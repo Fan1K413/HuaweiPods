@@ -42,9 +42,35 @@ class HuaweiAncPacketsTest {
     }
 
     @Test
+    fun `FreeBuds Pro 4 basic mode packets match verified capture`() {
+        assertArrayEquals(
+            hex("5A0007002B0401020000D22D"),
+            HuaweiAncPackets.enabled(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4, false),
+        )
+        assertArrayEquals(
+            hex("5A0007002B04010201FFFFEC"),
+            HuaweiAncPackets.enabled(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4, true),
+        )
+    }
+
+    @Test
+    fun `FreeBuds 7i basic mode packets match verified capture`() {
+        assertArrayEquals(
+            hex("5A0007002B0401020000D22D"),
+            HuaweiAncPackets.enabled(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I, false),
+        )
+        assertArrayEquals(
+            hex("5A0007002B04010201FFFFEC"),
+            HuaweiAncPackets.enabled(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I, true),
+        )
+    }
+
+    @Test
     fun `unverified FreeBuds 5 level command is unavailable`() {
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS5, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, 0))
+        assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4, 0))
+        assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I, 0))
     }
 
     @Test
@@ -53,6 +79,8 @@ class HuaweiAncPacketsTest {
 
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS5))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I))
+        assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4))
+        assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2))
         assertNull(HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))

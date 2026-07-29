@@ -15,6 +15,10 @@ class DeviceCapabilitiesTest {
             "FreeBuds 5" to HuaweiDeviceRoute.UNSUPPORTED,
             "HUAWEI FreeBuds 6i" to HuaweiDeviceRoute.UNSUPPORTED,
             "FreeBuds 6i" to HuaweiDeviceRoute.UNSUPPORTED,
+            "HUAWEI FreeBuds Pro 4" to HuaweiDeviceRoute.UNSUPPORTED,
+            "FreeBuds Pro 4" to HuaweiDeviceRoute.UNSUPPORTED,
+            "HUAWEI FreeBuds 7i" to HuaweiDeviceRoute.UNSUPPORTED,
+            "FreeBuds 7i" to HuaweiDeviceRoute.UNSUPPORTED,
             "HUAWEI FreeClip" to HuaweiDeviceRoute.UNSUPPORTED,
             "FreeClip" to HuaweiDeviceRoute.UNSUPPORTED,
             "FreeClip 2" to HuaweiDeviceRoute.UNSUPPORTED,
@@ -53,5 +57,19 @@ class DeviceCapabilitiesTest {
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.isSupported)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.supportsRfcommBattery)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.supportsAnc)
+    }
+
+    @Test
+    fun `FreeBuds Pro 4 exposes battery and basic ANC integration`() {
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4.isSupported)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4.supportsRfcommBattery)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4.supportsAnc)
+    }
+
+    @Test
+    fun `FreeBuds 7i exposes battery and basic ANC integration`() {
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.isSupported)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.supportsRfcommBattery)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.supportsAnc)
     }
 }

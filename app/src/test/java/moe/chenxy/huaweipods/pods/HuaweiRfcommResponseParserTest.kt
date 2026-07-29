@@ -61,6 +61,36 @@ class HuaweiRfcommResponseParserTest {
         assertEquals(false, battery?.case?.isCharging)
     }
 
+    @Test
+    fun `parses FreeBuds Pro 4 battery response captured from official app`() {
+        val response = hex("5A001B00010801015C02035C5C4A030300000004020A140502000006010A6F4E")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+        assertNotNull(battery)
+
+        assertEquals(92, battery?.left?.battery)
+        assertEquals(92, battery?.right?.battery)
+        assertEquals(74, battery?.case?.battery)
+        assertEquals(false, battery?.left?.isCharging)
+        assertEquals(false, battery?.right?.isCharging)
+        assertEquals(false, battery?.case?.isCharging)
+    }
+
+    @Test
+    fun `parses FreeBuds 7i battery response captured from official app`() {
+        val response = hex("5A001B000108010164020364641D03030000000402140A0502000106010A31A3")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+        assertNotNull(battery)
+
+        assertEquals(100, battery?.left?.battery)
+        assertEquals(100, battery?.right?.battery)
+        assertEquals(29, battery?.case?.battery)
+        assertEquals(false, battery?.left?.isCharging)
+        assertEquals(false, battery?.right?.isCharging)
+        assertEquals(false, battery?.case?.isCharging)
+    }
+
     private fun hex(value: String): ByteArray = value.chunked(2)
         .map { it.toInt(16).toByte() }
         .toByteArray()

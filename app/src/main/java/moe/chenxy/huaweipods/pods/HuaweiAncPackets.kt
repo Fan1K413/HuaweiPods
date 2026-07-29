@@ -27,7 +27,9 @@ internal object HuaweiAncPackets {
     fun enabled(route: HuaweiDeviceRoute, enabled: Boolean): ByteArray? = when (route) {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Enabled[enabled]
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> freeBuds5Enabled[enabled]
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> freeBuds5Enabled[enabled]
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
         HuaweiDeviceRoute.HUAWEI_FREECLIP2,
         HuaweiDeviceRoute.UNSUPPORTED -> null
@@ -37,6 +39,8 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Levels[level.coerceIn(0, freeBuds3Levels.lastIndex)]
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
         HuaweiDeviceRoute.HUAWEI_FREECLIP2,
         HuaweiDeviceRoute.UNSUPPORTED -> null
@@ -45,6 +49,8 @@ internal object HuaweiAncPackets {
     fun batteryQuery(route: HuaweiDeviceRoute): ByteArray? = when (route) {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
         HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> huaweiBatteryQuery
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
