@@ -1,84 +1,99 @@
 <div align="center">
 
-<img src="https://github.com/user-attachments/assets/e8a3df6b-6e67-485a-ae1c-018ac24e87d4" width="120" height="120" style="border-radius: 24px;" alt="HuaweiPods Icon"/>
+<img src="https://github.com/user-attachments/assets/e8a3df6b-6e67-485a-ae1c-018ac24e87d4" width="120" height="120" alt="HuaweiPods Icon"/>
 
 # HuaweiPods
 
-**为小米 HyperOS 设备适配 Huawei FreeBuds**
+**让华为耳机接入小米 HyperOS 的系统体验**
 
-[![Platform](https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android)](https://android.com)
-[![LSPosed](https://img.shields.io/badge/Framework-LSPosed-blueviolet?style=flat-square)](https://github.com/LSPosed/LSPosed)
-[![HyperOS](https://img.shields.io/badge/ROM-HyperOS-orange?style=flat-square)](https://hyperos.mi.com)
+[![Android 15+](https://img.shields.io/badge/Android-15%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](https://www.android.com/)
+[![HyperOS](https://img.shields.io/badge/ROM-HyperOS-FF6900?style=flat-square)](https://hyperos.mi.com/)
+[![LSPosed](https://img.shields.io/badge/Framework-LSPosed-6F42C1?style=flat-square)](https://github.com/LSPosed/LSPosed)
+[![License](https://img.shields.io/github/license/Nshpiter/HuaweiPods?style=flat-square)](LICENSE)
 
-**简体中文** | **[English](README_EN.md)**
+[下载安装](https://github.com/Nshpiter/HuaweiPods/releases) ·
+[使用文档](docs/guide/getting-started.md) ·
+[问题反馈](https://github.com/Nshpiter/HuaweiPods/issues) ·
+QQ群 `1022359908`
+
+**简体中文** · **[English](README_EN.md)**
 
 </div>
 
-HuaweiPods 是一个面向小米 HyperOS 的 Xposed 模块，用于把 Huawei FreeBuds 接入系统耳机弹窗、超级岛、融合设备中心和蓝牙详情页。
+HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将华为耳机接入系统蓝牙详情页、连接弹窗、超级岛与融合设备中心。
 
-当前主要围绕 **Huawei FreeBuds 3** 适配：电量显示、主动降噪开关、降噪空间圆盘调节，以及融合设备中心内的耳机显示和流转能力。
+> 项目仍在持续适配中。正式版目前仅完整支持 **HUAWEI FreeBuds 3**，其他型号须使用对应测试包，请勿直接套用 FreeBuds 3 的控制协议。
 
-## 交流与反馈
+## 支持状态
 
-- QQ 群：`1022359908`，用于使用交流、待适配型号登记、测试招募和采集协调。
-- 可复现的 Bug、功能请求和充分检查、脱敏后的普通采集包也可以提交到 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)，便于长期跟踪。
+| 型号 | 状态 | 当前能力 |
+| --- | --- | --- |
+| HUAWEI FreeBuds 3 | 已支持 | 电量、降噪、降噪空间调节、系统界面集成 |
+| HUAWEI FreeBuds 5 | 测试中 | 基础识别、电量与降噪协议验证 |
+| HUAWEI FreeBuds 6i | 测试中 | 基础识别、电量与降噪协议验证 |
+| HUAWEI FreeClip | 测试中 | 基础识别与电量协议验证 |
+| HUAWEI FreeClip 2 | 测试中 | 基础识别与电量协议验证 |
 
-## 功能
+需要适配其他华为耳机，可加入 QQ 群 `1022359908` 参与测试与协议采集。
 
-- **电量显示**：显示左耳、右耳和充电盒电量。
-- **主动降噪**：支持降噪 / 关闭两态切换。
-- **降噪圆盘**：支持 FreeBuds 3 的空间降噪方向调节。
-- **系统蓝牙详情页**：在系统设置中显示电量、降噪控制和圆盘调节。
-- **超级岛 / 弹窗**：显示耳机状态，并提供快速降噪控制。
-- **融合设备中心**：显示 FreeBuds，并支持在已配对设备间流转。
+## 主要功能
 
-## 正式版系统要求
+- 在系统蓝牙详情页显示耳机电量与控制项
+- 接入 HyperOS 连接弹窗和超级岛
+- 接入融合设备中心，并支持已配对设备间流转
+- 显示左耳、右耳和充电盒电量
+- 控制主动降噪；FreeBuds 3 支持降噪空间方向调节
 
-- 小米 / Redmi 设备，运行 HyperOS。
-- Android 15+。
-- LSPosed API 版本 >= 101。
-- 已配对 Huawei FreeBuds 3。
+## 使用要求
 
-## 正式版使用
+- 小米或 Redmi 设备
+- HyperOS，Android 15 及以上
+- LSPosed API 101 及以上
+- 正式版需配合 HUAWEI FreeBuds 3 使用
 
-1. 安装 HuaweiPods APK。
-2. 在 LSPosed 中启用模块。
-3. 勾选推荐作用域：
+## 快速开始
+
+1. 从 [GitHub Releases](https://github.com/Nshpiter/HuaweiPods/releases) 下载并安装 APK。
+2. 在 LSPosed 中启用 HuaweiPods。
+3. 勾选以下作用域：
+
    - `com.android.bluetooth`
    - `com.android.settings`
    - `com.milink.service`
    - `com.xiaomi.bluetooth`
-4. 重启手机，或在应用内重启相关作用域。
-5. 连接 FreeBuds 3 后，在 HuaweiPods、超级岛、融合设备中心或系统蓝牙详情页中控制耳机。
 
-## Debug 采集版
+4. 在 HuaweiPods 内重启相关作用域，或重启手机。
+5. 连接耳机后，即可在蓝牙详情页、超级岛或融合设备中心查看和控制耳机。
 
-Debug 版面向尚未适配的 FreeBuds、FreeClip、FreeLace 等华为蓝牙耳机，需要安装平时管理该耳机的智慧生活或智慧音频，并在 LSPosed 中额外勾选对应官方 App。它只负责引导和记录官方 App 与耳机的蓝牙交互，不代表对应型号已经可以在正式版中安全控制。
+更完整的安装说明见 [快速开始](docs/guide/getting-started.md)。
 
-采集前先搜索 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)：已有对应型号时填写 Issue 编号并在原 Issue 跟进；没有时可以留空，导出并检查采集包后再新建 Issue。提交时请说明耳机显示名称、手机与系统版本、官方 App 版本、`protocol_event_count` 以及实际操作结果；事件数为 `0` 时只反馈环境信息，不要把仅含向导标记的 ZIP 当作有效样本。
+## 适配新型号
 
-完成导出后，请在 LSPosed 中取消智慧生活 / 智慧音频作用域并重启相关进程或手机，然后换回同签名 Release 版或卸载 Debug 版；若附加过 HCI 日志，请清除 Debug 版应用数据，删除其私有副本。
+未支持型号需要先采集官方智慧生活 / 智慧音频与耳机之间的真实通信数据。通用协议采集版只负责引导和记录，不代表该型号已经适配。
 
-## 开发说明
+请勿直接公开包含设备地址、账号或其他个人信息的原始采集文件。提交前请检查并脱敏，完整流程见 [华为耳机协议采集指南](docs/DEBUG_CAPTURE_GUIDE.md)。
 
-项目内部包名、广播 action、配置命名和对外应用身份已统一为 HuaweiPods。
+建议优先加入 QQ 群 `1022359908` 获取对应型号的测试包；可复现问题则提交至 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)。
 
-项目区分两个构建变体：`release` 是不接触华为官方 App 的正式版；`debug` 是面向所有待适配华为蓝牙耳机的通用协议采集版。Debug 会读取当前已连接的蓝牙音频设备名称供测试者确认，并以统一功能清单引导采集；这不代表能够自动识别设备能力。两者使用相同应用 ID，不能同时安装。
+## 构建
 
 ```bash
+# 正式版
 ./gradlew :app:assembleRelease
+
+# 协议采集与调试版
 ./gradlew :app:assembleDebug
 ```
 
-完整的测试者操作流程、隐私边界和 HCI 兜底方案见 [华为耳机通用协议采集指南](docs/DEBUG_CAPTURE_GUIDE.md)。未取得并复核对应型号的真机数据前，任何未知型号都不会复用 FreeBuds 3 的写指令。
+`release` 不注入华为官方应用；`debug` 包含协议采集功能。两者使用相同应用 ID，无法同时安装。
 
 ## 致谢
 
-- [OppoPods](https://github.com/1812z/OppoPods) by 1812z — HuaweiPods 直接基于该分支适配开发。
-- [OppoPods](https://github.com/Leaf-lsgtky/OppoPods) by Leaf-lsgtky — OppoPods 上游原项目。
-- [HyperPods](https://github.com/Art-Chen/HyperPods) by Art_Chen — 原始 HyperOS 耳机集成思路。
-- [Miuix](https://github.com/YuKongA/miuix) — HyperOS 风格 Compose UI 组件。
+- [OppoPods](https://github.com/1812z/OppoPods) by 1812z
+- [OppoPods](https://github.com/Leaf-lsgtky/OppoPods) by Leaf-lsgtky
+- [HyperPods](https://github.com/Art-Chen/HyperPods) by Art_Chen
+- [Miuix](https://github.com/YuKongA/miuix)
 
 ## 许可证
 
-[GPL-3.0](LICENSE)
+本项目基于 [GPL-3.0](LICENSE) 开源。
