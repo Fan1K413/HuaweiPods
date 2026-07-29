@@ -15,8 +15,8 @@ import java.lang.reflect.Method
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.pods.HuaweiHfpController
-import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
@@ -690,7 +690,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         if (device == null) return false
         val address = runCatching { device.address }.getOrNull()
         val name = runCatching { device.name ?: device.alias }.getOrNull().orEmpty()
-        val result = detectHuaweiDeviceRoute(name) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 ||
+        val result = detectHuaweiDeviceRoute(name).isSupported ||
             (address != null && isHuaweiAddress(address))
         if (result && address != null) knownHuaweiAddresses.add(address.uppercase())
         return result

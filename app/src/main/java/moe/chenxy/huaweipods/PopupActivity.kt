@@ -33,6 +33,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import moe.chenxy.huaweipods.pods.NoiseControlMode
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.ui.AppLocale
 import moe.chenxy.huaweipods.ui.AppTheme
@@ -240,6 +243,11 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
         }
     }
 
+    val ancLevelChange = if (
+        detectHuaweiDeviceRoute(deviceName.value) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
+    ) ::setAncLevel else null
+    val showAnc = detectHuaweiDeviceRoute(deviceName.value).supportsAnc
+
 
     val dialogBgColor = if (isDarkMode) Color(0xFF1A1A1A) else Color(0xFFF7F7F7)
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -262,7 +270,8 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                     ancMode = ancMode.value,
                     ancLevel = ancLevel.value,
                     onAncModeChange = ::setAncMode,
-                    onAncLevelChange = ::setAncLevel,
+                    onAncLevelChange = ancLevelChange,
+                    showAnc = showAnc,
                     onMore = onMore,
                     onDone = { showDialog.value = false },
                 )
@@ -272,7 +281,8 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                     ancMode = ancMode.value,
                     ancLevel = ancLevel.value,
                     onAncModeChange = ::setAncMode,
-                    onAncLevelChange = ::setAncLevel,
+                    onAncLevelChange = ancLevelChange,
+                    showAnc = showAnc,
                     onMore = onMore,
                     onDone = { showDialog.value = false },
                 )
@@ -287,7 +297,8 @@ private fun PortraitPopupBody(
     ancMode: NoiseControlMode,
     ancLevel: Int,
     onAncModeChange: (NoiseControlMode) -> Unit,
-    onAncLevelChange: (Int) -> Unit,
+    onAncLevelChange: ((Int) -> Unit)?,
+    showAnc: Boolean,
     onMore: () -> Unit,
     onDone: () -> Unit,
 ) {
@@ -298,14 +309,16 @@ private fun PortraitPopupBody(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)
             )
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        Card(modifier = Modifier.fillMaxWidth()) {
-            AncSwitch(
-                ancStatus = ancMode,
-                onAncModeChange = onAncModeChange,
-                huaweiAncLevel = ancLevel,
-                onHuaweiAncLevelChange = onAncLevelChange,
-            )
+        if (showAnc) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                AncSwitch(
+                    ancStatus = ancMode,
+                    onAncModeChange = onAncModeChange,
+                    huaweiAncLevel = ancLevel,
+                    onHuaweiAncLevelChange = onAncLevelChange,
+                )
+            }
         }
         Spacer(modifier = Modifier.height(16.dp))
         Row(
@@ -332,7 +345,8 @@ private fun LandscapePopupBody(
     ancMode: NoiseControlMode,
     ancLevel: Int,
     onAncModeChange: (NoiseControlMode) -> Unit,
-    onAncLevelChange: (Int) -> Unit,
+    onAncLevelChange: ((Int) -> Unit)?,
+    showAnc: Boolean,
     onMore: () -> Unit,
     onDone: () -> Unit,
 ) {
@@ -356,15 +370,17 @@ private fun LandscapePopupBody(
                     compact = true
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                AncSwitch(
-                    ancStatus = ancMode,
-                    onAncModeChange = onAncModeChange,
-                    huaweiAncLevel = ancLevel,
-                    onHuaweiAncLevelChange = onAncLevelChange,
-                    compact = true,
-                )
+            if (showAnc) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    AncSwitch(
+                        ancStatus = ancMode,
+                        onAncModeChange = onAncModeChange,
+                        huaweiAncLevel = ancLevel,
+                        onHuaweiAncLevelChange = onAncLevelChange,
+                        compact = true,
+                    )
+                }
             }
         }
         Column(

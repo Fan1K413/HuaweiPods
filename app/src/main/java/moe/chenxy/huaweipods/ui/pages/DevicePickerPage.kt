@@ -47,8 +47,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.core.content.ContextCompat
 import moe.chenxy.huaweipods.R
-import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.isSupported
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -139,13 +139,20 @@ fun DevicePickerPage(
     val btManager = context.getSystemService(BluetoothManager::class.java)
     val adapter = btManager?.adapter
     val bluetoothEnabled = adapter?.isEnabled == true
-    val pairedDevices = remember(hasPermission, bluetoothEnabled, bluetoothRefreshToken) {
+    val pairedDevices = remember(
+        hasPermission,
+        bluetoothEnabled,
+        bluetoothRefreshToken,
+        connectedDeviceName,
+        connectedDeviceAddress,
+    ) {
         if (!bluetoothEnabled) {
             emptyList()
         } else {
             adapter.bondedDevices
                 .filter {
-                    detectHuaweiDeviceRoute(it.name ?: it.alias) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
+                    detectHuaweiDeviceRoute(it.name ?: it.alias).isSupported ||
+                        it.address.equals(connectedDeviceAddress, ignoreCase = true)
                 }
                 .sortedBy { it.name ?: it.alias ?: it.address }
         }

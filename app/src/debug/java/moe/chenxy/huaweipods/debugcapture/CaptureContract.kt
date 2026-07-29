@@ -1,6 +1,7 @@
 package moe.chenxy.huaweipods.debugcapture
 
 import android.content.ClipData
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 
@@ -8,6 +9,10 @@ import android.net.Uri
 object CaptureContract {
     const val ACTION_CAPTURE_EVENT =
         "moe.chenxy.huaweipods.debugcapture.action.CAPTURE_EVENT"
+    const val ACTION_HOOK_PROBE =
+        "moe.chenxy.huaweipods.debugcapture.action.HOOK_PROBE"
+
+    const val EVENT_TYPE_HOOK_READY = "hook_ready"
 
     const val EXTRA_EVENT_TYPE = "event_type"
     const val EXTRA_DIRECTION = "direction"
@@ -21,6 +26,12 @@ object CaptureContract {
     const val EXTRA_TIMESTAMP_EPOCH_MS = "timestamp_epoch_ms"
 
     const val MIME_CAPTURE_ARCHIVE = "application/zip"
+
+    fun sendHookProbe(context: Context, packageName: String) {
+        context.sendBroadcast(
+            Intent(ACTION_HOOK_PROBE).setPackage(packageName),
+        )
+    }
 
     fun createShareIntent(export: CaptureExport): Intent {
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -59,6 +70,7 @@ data class CaptureSession(
     val stoppedAtEpochMs: Long?,
     val eventCount: Long,
     val protocolEventCount: Long,
+    val hookReadyCount: Long,
     val bytesWritten: Long,
 ) {
     val isActive: Boolean

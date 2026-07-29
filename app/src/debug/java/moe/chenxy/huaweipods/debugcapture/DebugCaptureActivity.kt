@@ -341,6 +341,13 @@ private fun CaptureGuideScreen(
                 ?: 0L,
         )
     }
+    var currentHookReadyCount by remember {
+        mutableStateOf(
+            (initialStoreState?.activeSession ?: initialStoreState?.latestSession)
+                ?.hookReadyCount
+                ?: 0L,
+        )
+    }
     LaunchedEffect(resumeToken, storageBusy) {
         if (storageBusy) return@LaunchedEffect
         val storeState = withContext(Dispatchers.IO) {
@@ -352,6 +359,7 @@ private fun CaptureGuideScreen(
         activeSessionId = activeSession?.id
         latestSessionId = latestSession?.id
         currentProtocolEventCount = (activeSession ?: latestSession)?.protocolEventCount ?: 0L
+        currentHookReadyCount = (activeSession ?: latestSession)?.hookReadyCount ?: 0L
 
         activeSession?.let { session ->
             activeHeadsetName = session.headsetModel
@@ -412,6 +420,32 @@ private fun CaptureGuideScreen(
                                 currentProtocolEventCount,
                             ),
                         )
+                        Spacer(Modifier.height(8.dp))
+                        if (currentHookReadyCount > 0L) {
+                            SummaryText(
+                                text = stringResource(R.string.debug_capture_hook_ready),
+                                color = Color(0xFF2E7D32),
+                            )
+                        } else {
+                            SummaryText(
+                                text = stringResource(R.string.debug_capture_hook_not_ready),
+                                color = Color(0xFFC62828),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(
+                                text = stringResource(R.string.debug_capture_check_hook),
+                                onClick = {
+                                    selectedOfficialPackage?.let { targetPackage ->
+                                        CaptureContract.sendHookProbe(context, targetPackage)
+                                    }
+                                    if (!context.openOfficialApp(selectedOfficialPackage)) {
+                                        context.toast(R.string.debug_capture_official_open_failed)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                            )
+                        }
                         SummaryText(
                             buildString {
                                 append(activeHeadsetName)
@@ -433,7 +467,9 @@ private fun CaptureGuideScreen(
                     OperationCard(
                         step = step,
                         status = status,
-                        blockedByAnotherStep = storageBusy || (activeStep != null && activeStep.key != step.key),
+                        blockedByAnotherStep = currentHookReadyCount == 0L ||
+                            storageBusy ||
+                            (activeStep != null && activeStep.key != step.key),
                         busy = storageBusy,
                         onStart = startStep@{
                             if (storageBusy) return@startStep
@@ -575,6 +611,7 @@ private fun CaptureGuideScreen(
                                         captureFinished = true
                                         latestSessionId = stoppedSession.id
                                         currentProtocolEventCount = stoppedSession.protocolEventCount
+                                        currentHookReadyCount = stoppedSession.hookReadyCount
                                     }
                                     .onFailure {
                                         context.toast(stopFailedPrefix + it.userMessage())
@@ -621,7 +658,10 @@ private fun CaptureGuideScreen(
                         TextButton(
                             text = stringResource(R.string.debug_capture_export),
                             onClick = exportCapture@{
-                                if (storageBusy) return@exportCapture
+                                if (
+                                    storageBusy ||
+                                    (currentProtocolEventCount == 0L && !includeHciSnoop)
+                                ) return@exportCapture
                                 val includeHciForExport = includeHciSnoop
                                 storageBusy = true
                                 coroutineScope.launch {
@@ -643,7 +683,12 @@ private fun CaptureGuideScreen(
                                     storageBusy = false
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().alpha(if (storageBusy) 0.45f else 1f),
+                            modifier = Modifier.fillMaxWidth().alpha(
+                                if (
+                                    !storageBusy &&
+                                    (currentProtocolEventCount > 0L || includeHciSnoop)
+                                ) 1f else 0.45f,
+                            ),
                             colors = ButtonDefaults.textButtonColorsPrimary(),
                         )
                         Spacer(Modifier.height(8.dp))
@@ -791,6 +836,7 @@ private fun CaptureGuideScreen(
                                         }
                                         latestSessionId = startedSession.id
                                         currentProtocolEventCount = 0L
+                                        currentHookReadyCount = 0L
                                         captureActive = true
                                         captureFinished = false
                                     }.onFailure {

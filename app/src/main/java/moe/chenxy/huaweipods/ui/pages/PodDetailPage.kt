@@ -59,6 +59,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.supportsAnc
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -82,9 +83,13 @@ fun PodDetailPage(
     val context = LocalContext.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val gesturePrefs = remember { context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE) }
+    val deviceRoute = remember(podName) { detectHuaweiDeviceRoute(podName) }
     val gestureControlEnabled = remember(podName, connectedDeviceAddress) {
-        detectHuaweiDeviceRoute(podName) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 &&
+        deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 &&
             BluetoothAdapter.checkBluetoothAddress(connectedDeviceAddress)
+    }
+    val ancLevelChange = onHuaweiAncLevelChange.takeIf {
+        deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
     }
     var leftGestureAction by remember(connectedDeviceAddress) {
         mutableStateOf(readGesturePreference(gesturePrefs, connectedDeviceAddress, HuaweiGestureSide.LEFT))
@@ -151,7 +156,8 @@ fun PodDetailPage(
                     ancMode = ancMode,
                     onAncModeChange = onAncModeChange,
                     huaweiAncLevel = huaweiAncLevel,
-                    onHuaweiAncLevelChange = onHuaweiAncLevelChange,
+                    onHuaweiAncLevelChange = ancLevelChange,
+                    showAnc = deviceRoute.supportsAnc,
                     gestureControlEnabled = gestureControlEnabled,
                     leftGestureAction = leftGestureAction,
                     rightGestureAction = rightGestureAction,
@@ -184,7 +190,8 @@ fun PodDetailPage(
             ancMode = ancMode,
             onAncModeChange = onAncModeChange,
             huaweiAncLevel = huaweiAncLevel,
-            onHuaweiAncLevelChange = onHuaweiAncLevelChange,
+            onHuaweiAncLevelChange = ancLevelChange,
+            showAnc = deviceRoute.supportsAnc,
             gestureControlEnabled = gestureControlEnabled,
             leftGestureAction = leftGestureAction,
             rightGestureAction = rightGestureAction,
@@ -207,7 +214,8 @@ private fun LazyListScope.podControlItems(
     ancMode: NoiseControlMode,
     onAncModeChange: (NoiseControlMode) -> Unit,
     huaweiAncLevel: Int,
-    onHuaweiAncLevelChange: (Int) -> Unit,
+    onHuaweiAncLevelChange: ((Int) -> Unit)?,
+    showAnc: Boolean,
     gestureControlEnabled: Boolean,
     leftGestureAction: HuaweiGestureAction,
     rightGestureAction: HuaweiGestureAction,
@@ -225,16 +233,18 @@ private fun LazyListScope.podControlItems(
         }
     }
 
-    item {
-        Card(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
-        ) {
-            AncSwitch(
-                ancStatus = ancMode,
-                onAncModeChange = onAncModeChange,
-                huaweiAncLevel = huaweiAncLevel,
-                onHuaweiAncLevelChange = onHuaweiAncLevelChange,
-            )
+    if (showAnc) {
+        item {
+            Card(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
+            ) {
+                AncSwitch(
+                    ancStatus = ancMode,
+                    onAncModeChange = onAncModeChange,
+                    huaweiAncLevel = huaweiAncLevel,
+                    onHuaweiAncLevelChange = onHuaweiAncLevelChange,
+                )
+            }
         }
     }
 

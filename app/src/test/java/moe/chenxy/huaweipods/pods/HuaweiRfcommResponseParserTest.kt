@@ -1,0 +1,67 @@
+package moe.chenxy.huaweipods.pods
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Test
+
+class HuaweiRfcommResponseParserTest {
+    @Test
+    fun `parses FreeBuds 5 battery response captured from official app`() {
+        val response = hex("5A0014000127010164020364645603030000000402140A075C")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+        assertNotNull(battery)
+
+        assertEquals(100, battery?.left?.battery)
+        assertEquals(100, battery?.right?.battery)
+        assertEquals(86, battery?.case?.battery)
+        assertEquals(false, battery?.left?.isCharging)
+        assertEquals(false, battery?.right?.isCharging)
+        assertEquals(false, battery?.case?.isCharging)
+    }
+
+    @Test
+    fun `finds battery frame inside a combined RFCOMM read`() {
+        val prefix = hex("5A0006000A0E010100A26F")
+        val batteryFrame = hex("5A0014000127010164020364645603030000000402140A075C")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(prefix + batteryFrame)
+        assertNotNull(battery)
+
+        assertEquals(86, battery?.case?.battery)
+    }
+
+    @Test
+    fun `parses FreeClip battery response captured from official app`() {
+        val response = hex("5A0018000108010164020364642603030000000402140A05020101D504")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+        assertNotNull(battery)
+
+        assertEquals(100, battery?.left?.battery)
+        assertEquals(100, battery?.right?.battery)
+        assertEquals(38, battery?.case?.battery)
+        assertEquals(false, battery?.left?.isCharging)
+        assertEquals(false, battery?.right?.isCharging)
+        assertEquals(false, battery?.case?.isCharging)
+    }
+
+    @Test
+    fun `parses FreeBuds 6i battery response captured from official app`() {
+        val response = hex("5A001B000108010164020364646403030000000402140A0502010106010A5607")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+        assertNotNull(battery)
+
+        assertEquals(100, battery?.left?.battery)
+        assertEquals(100, battery?.right?.battery)
+        assertEquals(100, battery?.case?.battery)
+        assertEquals(false, battery?.left?.isCharging)
+        assertEquals(false, battery?.right?.isCharging)
+        assertEquals(false, battery?.case?.isCharging)
+    }
+
+    private fun hex(value: String): ByteArray = value.chunked(2)
+        .map { it.toInt(16).toByte() }
+        .toByteArray()
+}

@@ -109,6 +109,7 @@ class CaptureStoreTest {
         stoppedAtEpochMs = null,
         eventCount = 3L,
         protocolEventCount = 2L,
+        hookReadyCount = 1L,
         bytesWritten = 128L,
     )
 }

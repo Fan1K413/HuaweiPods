@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log as AndroidLog
 import moe.chenxy.huaweipods.hook.Log
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.UUID
@@ -24,19 +26,6 @@ object HuaweiL2capAncController {
     private const val RFCOMM_CONNECT_RETRY_DELAY_MS = 350L
     private const val RFCOMM_CONNECT_ATTEMPTS = 2
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-    private val ANC_ON_PACKET = huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x01, 0x78, 0x00)
-    private val ANC_OFF_PACKET = huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x00, 0x68, 0x21)
-    private val ANC_LEVEL_PACKETS = arrayOf(
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x00, 0x27, 0x13),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x01, 0x37, 0x32),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x02, 0x07, 0x51),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x03, 0x17, 0x70),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x04, 0x67, 0x97),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x05, 0x77, 0xB6),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x06, 0x47, 0xD5),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x07, 0x57, 0xF4),
-        huaweiPacket(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x08, 0xA6, 0x1B),
-    )
 
     private val executor = Executors.newSingleThreadExecutor()
     private var socket: BluetoothSocket? = null
@@ -45,13 +34,40 @@ object HuaweiL2capAncController {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun setAncEnabled(context: Context, device: BluetoothDevice, enabled: Boolean) {
-        val packet = if (enabled) ANC_ON_PACKET else ANC_OFF_PACKET
+        val route = device.route()
+        val packet = HuaweiAncPackets.enabled(route, enabled) ?: return
         enqueueWrite(context, device, packet, "enabled=$enabled")
     }
 
     fun setAncLevel(context: Context, device: BluetoothDevice, level: Int) {
-        val safeLevel = level.coerceIn(0, ANC_LEVEL_PACKETS.lastIndex)
-        enqueueWrite(context, device, ANC_LEVEL_PACKETS[safeLevel], "level=$safeLevel")
+        val route = device.route()
+        val packet = HuaweiAncPackets.level(route, level) ?: return
+        val safeLevel = level.coerceIn(0, 8)
+        enqueueWrite(context, device, packet, "level=$safeLevel")
+    }
+
+    fun requestBattery(
+        context: Context,
+        device: BluetoothDevice,
+        onBattery: (BatteryParams) -> Unit,
+    ) {
+        val route = device.route()
+        val packet = HuaweiAncPackets.batteryQuery(route) ?: return
+        enqueueWrite(
+            context = context,
+            device = device,
+            packet = packet,
+            description = "battery-query",
+            responseWindowMs = 1_500L,
+            onResponse = { response ->
+                val battery = HuaweiRfcommResponseParser.parseBattery(response)
+                logInfo(
+                    context.applicationContext ?: context,
+                    "Huawei battery response bytes=${response.size} parsed=${battery != null} device=${device.address}",
+                )
+                battery?.let(onBattery)
+            },
+        )
     }
 
     fun sendRawPacket(
@@ -82,10 +98,12 @@ object HuaweiL2capAncController {
         description: String,
         keepSocket: Boolean = true,
         onComplete: ((Boolean) -> Unit)? = null,
+        responseWindowMs: Long = 0L,
+        onResponse: ((ByteArray) -> Unit)? = null,
     ) {
         val appContext = context.applicationContext ?: context
         val deviceName = runCatching { device.name ?: device.alias }.getOrNull()
-        if (detectHuaweiDeviceRoute(deviceName) != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+        if (!detectHuaweiDeviceRoute(deviceName).isSupported) {
             logInfo(
                 appContext,
                 "Huawei write rejected: unsupported device name=${deviceName.orEmpty()} address=${device.address}",
@@ -101,6 +119,10 @@ object HuaweiL2capAncController {
                     val currentSocket = ensureSocket(device)
                     currentSocket.outputStream.write(packet)
                     currentSocket.outputStream.flush()
+                    if (responseWindowMs > 0L && onResponse != null) {
+                        val response = collectSocketResponse(currentSocket, responseWindowMs)
+                        mainHandler.post { onResponse(response) }
+                    }
                     val hex = packet.toHexString()
                     RfcommLog.d(appContext, "RFCOMM/TX", "$description $hex")
                     logInfo(
@@ -227,12 +249,35 @@ object HuaweiL2capAncController {
             .onFailure { Log.w(TAG, "Huawei ANC socket close failed", it) }
     }
 
+    private fun collectSocketResponse(socket: BluetoothSocket, timeoutMs: Long): ByteArray {
+        val input = socket.inputStream
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(4 * 1024)
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+        var lastReadAt = 0L
+        while (System.nanoTime() < deadline) {
+            val available = runCatching { input.available() }.getOrDefault(0)
+            if (available > 0) {
+                val read = input.read(buffer, 0, minOf(buffer.size, available))
+                if (read > 0) {
+                    output.write(buffer, 0, read)
+                    lastReadAt = System.nanoTime()
+                }
+                continue
+            }
+            if (lastReadAt > 0L && System.nanoTime() - lastReadAt >= 200_000_000L) break
+            Thread.sleep(20L)
+        }
+        return output.toByteArray()
+    }
+
     private data class SocketCandidate(
         val label: String,
         val create: () -> BluetoothSocket,
     )
 
-    private fun huaweiPacket(vararg values: Int): ByteArray = values.map { it.toByte() }.toByteArray()
+    private fun BluetoothDevice.route(): HuaweiDeviceRoute =
+        detectHuaweiDeviceRoute(runCatching { name ?: alias }.getOrNull())
 
     @OptIn(ExperimentalStdlibApi::class)
     private fun ByteArray.toHexString(): String = toHexString(HexFormat.UpperCase)
