@@ -11,7 +11,7 @@ internal object HuaweiRfcommResponseParser {
     private const val BATTERY_LEVELS = 0x02
     private const val CHARGING_STATES = 0x03
 
-    fun parseBattery(stream: ByteArray): BatteryParams? {
+    fun parseBattery(stream: ByteArray, includeCase: Boolean = true): BatteryParams? {
         frames(stream).forEach { frame ->
             if (frame.u8(4) != BATTERY_SERVICE || frame.u8(5) !in BATTERY_COMMANDS) return@forEach
             val fields = parseFields(frame, start = 6, endExclusive = frame.size - CHECKSUM_SIZE)
@@ -21,7 +21,7 @@ internal object HuaweiRfcommResponseParser {
             return BatteryParams(
                 left = levels.podAt(0, charging),
                 right = levels.podAt(1, charging),
-                case = levels.podAt(2, charging),
+                case = levels.podAt(2, charging).takeIf { includeCase },
             )
         }
         return null

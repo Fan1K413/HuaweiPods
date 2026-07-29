@@ -32,6 +32,7 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> freeBuds5Enabled[enabled]
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
         HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR,
         HuaweiDeviceRoute.UNSUPPORTED -> null
     }?.copyOf()
 
@@ -43,6 +44,7 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
         HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR,
         HuaweiDeviceRoute.UNSUPPORTED -> null
     }?.copyOf()
 
@@ -52,7 +54,8 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> huaweiBatteryQuery
+        HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR -> huaweiBatteryQuery
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
         HuaweiDeviceRoute.UNSUPPORTED -> null
     }?.copyOf()

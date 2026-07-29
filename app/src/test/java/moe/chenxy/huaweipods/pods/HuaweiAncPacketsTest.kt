@@ -71,6 +71,7 @@ class HuaweiAncPacketsTest {
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I, 0))
+        assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_EYEWEAR, 0))
     }
 
     @Test
@@ -83,6 +84,7 @@ class HuaweiAncPacketsTest {
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2))
+        assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_EYEWEAR))
         assertNull(HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
     }
 

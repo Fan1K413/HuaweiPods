@@ -60,7 +60,10 @@ object HuaweiL2capAncController {
             description = "battery-query",
             responseWindowMs = 1_500L,
             onResponse = { response ->
-                val battery = HuaweiRfcommResponseParser.parseBattery(response)
+                val battery = HuaweiRfcommResponseParser.parseBattery(
+                    response,
+                    includeCase = route.hasChargingCase,
+                )
                 logInfo(
                     context.applicationContext ?: context,
                     "Huawei battery response bytes=${response.size} parsed=${battery != null} device=${device.address}",

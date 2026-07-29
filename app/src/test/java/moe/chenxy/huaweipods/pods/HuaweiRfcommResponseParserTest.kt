@@ -91,6 +91,18 @@ class HuaweiRfcommResponseParserTest {
         assertEquals(false, battery?.case?.isCharging)
     }
 
+    @Test
+    fun `parses Eyewear temple batteries without exposing the placeholder case`() {
+        val response = hex("5A0014000108010144020346440003030000000402140A392E")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response, includeCase = false)
+        assertNotNull(battery)
+
+        assertEquals(70, battery?.left?.battery)
+        assertEquals(68, battery?.right?.battery)
+        assertEquals(null, battery?.case)
+    }
+
     private fun hex(value: String): ByteArray = value.chunked(2)
         .map { it.toInt(16).toByte() }
         .toByteArray()

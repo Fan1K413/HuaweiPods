@@ -8,6 +8,7 @@ enum class HuaweiDeviceRoute {
     HUAWEI_FREEBUDS7I,
     HUAWEI_FREECLIP,
     HUAWEI_FREECLIP2,
+    HUAWEI_EYEWEAR,
     UNSUPPORTED,
 }
 
@@ -27,6 +28,16 @@ val HuaweiDeviceRoute.supportsRfcommBattery: Boolean
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I ||
         this == HuaweiDeviceRoute.HUAWEI_FREECLIP ||
+        this == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+        this == HuaweiDeviceRoute.HUAWEI_EYEWEAR
+
+val HuaweiDeviceRoute.hasChargingCase: Boolean
+    get() = this == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS5 ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I ||
+        this == HuaweiDeviceRoute.HUAWEI_FREECLIP ||
         this == HuaweiDeviceRoute.HUAWEI_FREECLIP2
 
 private val enabledExperimentalRoute: HuaweiDeviceRoute? = null
@@ -40,6 +51,7 @@ fun detectHuaweiDeviceRoute(deviceName: String?): HuaweiDeviceRoute {
         "huaweifreebuds7i", "freebuds7i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
         "huaweifreeclip", "freeclip" -> HuaweiDeviceRoute.HUAWEI_FREECLIP
         "huaweifreeclip2", "freeclip2" -> HuaweiDeviceRoute.HUAWEI_FREECLIP2
+        "huaweieyewear" -> HuaweiDeviceRoute.HUAWEI_EYEWEAR
         else -> HuaweiDeviceRoute.UNSUPPORTED
     }
     return route.takeIf {

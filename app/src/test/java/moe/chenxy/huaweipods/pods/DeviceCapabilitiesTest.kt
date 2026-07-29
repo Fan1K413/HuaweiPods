@@ -23,6 +23,7 @@ class DeviceCapabilitiesTest {
             "FreeClip" to HuaweiDeviceRoute.UNSUPPORTED,
             "FreeClip 2" to HuaweiDeviceRoute.UNSUPPORTED,
             "HUAWEI FreeClip 2" to HuaweiDeviceRoute.UNSUPPORTED,
+            "HUAWEI Eyewear" to HuaweiDeviceRoute.UNSUPPORTED,
             "OPPO Enco" to HuaweiDeviceRoute.UNSUPPORTED,
             "OPPO Enco X3" to HuaweiDeviceRoute.UNSUPPORTED,
             "HUAWEI WATCH" to HuaweiDeviceRoute.UNSUPPORTED,
@@ -71,5 +72,13 @@ class DeviceCapabilitiesTest {
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.isSupported)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.supportsRfcommBattery)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.supportsAnc)
+    }
+
+    @Test
+    fun `Eyewear exposes two-sided battery integration without case or ANC`() {
+        assertTrue(HuaweiDeviceRoute.HUAWEI_EYEWEAR.isSupported)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_EYEWEAR.supportsRfcommBattery)
+        assertFalse(HuaweiDeviceRoute.HUAWEI_EYEWEAR.hasChargingCase)
+        assertFalse(HuaweiDeviceRoute.HUAWEI_EYEWEAR.supportsAnc)
     }
 }
