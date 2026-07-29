@@ -31,8 +31,11 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 | HUAWEI FreeBuds 3 | 已支持 | 电量、降噪、降噪空间调节、系统界面集成 |
 | HUAWEI FreeBuds 5 | 测试中 | 基础识别、电量与降噪协议验证 |
 | HUAWEI FreeBuds 6i | 测试中 | 基础识别、电量与降噪协议验证 |
+| HUAWEI FreeBuds Pro 4 | 测试中 | 基础识别、电量与降噪协议验证 |
+| HUAWEI FreeBuds 7i | 测试中 | 基础识别、电量与降噪协议验证 |
 | HUAWEI FreeClip | 测试中 | 基础识别与电量协议验证 |
 | HUAWEI FreeClip 2 | 测试中 | 基础识别与电量协议验证 |
+| 华为智能眼镜（第一代） | 测试中 | 左右镜腿电量与系统界面验证 |
 
 需要适配其他华为耳机，可加入 QQ 群 `1022359908` 参与测试与协议采集。
 
