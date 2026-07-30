@@ -22,7 +22,9 @@ import moe.chenxy.huaweipods.hook.callMethod
 import moe.chenxy.huaweipods.hook.getObjectField
 import moe.chenxy.huaweipods.hook.setObjectField
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.isSupported
+import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
@@ -616,7 +618,7 @@ object MiLinkServiceHook : HookContext() {
         val address = runCatching { device.address }.getOrNull()
         if (address != null && isHuaweiAddress(address)) return true
         val name = runCatching { device.name ?: device.alias }.getOrNull().orEmpty()
-        val result = detectHuaweiDeviceRoute(name).isSupported
+        val result = device.huaweiDeviceRoute().isSupported
         if (result && address != null) {
             knownHuaweiAddresses.add(address.uppercase())
             currentAddress = address
@@ -627,7 +629,9 @@ object MiLinkServiceHook : HookContext() {
 
     internal fun isHuaweiAddress(address: String): Boolean {
         val normalized = address.uppercase()
-        return normalized == currentAddress?.uppercase() || normalized in knownHuaweiAddresses
+        return resolveHuaweiDeviceRoute(address, null).isSupported ||
+            normalized == currentAddress?.uppercase() ||
+            normalized in knownHuaweiAddresses
     }
 
     private fun isTargetHeadsetInfo(info: Any?): Boolean {
@@ -718,13 +722,14 @@ object MiLinkServiceHook : HookContext() {
     }
 
     private fun rememberSupportedDevice(intent: Intent): Boolean {
+        val address = intent.getStringExtra("address") ?: currentAddress
         val name = intent.getStringExtra("device_name") ?: currentName
-        if (!detectHuaweiDeviceRoute(name).isSupported) {
-            Log.w(TAG, "ignored unsupported persisted/broadcast device name=${name.orEmpty()}")
+        if (!resolveHuaweiDeviceRoute(address, name).isSupported) {
+            Log.w(TAG, "ignored unsupported persisted/broadcast device=${name.orEmpty()}/${address.orEmpty()}")
             return false
         }
         currentName = name
-        currentAddress = intent.getStringExtra("address") ?: currentAddress
+        currentAddress = address
         currentAddress?.takeIf { it.isNotBlank() }?.let { knownHuaweiAddresses.add(it.uppercase()) }
         return true
     }
@@ -732,7 +737,7 @@ object MiLinkServiceHook : HookContext() {
     private fun isCurrentHuaweiHeadset(): Boolean {
         loadState()
         return !currentAddress.isNullOrBlank() &&
-            detectHuaweiDeviceRoute(currentName).isSupported
+            resolveHuaweiDeviceRoute(currentAddress, currentName).isSupported
     }
 
     private fun isTargetCirculateHeadset(serviceInfo: Any?): Boolean {
@@ -1235,8 +1240,9 @@ object MiLinkServiceHook : HookContext() {
     private fun loadState() {
         val prefs = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
         val hasPersistedIdentity = prefs.contains("address") || prefs.contains("name")
+        val persistedAddress = prefs.getString("address", null)
         val persistedName = prefs.getString("name", null)
-        if (hasPersistedIdentity && !detectHuaweiDeviceRoute(persistedName).isSupported) {
+        if (hasPersistedIdentity && !resolveHuaweiDeviceRoute(persistedAddress, persistedName).isSupported) {
             currentAddress = null
             currentName = null
             currentBattery = BatteryParams()

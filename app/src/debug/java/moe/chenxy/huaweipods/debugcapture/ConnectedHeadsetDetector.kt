@@ -118,8 +118,9 @@ object ConnectedHeadsetDetector {
                 proxy.connectedDevices.forEach { device ->
                     val address = device.address
                     val key = address.uppercase(Locale.ROOT)
-                    val displayName = device.alias?.takeIf(String::isNotBlank)
-                        ?: device.name?.takeIf(String::isNotBlank)
+                    // 抓包元数据优先记录远端原始名称，避免把用户自定义别名误判为耳机型号。
+                    val displayName = device.name?.takeIf(String::isNotBlank)
+                        ?: device.alias?.takeIf(String::isNotBlank)
                         ?: UNKNOWN_HEADSET_NAME
                     val current = devices.getOrPut(key) {
                         MutableConnectedHeadset(

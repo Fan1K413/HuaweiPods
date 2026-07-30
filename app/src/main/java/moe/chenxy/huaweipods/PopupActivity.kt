@@ -34,9 +34,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
-import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.ui.AppLocale
 import moe.chenxy.huaweipods.ui.AppTheme
 import moe.chenxy.huaweipods.ui.components.AncSwitch
@@ -146,11 +146,16 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     val ancMode = remember { mutableStateOf(NoiseControlMode.OFF) }
     val ancLevel = remember { mutableStateOf(0) }
     val deviceName = remember { mutableStateOf("") }
+    val deviceAddress = remember { mutableStateOf("") }
+    val xposedService = remember { mutableStateOf(HuaweiPodsApp.xposedService) }
+    val routeSyncVersion = remember { mutableStateOf(0) }
 
     val broadcastReceiver = remember {
         object : BroadcastReceiver() {
             override fun onReceive(p0: Context?, p1: Intent?) {
                 val intent = p1 ?: return
+                intent.getStringExtra("address")?.let { deviceAddress.value = it }
+                intent.getStringExtra("device_name")?.let { deviceName.value = it }
                 when (HuaweiPodsAction.canonical(intent.action)) {
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         val status = intent.getIntExtra("status", 1)
@@ -169,7 +174,6 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                         }
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
-                        deviceName.value = intent.getStringExtra("device_name") ?: ""
                         if (!showDialog.value) showDialog.value = true
                     }
                     HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
@@ -181,6 +185,10 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     DisposableEffect(Unit) {
+        val serviceListener: (io.github.libxposed.service.XposedService?) -> Unit = { service ->
+            xposedService.value = service
+        }
+        HuaweiPodsApp.addServiceListener(serviceListener)
         context.registerReceiver(broadcastReceiver, IntentFilter().apply {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED)
@@ -200,17 +208,23 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
 
         onDispose {
             try { context.unregisterReceiver(broadcastReceiver) } catch (_: Exception) {}
+            HuaweiPodsApp.removeServiceListener(serviceListener)
         }
     }
 
+    LaunchedEffect(xposedService.value) {
+        DeviceRoutePrefs.syncWithRemote(prefs, xposedService.value)
+        routeSyncVersion.value++
+    }
+
     // Timeout fallback: show dialog even if no response within 500ms
-    // Periodic refresh: poll earbuds every 15s while popup is open
+    // Periodic refresh: poll earbuds every 10s while popup is open
     LaunchedEffect(Unit) {
         delay(500)
         if (!showDialog.value) showDialog.value = true
 
         while (true) {
-            delay(15_000)
+            delay(10_000)
             context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_REFRESH_STATUS).apply {
                 setPackage("com.android.bluetooth")
                 addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
@@ -243,10 +257,23 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
         }
     }
 
-    val ancLevelChange = if (
-        detectHuaweiDeviceRoute(deviceName.value) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
-    ) ::setAncLevel else null
-    val showAnc = detectHuaweiDeviceRoute(deviceName.value).supportsAnc
+    val deviceRoute = remember(
+        deviceAddress.value,
+        deviceName.value,
+        routeSyncVersion.value,
+    ) {
+        DeviceRoutePrefs.resolve(
+            prefs = prefs,
+            address = deviceAddress.value,
+            deviceName = deviceName.value,
+        )
+    }
+    val ancLevelChange = if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+        ::setAncLevel
+    } else {
+        null
+    }
+    val showAnc = deviceRoute.supportsAnc
 
 
     val dialogBgColor = if (isDarkMode) Color(0xFF1A1A1A) else Color(0xFFF7F7F7)

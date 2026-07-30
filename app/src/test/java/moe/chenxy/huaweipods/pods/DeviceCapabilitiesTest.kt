@@ -37,6 +37,19 @@ class DeviceCapabilitiesTest {
             assertEquals(deviceName, expectedRoute, detectHuaweiDeviceRoute(deviceName))
         }
         assertEquals("null", HuaweiDeviceRoute.UNSUPPORTED, detectHuaweiDeviceRoute(null))
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS3 in enabledHuaweiDeviceRoutes())
+    }
+
+    @Test
+    fun `known route detection is independent from the current model branch`() {
+        assertEquals(
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            detectKnownHuaweiDeviceRoute("HUAWEI FreeClip 2"),
+        )
+        assertEquals(
+            HuaweiDeviceRoute.UNSUPPORTED,
+            detectHuaweiDeviceRoute("HUAWEI FreeClip 2"),
+        )
     }
 
     @Test

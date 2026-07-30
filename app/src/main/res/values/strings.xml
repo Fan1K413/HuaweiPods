@@ -32,6 +32,8 @@
     <string name="select_device">Select Bluetooth Device</string>
     <string name="no_supported_freebuds3">No supported Huawei earbuds found</string>
     <string name="bluetooth_disabled">Please enable Bluetooth</string>
+    <string name="select_device_model">Select device model</string>
+    <string name="select_device_model_hint">The device name cannot identify its model. Select it once; later renaming will not affect recognition.</string>
     <string name="unknown_device">Unknown Device</string>
     <string name="input_mac_manually">Input MAC Address Manually</string>
     <string name="input_mac_title">Enter Device MAC Address</string>

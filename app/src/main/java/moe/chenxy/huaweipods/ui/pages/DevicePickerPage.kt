@@ -3,12 +3,14 @@ package moe.chenxy.huaweipods.ui.pages
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,7 +49,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.core.content.ContextCompat
 import moe.chenxy.huaweipods.R
+import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.DeviceRoutePrefs
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.displayName
+import moe.chenxy.huaweipods.pods.enabledHuaweiDeviceRoutes
 import moe.chenxy.huaweipods.pods.isSupported
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -61,6 +68,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Edit
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -74,12 +82,15 @@ fun DevicePickerPage(
     showConnectError: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     bottomContentPadding: Dp = 16.dp,
-    onDeviceSelected: (BluetoothDevice) -> Unit,
+    onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit = {},
     onDeviceDisconnect: (BluetoothDevice) -> Unit = {},
     onDismissConnectError: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val routePrefs = remember {
+        context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
+    }
     var hasPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -94,6 +105,21 @@ fun DevicePickerPage(
     val showMacDialog = remember { mutableStateOf(false) }
     var macInput by remember { mutableStateOf("") }
     var bluetoothRefreshToken by remember { mutableStateOf(0) }
+    var routeRefreshToken by remember { mutableStateOf(0) }
+    var pendingRouteDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
+
+    fun selectDevice(device: BluetoothDevice) {
+        val route = DeviceRoutePrefs.resolve(
+            prefs = routePrefs,
+            address = runCatching { device.address }.getOrNull(),
+            deviceName = runCatching { device.name ?: device.alias }.getOrNull(),
+        )
+        if (route.isSupported) {
+            onDeviceSelected(device, route)
+        } else {
+            pendingRouteDevice = device
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (!hasPermission) {
@@ -120,6 +146,18 @@ fun DevicePickerPage(
         }
     }
 
+    DisposableEffect(routePrefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (DeviceRoutePrefs.isBindingKey(key)) {
+                routeRefreshToken++
+            }
+        }
+        routePrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            routePrefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+
     if (!hasPermission) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -143,6 +181,7 @@ fun DevicePickerPage(
         hasPermission,
         bluetoothEnabled,
         bluetoothRefreshToken,
+        routeRefreshToken,
         connectedDeviceName,
         connectedDeviceAddress,
     ) {
@@ -151,7 +190,9 @@ fun DevicePickerPage(
         } else {
             adapter.bondedDevices
                 .filter {
-                    detectHuaweiDeviceRoute(it.name ?: it.alias).isSupported ||
+                    DeviceRoutePrefs.find(routePrefs, it.address) != null ||
+                        detectHuaweiDeviceRoute(it.name ?: it.alias).isSupported ||
+                        it.isBluetoothAudioDevice() ||
                         it.address.equals(connectedDeviceAddress, ignoreCase = true)
                 }
                 .sortedBy { it.name ?: it.alias ?: it.address }
@@ -207,17 +248,28 @@ fun DevicePickerPage(
             }
             if (bluetoothEnabled) {
                 items(pairedDevices, key = { it.address }) { device ->
+                    val route = DeviceRoutePrefs.resolve(
+                        prefs = routePrefs,
+                        address = device.address,
+                        deviceName = device.name ?: device.alias,
+                    )
                     val connected = device.address == connectedDeviceAddress || (
                         connectedDeviceAddress.isBlank() &&
                             connectedDeviceName.isNotBlank() &&
                             device.name == connectedDeviceName
                     )
                     DeviceRow(
-                        title = device.name ?: stringResource(R.string.unknown_device),
-                        summary = device.address,
+                        title = device.alias ?: device.name ?: stringResource(R.string.unknown_device),
+                        summary = route.displayName
+                            .takeIf { route.isSupported }
+                            ?.let { "${device.address} · $it" }
+                            ?: device.address,
                         connected = connected,
                         connecting = device.address == connectingDeviceAddress,
-                        onClick = { if (connected) onConnectedDeviceClick() else onDeviceSelected(device) },
+                        onClick = { if (connected) onConnectedDeviceClick() else selectDevice(device) },
+                        onChangeModel = {
+                            pendingRouteDevice = device
+                        }.takeIf { route.isSupported && !connected },
                         onDisconnect = { onDeviceDisconnect(device) },
                     )
                 }
@@ -254,11 +306,35 @@ fun DevicePickerPage(
                         val device = adapter?.getRemoteDevice(mac)
                         if (device != null) {
                             showMacDialog.value = false
-                            onDeviceSelected(device)
+                            selectDevice(device)
                         }
                     }
                 },
                 modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
+
+    WindowDialog(
+        title = stringResource(R.string.select_device_model),
+        show = pendingRouteDevice != null,
+        onDismissRequest = { pendingRouteDevice = null },
+    ) {
+        Text(
+            text = stringResource(R.string.select_device_model_hint),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        )
+        enabledHuaweiDeviceRoutes().forEach { route ->
+            TextButton(
+                text = route.displayName,
+                onClick = {
+                    val device = pendingRouteDevice ?: return@TextButton
+                    pendingRouteDevice = null
+                    onDeviceSelected(device, route)
+                },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
             )
         }
@@ -279,6 +355,14 @@ fun DevicePickerPage(
     }
 
 }
+
+@SuppressLint("MissingPermission")
+private fun BluetoothDevice.isBluetoothAudioDevice(): Boolean {
+    return runCatching {
+        bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
+    }.getOrDefault(false)
+}
+
 @Composable
 private fun DeviceRow(
     title: String,
@@ -286,6 +370,7 @@ private fun DeviceRow(
     connected: Boolean,
     connecting: Boolean,
     onClick: () -> Unit,
+    onChangeModel: (() -> Unit)?,
     onDisconnect: () -> Unit,
 ) {
     Card(
@@ -323,6 +408,17 @@ private fun DeviceRow(
                         modifier = Modifier.size(18.dp),
                         imageVector = MiuixIcons.Close,
                         contentDescription = null,
+                    )
+                }
+            } else if (onChangeModel != null) {
+                IconButton(
+                    modifier = Modifier.size(32.dp),
+                    onClick = onChangeModel,
+                ) {
+                    Icon(
+                        modifier = Modifier.size(18.dp),
+                        imageVector = MiuixIcons.Edit,
+                        contentDescription = stringResource(R.string.select_device_model),
                     )
                 }
             }

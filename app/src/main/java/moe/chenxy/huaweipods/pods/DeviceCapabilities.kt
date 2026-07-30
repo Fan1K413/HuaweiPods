@@ -12,6 +12,19 @@ enum class HuaweiDeviceRoute {
     UNSUPPORTED,
 }
 
+val HuaweiDeviceRoute.displayName: String
+    get() = when (this) {
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> "HUAWEI FreeBuds 3"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> "HUAWEI FreeBuds 5"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> "HUAWEI FreeBuds 6i"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 -> "HUAWEI FreeBuds Pro 4"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> "HUAWEI FreeBuds 7i"
+        HuaweiDeviceRoute.HUAWEI_FREECLIP -> "HUAWEI FreeClip"
+        HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> "HUAWEI FreeClip 2"
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR -> "HUAWEI Eyewear"
+        HuaweiDeviceRoute.UNSUPPORTED -> "Unsupported"
+    }
+
 val HuaweiDeviceRoute.isSupported: Boolean
     get() = this != HuaweiDeviceRoute.UNSUPPORTED
 
@@ -42,8 +55,25 @@ val HuaweiDeviceRoute.hasChargingCase: Boolean
 
 private val enabledExperimentalRoute: HuaweiDeviceRoute? = null
 
+fun enabledHuaweiDeviceRoutes(): List<HuaweiDeviceRoute> {
+    return listOfNotNull(
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
+        enabledExperimentalRoute,
+    ).distinct()
+}
+
+fun isHuaweiDeviceRouteEnabled(route: HuaweiDeviceRoute): Boolean {
+    return route in enabledHuaweiDeviceRoutes()
+}
+
 fun detectHuaweiDeviceRoute(deviceName: String?): HuaweiDeviceRoute {
-    val route = when (deviceName?.let(::normalizeDeviceName).orEmpty()) {
+    return detectKnownHuaweiDeviceRoute(deviceName)
+        .takeIf(::isHuaweiDeviceRouteEnabled)
+        ?: HuaweiDeviceRoute.UNSUPPORTED
+}
+
+fun detectKnownHuaweiDeviceRoute(deviceName: String?): HuaweiDeviceRoute {
+    return when (deviceName?.let(::normalizeDeviceName).orEmpty()) {
         "huaweifreebuds3", "freebuds3" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS3
         "huaweifreebuds5", "freebuds5" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS5
         "huaweifreebuds6i", "freebuds6i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
@@ -54,9 +84,6 @@ fun detectHuaweiDeviceRoute(deviceName: String?): HuaweiDeviceRoute {
         "huaweieyewear" -> HuaweiDeviceRoute.HUAWEI_EYEWEAR
         else -> HuaweiDeviceRoute.UNSUPPORTED
     }
-    return route.takeIf {
-        it == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 || it == enabledExperimentalRoute
-    } ?: HuaweiDeviceRoute.UNSUPPORTED
 }
 
 private fun normalizeDeviceName(deviceName: String): String {

@@ -26,8 +26,9 @@ import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.pods.HuaweiGestureAction
 import moe.chenxy.huaweipods.pods.HuaweiGestureController
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
-import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.isSupported
+import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
@@ -660,7 +661,7 @@ object SettingsHeadsetHook : HookContext() {
             deviceId == fakeDeviceId ||
             support?.startsWith(fakeDeviceId) == true ||
             knownHuaweiAddresses.any { known -> address != null && known.equals(address, ignoreCase = true) } ||
-            detectHuaweiDeviceRoute(currentName).isSupported
+            resolveHuaweiDeviceRoute(address, currentName).isSupported
     }
 
     private fun isHuaweiPod(device: BluetoothDevice?): Boolean {
@@ -668,7 +669,7 @@ object SettingsHeadsetHook : HookContext() {
         val address = runCatching { device.address }.getOrNull()
         if (address != null && isHuaweiAddress(address)) return true
         val name = runCatching { device.name ?: device.alias }.getOrNull().orEmpty()
-        val result = detectHuaweiDeviceRoute(name).isSupported
+        val result = device.huaweiDeviceRoute().isSupported
         if (result && address != null) {
             knownHuaweiAddresses.add(address.uppercase())
             currentAddress = address
@@ -710,17 +711,20 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun isHuaweiAddress(address: String): Boolean {
         val normalized = address.uppercase()
-        return normalized == currentAddress?.uppercase() || normalized in knownHuaweiAddresses
+        return resolveHuaweiDeviceRoute(address, null).isSupported ||
+            normalized == currentAddress?.uppercase() ||
+            normalized in knownHuaweiAddresses
     }
 
     private fun rememberSupportedDevice(intent: Intent): Boolean {
+        val address = intent.getStringExtra("address") ?: currentAddress
         val name = intent.getStringExtra("device_name") ?: currentName
-        if (!detectHuaweiDeviceRoute(name).isSupported) {
-            Log.w(TAG, "ignored unsupported persisted/broadcast device name=${name.orEmpty()}")
+        if (!resolveHuaweiDeviceRoute(address, name).isSupported) {
+            Log.w(TAG, "ignored unsupported persisted/broadcast device=${name.orEmpty()}/${address.orEmpty()}")
             return false
         }
         currentName = name
-        currentAddress = intent.getStringExtra("address") ?: currentAddress
+        currentAddress = address
         currentAddress?.takeIf { it.isNotBlank() }?.let { knownHuaweiAddresses.add(it.uppercase()) }
         return true
     }
@@ -1552,8 +1556,9 @@ object SettingsHeadsetHook : HookContext() {
     private fun loadState() {
         val prefs = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
         val hasPersistedIdentity = prefs.contains("address") || prefs.contains("name")
+        val persistedAddress = prefs.getString("address", null)
         val persistedName = prefs.getString("name", null)
-        if (hasPersistedIdentity && !detectHuaweiDeviceRoute(persistedName).isSupported) {
+        if (hasPersistedIdentity && !resolveHuaweiDeviceRoute(persistedAddress, persistedName).isSupported) {
             currentAddress = null
             currentName = null
             currentBattery = BatteryParams()

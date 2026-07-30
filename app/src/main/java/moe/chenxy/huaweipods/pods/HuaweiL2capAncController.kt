@@ -33,29 +33,38 @@ object HuaweiL2capAncController {
     private var socketLabel: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun setAncEnabled(context: Context, device: BluetoothDevice, enabled: Boolean) {
-        val route = device.route()
+    fun setAncEnabled(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        enabled: Boolean,
+    ) {
         val packet = HuaweiAncPackets.enabled(route, enabled) ?: return
-        enqueueWrite(context, device, packet, "enabled=$enabled")
+        enqueueWrite(context, device, route, packet, "enabled=$enabled")
     }
 
-    fun setAncLevel(context: Context, device: BluetoothDevice, level: Int) {
-        val route = device.route()
+    fun setAncLevel(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        level: Int,
+    ) {
         val packet = HuaweiAncPackets.level(route, level) ?: return
         val safeLevel = level.coerceIn(0, 8)
-        enqueueWrite(context, device, packet, "level=$safeLevel")
+        enqueueWrite(context, device, route, packet, "level=$safeLevel")
     }
 
     fun requestBattery(
         context: Context,
         device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
         onBattery: (BatteryParams) -> Unit,
     ) {
-        val route = device.route()
         val packet = HuaweiAncPackets.batteryQuery(route) ?: return
         enqueueWrite(
             context = context,
             device = device,
+            route = route,
             packet = packet,
             description = "battery-query",
             responseWindowMs = 1_500L,
@@ -76,27 +85,30 @@ object HuaweiL2capAncController {
     fun sendRawPacket(
         context: Context,
         device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
         packet: ByteArray,
         description: String,
         keepSocket: Boolean = true,
         onComplete: ((Boolean) -> Unit)? = null,
     ) {
-        enqueueWrite(context, device, packet, "raw $description", keepSocket, onComplete)
+        enqueueWrite(context, device, route, packet, "raw $description", keepSocket, onComplete)
     }
 
     fun sendRawPacketOnce(
         context: Context,
         device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
         packet: ByteArray,
         description: String,
         onComplete: ((Boolean) -> Unit)? = null,
     ) {
-        sendRawPacket(context, device, packet, description, keepSocket = false, onComplete)
+        sendRawPacket(context, device, route, packet, description, keepSocket = false, onComplete)
     }
 
     private fun enqueueWrite(
         context: Context,
         device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
         packet: ByteArray,
         description: String,
         keepSocket: Boolean = true,
@@ -105,11 +117,10 @@ object HuaweiL2capAncController {
         onResponse: ((ByteArray) -> Unit)? = null,
     ) {
         val appContext = context.applicationContext ?: context
-        val deviceName = runCatching { device.name ?: device.alias }.getOrNull()
-        if (!detectHuaweiDeviceRoute(deviceName).isSupported) {
+        if (!isHuaweiDeviceRouteEnabled(route)) {
             logInfo(
                 appContext,
-                "Huawei write rejected: unsupported device name=${deviceName.orEmpty()} address=${device.address}",
+                "Huawei write rejected: disabled route=$route address=${device.address}",
             )
             notifyComplete(onComplete, false)
             return
@@ -278,9 +289,6 @@ object HuaweiL2capAncController {
         val label: String,
         val create: () -> BluetoothSocket,
     )
-
-    private fun BluetoothDevice.route(): HuaweiDeviceRoute =
-        detectHuaweiDeviceRoute(runCatching { name ?: alias }.getOrNull())
 
     @OptIn(ExperimentalStdlibApi::class)
     private fun ByteArray.toHexString(): String = toHexString(HexFormat.UpperCase)
