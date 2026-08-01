@@ -7,7 +7,7 @@ import org.junit.Test
 
 class DeviceCapabilitiesTest {
     @Test
-    fun `base route only enables verified FreeBuds 3`() {
+    fun `FreeBuds Pro 3 test route only enables target model and FreeBuds 3`() {
         val cases = listOf(
             "HUAWEI FreeBuds 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
             "FreeBuds 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
@@ -15,6 +15,8 @@ class DeviceCapabilitiesTest {
             "FreeBuds 5" to HuaweiDeviceRoute.UNSUPPORTED,
             "HUAWEI FreeBuds 6i" to HuaweiDeviceRoute.UNSUPPORTED,
             "FreeBuds 6i" to HuaweiDeviceRoute.UNSUPPORTED,
+            "HUAWEI FreeBuds Pro 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            "FreeBuds Pro 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
             "HUAWEI FreeBuds Pro 4" to HuaweiDeviceRoute.UNSUPPORTED,
             "FreeBuds Pro 4" to HuaweiDeviceRoute.UNSUPPORTED,
             "HUAWEI FreeBuds 7i" to HuaweiDeviceRoute.UNSUPPORTED,
@@ -37,7 +39,13 @@ class DeviceCapabilitiesTest {
             assertEquals(deviceName, expectedRoute, detectHuaweiDeviceRoute(deviceName))
         }
         assertEquals("null", HuaweiDeviceRoute.UNSUPPORTED, detectHuaweiDeviceRoute(null))
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS3 in enabledHuaweiDeviceRoutes())
+        assertEquals(
+            listOf(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            ),
+            enabledHuaweiDeviceRoutes(),
+        )
     }
 
     @Test
@@ -71,6 +79,14 @@ class DeviceCapabilitiesTest {
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.isSupported)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.supportsRfcommBattery)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.supportsAnc)
+    }
+
+    @Test
+    fun `FreeBuds Pro 3 exposes battery case and basic ANC integration`() {
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.isSupported)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.supportsRfcommBattery)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.supportsAnc)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.hasChargingCase)
     }
 
     @Test

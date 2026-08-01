@@ -4,6 +4,7 @@ enum class HuaweiDeviceRoute {
     HUAWEI_FREEBUDS3,
     HUAWEI_FREEBUDS5,
     HUAWEI_FREEBUDS6I,
+    HUAWEI_FREEBUDS_PRO3,
     HUAWEI_FREEBUDS_PRO4,
     HUAWEI_FREEBUDS7I,
     HUAWEI_FREECLIP,
@@ -17,6 +18,7 @@ val HuaweiDeviceRoute.displayName: String
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> "HUAWEI FreeBuds 3"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> "HUAWEI FreeBuds 5"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> "HUAWEI FreeBuds 6i"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 -> "HUAWEI FreeBuds Pro 3"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 -> "HUAWEI FreeBuds Pro 4"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> "HUAWEI FreeBuds 7i"
         HuaweiDeviceRoute.HUAWEI_FREECLIP -> "HUAWEI FreeClip"
@@ -32,12 +34,14 @@ val HuaweiDeviceRoute.supportsAnc: Boolean
     get() = this == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS5 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
 
 val HuaweiDeviceRoute.supportsRfcommBattery: Boolean
     get() = this == HuaweiDeviceRoute.HUAWEI_FREEBUDS5 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I ||
         this == HuaweiDeviceRoute.HUAWEI_FREECLIP ||
@@ -48,12 +52,13 @@ val HuaweiDeviceRoute.hasChargingCase: Boolean
     get() = this == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS5 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+        this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 ||
         this == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I ||
         this == HuaweiDeviceRoute.HUAWEI_FREECLIP ||
         this == HuaweiDeviceRoute.HUAWEI_FREECLIP2
 
-private val enabledExperimentalRoute: HuaweiDeviceRoute? = null
+private val enabledExperimentalRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3
 
 fun enabledHuaweiDeviceRoutes(): List<HuaweiDeviceRoute> {
     return listOfNotNull(
@@ -77,6 +82,7 @@ fun detectKnownHuaweiDeviceRoute(deviceName: String?): HuaweiDeviceRoute {
         "huaweifreebuds3", "freebuds3" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS3
         "huaweifreebuds5", "freebuds5" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS5
         "huaweifreebuds6i", "freebuds6i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+        "huaweifreebudspro3", "freebudspro3" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3
         "huaweifreebudspro4", "freebudspro4" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4
         "huaweifreebuds7i", "freebuds7i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
         "huaweifreeclip", "freeclip" -> HuaweiDeviceRoute.HUAWEI_FREECLIP

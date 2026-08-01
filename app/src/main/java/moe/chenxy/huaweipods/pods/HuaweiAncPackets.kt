@@ -1,6 +1,6 @@
 package moe.chenxy.huaweipods.pods
 
-/** 已由对应型号实机抓包验证的降噪指令。 */
+/** 已验证的协议指令；实验路由可能包含注明待实机复核的同协议族指令。 */
 internal object HuaweiAncPackets {
     private val huaweiBatteryQuery =
         packet(0x5A, 0x00, 0x09, 0x00, 0x01, 0x08, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0xFB, 0xB9)
@@ -8,7 +8,8 @@ internal object HuaweiAncPackets {
         false to packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x00, 0x68, 0x21),
         true to packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x01, 0x78, 0x00),
     )
-    private val freeBuds5Enabled = mapOf(
+    // FreeBuds Pro 3 的开启包已实抓；关闭包沿用同协议族格式，需在首轮实机测试中重点复核。
+    private val modernFreeBudsEnabled = mapOf(
         false to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x00, 0x00, 0xD2, 0x2D),
         true to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0xFF, 0xFF, 0xEC),
     )
@@ -28,8 +29,9 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Enabled[enabled]
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> freeBuds5Enabled[enabled]
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> modernFreeBudsEnabled[enabled]
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
         HuaweiDeviceRoute.HUAWEI_FREECLIP2,
         HuaweiDeviceRoute.HUAWEI_EYEWEAR,
@@ -40,6 +42,7 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Levels[level.coerceIn(0, freeBuds3Levels.lastIndex)]
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         HuaweiDeviceRoute.HUAWEI_FREECLIP,
@@ -51,6 +54,7 @@ internal object HuaweiAncPackets {
     fun batteryQuery(route: HuaweiDeviceRoute): ByteArray? = when (route) {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         HuaweiDeviceRoute.HUAWEI_FREECLIP,

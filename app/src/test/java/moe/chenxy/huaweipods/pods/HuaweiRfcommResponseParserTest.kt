@@ -62,6 +62,21 @@ class HuaweiRfcommResponseParserTest {
     }
 
     @Test
+    fun `parses FreeBuds Pro 3 battery response captured from official app`() {
+        val response = hex("5A00180001080101600203606413030301010004020A140502010126EC")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+        assertNotNull(battery)
+
+        assertEquals(96, battery?.left?.battery)
+        assertEquals(100, battery?.right?.battery)
+        assertEquals(19, battery?.case?.battery)
+        assertEquals(true, battery?.left?.isCharging)
+        assertEquals(true, battery?.right?.isCharging)
+        assertEquals(false, battery?.case?.isCharging)
+    }
+
+    @Test
     fun `parses FreeBuds Pro 4 battery response captured from official app`() {
         val response = hex("5A001B00010801015C02035C5C4A030300000004020A140502000006010A6F4E")
 

@@ -23,6 +23,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiGestureAction
 import moe.chenxy.huaweipods.pods.HuaweiGestureController
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
@@ -95,6 +96,15 @@ object SettingsHeadsetHook : HookContext() {
     private val ancLevelKeywords = listOf("自适应", "智能", "轻度", "均衡", "深度", "Smart", "Adaptive", "Light", "Medium", "Deep")
     private val ancLevelAnchorKeywords = listOf("轻度", "均衡", "深度", "Light", "Medium", "Deep")
     private val ancModeKeywords = listOf("降噪", "关闭", "Noise", "Off")
+    private val gestureEntryKeywords = listOf("手势操作", "手势控制", "按键设置", "Gesture controls", "Gestures", "Button settings")
+    private val nativeGesturePreferenceKeys = listOf(
+        "left_double",
+        "right_double",
+        "left_triple",
+        "right_triple",
+        "long_press_left_headset",
+        "long_press_right_headset",
+    )
     private val knownHuaweiAddresses = linkedSetOf<String>()
     private val batteryViews = WeakHashMap<Any, BluetoothDevice>()
     private val headsetFragments = WeakHashMap<Any, Boolean>()
@@ -482,10 +492,14 @@ object SettingsHeadsetHook : HookContext() {
             "right_double" -> HuaweiGestureSide.RIGHT
             else -> return false
         }
+        val targetAddress = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
+        if (resolveHuaweiDeviceRoute(targetAddress, currentName) != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            Log.i(TAG, "native key config gesture ignored for unsupported route address=$targetAddress")
+            return true
+        }
         val action = HuaweiGestureAction.fromExtra(newValue?.toString())
             ?: newValue?.toString()?.toIntOrNull()?.let { HuaweiGestureAction.fromProtocolValue(it) }
             ?: return false
-        val targetAddress = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
         val targetContext = runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull()
             ?: context
             ?: return false
@@ -800,7 +814,12 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun configureFreeBudsNativeGesturePage(fragment: Any?) {
-        val address = gestureDeviceAddress(fragment).orEmpty()
+        val address = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
+        if (resolveHuaweiDeviceRoute(address, currentName) != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            nativeGesturePreferenceKeys.forEach { key -> hideNativePreference(fragment, key) }
+            Log.d(TAG, "FreeBuds native gesture page hidden for unsupported route address=$address")
+            return
+        }
         listOf(
             "left_triple",
             "right_triple",
@@ -1009,6 +1028,9 @@ object SettingsHeadsetHook : HookContext() {
         hideRowsByText(root, earFitKeywords)
         hideRowsByText(root, notificationEntryKeywords)
         hideRowsByText(root, xiaomiOnlyEntryKeywords)
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            hideRowsByText(root, gestureEntryKeywords)
+        }
         replaceHuaweiAncLevelsWithHuaweiDial(root)
     }
 
@@ -1076,20 +1098,24 @@ object SettingsHeadsetHook : HookContext() {
     private fun replaceHuaweiAncLevelsWithHuaweiDial(root: View) {
         loadState()
         val existingDial = findTaggedView(root, SETTINGS_HUAWEI_DIAL_TAG) as? HuaweiAncLevelDialView
+        val matches = mutableListOf<TextView>()
+        collectTextMatches(root, ancLevelKeywords, matches)
+        val anchorMatches = matches.filter { textView ->
+            val text = textView.text?.toString().orEmpty()
+            ancLevelAnchorKeywords.any { text.contains(it, ignoreCase = true) }
+        }
+        val levelAnchor = levelContainer(root, anchorMatches.ifEmpty { matches })
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            existingDial?.visibility = View.GONE
+            levelAnchor?.let { hideHuaweiAncLevelArea(root, it) }
+            return
+        }
         if (!currentAnc.isSettingsNoiseCancellation()) {
             existingDial?.visibility = View.GONE
             return
         }
 
-        val matches = mutableListOf<TextView>()
-        collectTextMatches(root, ancLevelKeywords, matches)
-
-        val anchorMatches = matches.filter { textView ->
-            val text = textView.text?.toString().orEmpty()
-            ancLevelAnchorKeywords.any { text.contains(it, ignoreCase = true) }
-        }
-        val anchor = levelContainer(root, anchorMatches.ifEmpty { matches })
-            ?: modeButtonContainer(root)
+        val anchor = levelAnchor ?: modeButtonContainer(root)
         if (anchor == null) {
             existingDial?.visibility = View.GONE
             Log.d(TAG, "Settings Huawei ANC dial anchor not found matches=${matches.map { it.text }}")
@@ -1103,6 +1129,10 @@ object SettingsHeadsetHook : HookContext() {
             dial.setLevel(currentHuaweiAncLevel)
             dial.visibility = View.VISIBLE
         }
+    }
+
+    private fun currentHuaweiRoute(): HuaweiDeviceRoute {
+        return resolveHuaweiDeviceRoute(currentAddress, currentName)
     }
 
     private fun createHuaweiAncLevelDial(anchor: View): HuaweiAncLevelDialView? {

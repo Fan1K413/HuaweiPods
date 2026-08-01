@@ -89,6 +89,7 @@ object DeviceRoutePrefs {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> "freebuds3"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> "freebuds5"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> "freebuds6i"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 -> "freebuds_pro3"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 -> "freebuds_pro4"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> "freebuds7i"
         HuaweiDeviceRoute.HUAWEI_FREECLIP -> "freeclip"
@@ -101,6 +102,7 @@ object DeviceRoutePrefs {
         "freebuds3" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS3
         "freebuds5" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS5
         "freebuds6i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+        "freebuds_pro3" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3
         "freebuds_pro4" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4
         "freebuds7i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
         "freeclip" -> HuaweiDeviceRoute.HUAWEI_FREECLIP

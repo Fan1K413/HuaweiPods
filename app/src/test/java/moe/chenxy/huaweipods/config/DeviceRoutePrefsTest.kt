@@ -19,6 +19,17 @@ class DeviceRoutePrefsTest {
     }
 
     @Test
+    fun `enabled FreeBuds Pro 3 binding wins after device is renamed`() {
+        assertEquals(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            resolveBoundOrNamedRoute(
+                boundRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+                deviceName = "Renamed Pro headset",
+            ),
+        )
+    }
+
+    @Test
     fun `binding from another model branch cannot bypass build isolation`() {
         val disabledRoute = HuaweiDeviceRoute.entries.first {
             it != HuaweiDeviceRoute.UNSUPPORTED && it !in enabledHuaweiDeviceRoutes()
