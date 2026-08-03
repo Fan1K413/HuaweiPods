@@ -15,8 +15,8 @@ android {
         applicationId = "moe.chenxy.huaweipods"
         minSdk = 35
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

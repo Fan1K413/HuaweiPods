@@ -31,7 +31,7 @@ fun AboutPage(
             Card {
                 BasicComponent(
                     title = "HuaweiPods",
-                    summary = "FreeBuds adaptation for HyperOS"
+                    summary = stringResource(R.string.app_subtitle)
                 )
                 BasicComponent(
                     title = stringResource(R.string.based_on),

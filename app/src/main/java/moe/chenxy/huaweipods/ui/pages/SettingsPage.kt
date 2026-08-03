@@ -151,7 +151,7 @@ fun SettingsPage(
             Card(modifier = Modifier.padding(top = 12.dp)) {
                 BasicComponent(
                     title = stringResource(R.string.about),
-                    summary = "Huawei FreeBuds for HyperOS",
+                    summary = stringResource(R.string.app_subtitle),
                     onClick = onOpenAbout
                 )
             }
