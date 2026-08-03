@@ -20,7 +20,30 @@ class CaptureEventReceiver : BroadcastReceiver() {
             Log.w(TAG, "忽略非官方应用发送的 Debug 抓包事件：$senderPackage")
             return
         }
+        senderPackage ?: return
         if (!CaptureStore.isCaptureActive(context)) return
+
+        if (intent.getStringExtra(CaptureContract.EXTRA_EVENT_TYPE) == CaptureContract.EVENT_TYPE_HOOK_READY) {
+            val pendingResult = goAsync()
+            try {
+                executor.execute {
+                    try {
+                        CaptureStore.recordHookReady(
+                            context = context.applicationContext,
+                            sourcePackage = senderPackage,
+                            sourceProcess = intent.getStringExtra(CaptureContract.EXTRA_SOURCE_PROCESS),
+                        )
+                    } catch (throwable: Throwable) {
+                        Log.e(TAG, "保存 Debug Hook 状态失败", throwable)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            } catch (_: RejectedExecutionException) {
+                pendingResult.finish()
+            }
+            return
+        }
 
         val event = CapturedProtocolEvent(
             eventType = intent.getStringExtra(CaptureContract.EXTRA_EVENT_TYPE),

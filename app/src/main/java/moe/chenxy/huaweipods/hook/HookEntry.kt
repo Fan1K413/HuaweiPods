@@ -4,7 +4,9 @@ import android.content.SharedPreferences
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.hook.milink.MiLinkServiceHook
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRouteResolver
 
 open class HookEntry : XposedModule() {
     private val TAG = "HuaweiPods-HookEntry"
@@ -35,11 +37,15 @@ open class HookEntry : XposedModule() {
         hook.appClassLoader = classLoader
         hook.packageName = packageName
         hook.prefs = getRemotePreferences(ConfigManager.PREFS_NAME)
+        HuaweiDeviceRouteResolver.init(hook.prefs)
         Log.d(TAG, "loadHook package=$packageName hook=${hook.javaClass.simpleName}")
         ConfigManager.init(hook.prefs)
         val configListener = SharedPreferences.OnSharedPreferenceChangeListener { sharedPreferences, key ->
             if (key == ConfigManager.PREF_KEY_CONFIG_JSON) {
                 ConfigManager.refreshFromPrefs(sharedPreferences)
+            }
+            if (DeviceRoutePrefs.isBindingKey(key)) {
+                HuaweiDeviceRouteResolver.refreshBindings()
             }
         }
         configListeners.add(configListener)

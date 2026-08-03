@@ -1,6 +1,6 @@
 # 华为耳机通用协议采集指南
 
-HuaweiPods 目前只有 HUAWEI FreeBuds 3 的控制协议经过验证。FreeBuds、FreeClip、FreeLace 等华为耳机即使同属一个品牌，服务 UUID、命令编号、能力位、参数范围和返回格式也可能因系列、代际和固件而不同，因此不能仅凭设备名称复用 FreeBuds 3 的写指令。
+HuaweiPods 已对 HUAWEI FreeBuds 3 与 HUAWEI FreeBuds Pro 3 的已实现控制能力完成验证。FreeBuds、FreeClip、FreeLace 等华为耳机即使同属一个品牌，服务 UUID、命令编号、能力位、参数范围和返回格式也可能因系列、代际和固件而不同，因此不能仅凭设备名称跨型号复用写指令。
 
 项目提供两个构建：
 

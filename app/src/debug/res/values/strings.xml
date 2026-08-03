@@ -49,6 +49,9 @@
     <string name="debug_capture_active_badge">正在采集</string>
     <string name="debug_capture_progress">已完成或跳过 %1$d / %2$d 项</string>
     <string name="debug_capture_event_count">协议事件已记录 %1$d 条</string>
+    <string name="debug_capture_hook_ready">Hook 已成功注入官方 App，可以开始逐项操作。</string>
+    <string name="debug_capture_hook_not_ready">尚未检测到 Hook。请先打开官方 App，返回本页确认变绿后再操作；如果始终失败，请检查 LSPosed 作用域并强行停止官方 App 或重启手机。</string>
+    <string name="debug_capture_check_hook">打开官方 App 并检测 Hook</string>
     <string name="debug_capture_no_protocol_events">本轮没有抓到任何协议事件，只有向导标记。请先确认 LSPosed 作用域并重启官方 App；仍为 0 时按页面底部的 HCI 兜底说明反馈，不要把本包当作有效协议样本。</string>
     <string name="debug_capture_status_pending">待采集</string>
     <string name="debug_capture_status_active">正在执行，请完成后等待 2 秒</string>

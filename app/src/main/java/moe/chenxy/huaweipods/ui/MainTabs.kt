@@ -32,6 +32,7 @@ import io.github.libxposed.service.XposedService
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.EarphonePref
 import moe.chenxy.huaweipods.config.PodImageResource
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.ui.dialogs.RestartScope
 import moe.chenxy.huaweipods.ui.dialogs.RestartScopeDialog
@@ -85,7 +86,7 @@ internal fun MainTabsScaffold(
     connectedDeviceAddress: String,
     connectingDeviceAddress: String?,
     showConnectErrorDialog: Boolean,
-    onDeviceSelected: (BluetoothDevice) -> Unit,
+    onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit,
     onDeviceDisconnect: (BluetoothDevice) -> Unit,
     onDismissConnectError: () -> Unit,
@@ -334,7 +335,7 @@ private fun EarphonesTabShell(
     connectingDeviceAddress: String?,
     showConnectErrorDialog: Boolean,
     pageBottomContentPadding: Dp,
-    onDeviceSelected: (BluetoothDevice) -> Unit,
+    onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit,
     onDeviceDisconnect: (BluetoothDevice) -> Unit,
     onDismissConnectError: () -> Unit,

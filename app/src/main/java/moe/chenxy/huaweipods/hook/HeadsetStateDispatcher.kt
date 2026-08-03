@@ -12,8 +12,8 @@ import android.content.IntentFilter
 import android.os.Handler
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.pods.HuaweiHfpController
-import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
-import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.utils.SystemApisUtils.setIconVisibility
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
@@ -79,9 +79,10 @@ object HeadsetStateDispatcher : HookContext() {
                     HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST -> {
                         val device = receivedIntent.getParcelableExtra("device", BluetoothDevice::class.java) ?: return
                         Log.d("HuaweiPods", "connect request from app device=${device.name}/${device.address}")
-                        if (isHuaweiPod(device) && isDeviceConnected(device)) {
+                        val supported = isHuaweiPod(device)
+                        if (supported && isDeviceConnected(device)) {
                             HuaweiHfpController.connectPod(context, device)
-                        } else if (isHuaweiPod(device)) {
+                        } else if (supported) {
                             notifyRejectedDevice(
                                 context = context,
                                 device = device,
@@ -141,8 +142,7 @@ object HeadsetStateDispatcher : HookContext() {
 
     @SuppressLint("MissingPermission")
     private fun isHuaweiPod(device: BluetoothDevice): Boolean {
-        val name = device.name ?: device.alias
-        return detectHuaweiDeviceRoute(name) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
+        return device.huaweiDeviceRoute().isSupported
     }
 
     private fun isDeviceConnected(device: BluetoothDevice): Boolean {

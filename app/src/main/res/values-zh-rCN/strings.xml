@@ -31,8 +31,10 @@
     <string name="batt_right_pod">右</string>
     <string name="waiting_for_pod">等待 FreeBuds 连接...</string>
     <string name="select_device">选择蓝牙设备</string>
-    <string name="no_supported_freebuds3">未找到受支持的 FreeBuds 3</string>
+    <string name="no_supported_freebuds3">未找到受支持的华为耳机</string>
     <string name="bluetooth_disabled">请开启蓝牙</string>
+    <string name="select_device_model">选择耳机型号</string>
+    <string name="select_device_model_hint">设备名称无法判断型号，只需选择一次；以后改名不会影响识别。</string>
     <string name="unknown_device">未知设备</string>
     <string name="input_mac_manually">手动输入 MAC 地址</string>
     <string name="input_mac_title">输入设备 MAC 地址</string>

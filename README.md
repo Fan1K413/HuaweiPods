@@ -22,7 +22,7 @@ QQ群 `1022359908`
 
 HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将华为耳机接入系统蓝牙详情页、连接弹窗、超级岛与融合设备中心。
 
-> 项目仍在持续适配中。正式版目前仅完整支持 **HUAWEI FreeBuds 3**，其他型号须使用对应测试包，请勿直接套用 FreeBuds 3 的控制协议。
+> 项目仍在持续适配中。正式版目前支持 **HUAWEI FreeBuds 3** 与 **HUAWEI FreeBuds Pro 3**；下表标记为“测试中”的型号仍须使用对应测试包，请勿跨型号复用控制协议。
 
 ## 支持状态
 
@@ -31,7 +31,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 | HUAWEI FreeBuds 3 | 已支持 | 电量、降噪、降噪空间调节、系统界面集成 |
 | HUAWEI FreeBuds 5 | 测试中 | 基础识别、电量与降噪协议验证 |
 | HUAWEI FreeBuds 6i | 测试中 | 基础识别、电量与降噪协议验证 |
-| HUAWEI FreeBuds Pro 3 | 测试中 | 基础识别、左右耳/充电盒电量与基础降噪验证 |
+| HUAWEI FreeBuds Pro 3 | 已支持 | 左右耳/充电盒电量、降噪 / 关闭两态控制与状态回读、系统界面集成；暂不支持通透、降噪强度 / 空间调节及手势设置 |
 | HUAWEI FreeBuds Pro 4 | 测试中 | 基础识别、电量与降噪协议验证 |
 | HUAWEI FreeBuds 7i | 测试中 | 基础识别、电量与降噪协议验证 |
 | HUAWEI FreeClip | 测试中 | 基础识别与电量协议验证 |
@@ -46,14 +46,14 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 - 接入 HyperOS 连接弹窗和超级岛
 - 接入融合设备中心，并支持已配对设备间流转
 - 显示左耳、右耳和充电盒电量
-- 控制主动降噪；FreeBuds 3 支持降噪空间方向调节
+- 控制主动降噪；FreeBuds 3 支持降噪空间方向调节，FreeBuds Pro 3 支持降噪 / 关闭两态控制
 
 ## 使用要求
 
 - 小米或 Redmi 设备
 - HyperOS，Android 15 及以上
 - LSPosed API 101 及以上
-- 正式版需配合 HUAWEI FreeBuds 3 使用
+- 正式版需配合 HUAWEI FreeBuds 3 或 HUAWEI FreeBuds Pro 3 使用
 
 ## 快速开始
 

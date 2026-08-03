@@ -16,13 +16,13 @@
 
 HuaweiPods is an Xposed module for Xiaomi HyperOS. It integrates Huawei FreeBuds with the system headset popup, Super Island, Fusion Device Center, and Bluetooth detail page.
 
-The current adaptation focuses on **Huawei FreeBuds 3**: battery display, ANC on/off, spatial ANC dial control, and headset display / transfer in Fusion Device Center.
+The release build currently supports **HUAWEI FreeBuds 3** and **HUAWEI FreeBuds Pro 3**. FreeBuds 3 supports battery display, ANC on/off, the spatial ANC dial, and system UI integration. FreeBuds Pro 3 supports left/right/case battery, ANC/off control with state readback, and system UI integration; transparency, ANC strength or spatial adjustment, and gesture settings are not supported.
 
 ## Features
 
 - **Battery display** for the left earbud, right earbud, and charging case.
 - **ANC control** with noise cancellation and off states.
-- **ANC dial** for FreeBuds 3 spatial noise cancellation adjustment.
+- **ANC dial** for FreeBuds 3 spatial noise cancellation adjustment only.
 - **System Bluetooth detail page** integration for battery, ANC, and dial controls.
 - **Super Island / popup** status display and quick ANC controls.
 - **Fusion Device Center** headset display and transfer between paired devices.
@@ -32,7 +32,7 @@ The current adaptation focuses on **Huawei FreeBuds 3**: battery display, ANC on
 - Xiaomi / Redmi device running HyperOS.
 - Android 15+.
 - LSPosed API version >= 101.
-- Paired Huawei FreeBuds 3.
+- Paired HUAWEI FreeBuds 3 or HUAWEI FreeBuds Pro 3.
 
 ## Usage
 
@@ -44,7 +44,7 @@ The current adaptation focuses on **Huawei FreeBuds 3**: battery display, ANC on
    - `com.milink.service`
    - `com.xiaomi.bluetooth`
 4. Reboot the phone, or restart the scoped apps from HuaweiPods.
-5. Connect FreeBuds 3 and control it from HuaweiPods, Super Island, Fusion Device Center, or the system Bluetooth detail page.
+5. Connect a supported headset and view or control it from HuaweiPods, Super Island, Fusion Device Center, or the system Bluetooth detail page.
 
 ## Development Notes
 

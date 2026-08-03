@@ -6,8 +6,10 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothSocket
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.hook.HookContext
 import moe.chenxy.huaweipods.hook.Log
@@ -27,6 +29,10 @@ object AiLifeCaptureHook : HookContext() {
     private const val MAX_SUMMARY_CHARS = 512
 
     private val installed = AtomicBoolean(false)
+    private val probeReceiverRegistered = AtomicBoolean(false)
+
+    @Volatile
+    private var probeReceiver: BroadcastReceiver? = null
 
     @Volatile
     private var applicationContext: Context? = null
@@ -36,7 +42,60 @@ object AiLifeCaptureHook : HookContext() {
 
         hookGattTraffic()
         hookBluetoothSocketIo()
+        installProbeBridge()
         Log.i(TAG, "Bluetooth protocol capture enabled for package=$packageName")
+    }
+
+    private fun installProbeBridge() {
+        resolveApplicationContext()?.let {
+            registerProbeReceiver(it)
+            return
+        }
+
+        runCatching {
+            val attachMethod = Application::class.java.getDeclaredMethod("attach", Context::class.java)
+                .apply { isAccessible = true }
+            hookAfter(attachMethod) {
+                val context = (instance as? Application)?.applicationContext
+                    ?: args.firstOrNull() as? Context
+                    ?: return@hookAfter
+                registerProbeReceiver(context)
+            }
+        }.onFailure { Log.w(TAG, "Unable to install capture probe bridge", it) }
+    }
+
+    private fun registerProbeReceiver(context: Context) {
+        if (!probeReceiverRegistered.compareAndSet(false, true)) return
+        val appContext = context.applicationContext ?: context
+        applicationContext = appContext
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context, intent: Intent) {
+                if (intent.action == CaptureContract.ACTION_HOOK_PROBE) {
+                    broadcastHookReady(receiverContext.applicationContext ?: receiverContext)
+                }
+            }
+        }
+        runCatching {
+            val filter = IntentFilter(CaptureContract.ACTION_HOOK_PROBE)
+            // The probe originates from the HuaweiPods debug app and is received
+            // inside the hooked AI Life process, so this receiver must be exported.
+            appContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            probeReceiver = receiver
+            broadcastHookReady(appContext)
+        }.onFailure {
+            probeReceiverRegistered.set(false)
+            Log.w(TAG, "Unable to register capture probe receiver", it)
+        }
+    }
+
+    private fun broadcastHookReady(context: Context) {
+        val intent = Intent(CaptureContract.ACTION_CAPTURE_EVENT).apply {
+            setPackage(BuildConfig.APPLICATION_ID)
+            putExtra(CaptureContract.EXTRA_EVENT_TYPE, CaptureContract.EVENT_TYPE_HOOK_READY)
+            putExtra(CaptureContract.EXTRA_SOURCE_PROCESS, sourceProcessName())
+            putExtra(CaptureContract.EXTRA_TIMESTAMP_EPOCH_MS, System.currentTimeMillis())
+        }
+        sendCaptureBroadcast(context, intent)
     }
 
     private fun hookGattTraffic() {
@@ -413,6 +472,10 @@ object AiLifeCaptureHook : HookContext() {
             }
             putExtra(CaptureContract.EXTRA_TIMESTAMP_EPOCH_MS, event.timestampEpochMs)
         }
+        sendCaptureBroadcast(context, intent)
+    }
+
+    private fun sendCaptureBroadcast(context: Context, intent: Intent) {
         val options = BroadcastOptions.makeBasic()
             .setShareIdentityEnabled(true)
             .toBundle()

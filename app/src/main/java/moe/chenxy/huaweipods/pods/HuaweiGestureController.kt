@@ -27,6 +27,7 @@ object HuaweiGestureController {
     fun setDoubleTap(
         context: Context,
         device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
         side: HuaweiGestureSide,
         action: HuaweiGestureAction,
         onComplete: ((Boolean) -> Unit)? = null,
@@ -34,6 +35,7 @@ object HuaweiGestureController {
         HuaweiL2capAncController.sendRawPacketOnce(
             context = context,
             device = device,
+            route = route,
             packet = buildDoubleTapPacket(side, action),
             description = "gesture side=${side.extraValue} action=${action.extraValue}",
             onComplete = onComplete,

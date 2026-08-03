@@ -6,25 +6,37 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.hook.Log
 import moe.chenxy.huaweipods.utils.miuiStrongToast.MiuiStrongToastUtil
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 
 @SuppressLint("MissingPermission", "StaticFieldLeak")
 object HuaweiHfpController {
     private const val TAG = "HuaweiPods-HuaweiHfp"
+    private const val ANC_CONFIRM_DELAY_MS = 300L
+    private const val ANC_REFRESH_MIN_INTERVAL_MS = 750L
 
     private var context: Context? = null
     private var device: BluetoothDevice? = null
+    private var sessionRoute = HuaweiDeviceRoute.UNSUPPORTED
     private var receiverRegistered = false
     private var currentBattery: BatteryParams? = null
-    private var currentAnc = 1
+    private var currentAnc: Int? = null
     private var currentAncLevel = 0
     private var lastDispatchedAncLevel: Int? = null
     private var connectedBroadcastSent = false
+    private var lastBatteryRequestAt = 0L
+    private var lastAncRequestAt = 0L
+    private var ancRequestInFlight = false
+    private var sessionGeneration = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -35,15 +47,29 @@ object HuaweiHfpController {
                     sendConnectionState("connected")
                     sendConnected(force = true)
                     currentBattery?.let { sendBattery(it) }
-                    sendAnc(currentAnc)
-                    sendAncLevel(currentAncLevel)
+                    requestPrivateBattery()
+                    if (sessionRoute.supportsAnc) {
+                        if (!requestAncState()) {
+                            currentAnc?.let(::sendAnc)
+                        }
+                        sendAncLevel(currentAncLevel)
+                    }
                 }
                 HuaweiPodsAction.ACTION_ANC_SELECT -> {
-                    setAncMode(receivedIntent.getIntExtra("status", currentAnc))
+                    if (!receivedIntent.hasExtra("status")) {
+                        Log.w(TAG, "Huawei ANC skipped: missing status")
+                        return
+                    }
+                    setAncMode(receivedIntent.getIntExtra("status", 1))
                 }
                 HuaweiPodsAction.ACTION_CYCLE_ANC -> {
-                    val nextStatus = if (currentAnc == 1) 2 else 1
-                    Log.i(TAG, "Huawei ANC cycle current=$currentAnc next=$nextStatus")
+                    val knownStatus = currentAnc ?: run {
+                        Log.i(TAG, "Huawei ANC cycle deferred until current state is known")
+                        requestAncState(force = true)
+                        return
+                    }
+                    val nextStatus = if (knownStatus == 1) 2 else 1
+                    Log.i(TAG, "Huawei ANC cycle current=$knownStatus next=$nextStatus")
                     setAncMode(nextStatus)
                 }
                 HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_SET -> {
@@ -60,13 +86,16 @@ object HuaweiHfpController {
     }
 
     fun connectPod(context: Context, device: BluetoothDevice) {
-        if (!supportsPrivateCommands(device)) {
+        val route = device.huaweiDeviceRoute()
+        if (!route.isSupported) {
             Log.w(TAG, "Huawei session skipped: unsupported device=${device.address}")
             return
         }
-        ensureSession(context, device)
+        ensureSession(context, device, route)
         sendConnectionState("connecting")
         sendConnected()
+        requestAncState(force = true)
+        requestPrivateBattery()
     }
 
     fun disconnectedPod(context: Context, device: BluetoothDevice) {
@@ -79,12 +108,17 @@ object HuaweiHfpController {
             putExtra("address", device.address)
         }
         currentBattery = null
-        currentAnc = 1
+        currentAnc = null
         currentAncLevel = 0
         lastDispatchedAncLevel = null
         connectedBroadcastSent = false
+        lastBatteryRequestAt = 0L
+        lastAncRequestAt = 0L
+        ancRequestInFlight = false
+        sessionGeneration++
         this.device = null
         this.context = null
+        sessionRoute = HuaweiDeviceRoute.UNSUPPORTED
         HuaweiL2capAncController.disconnect(device)
         Log.d(TAG, "Huawei HFP disconnected device=${device.address}")
     }
@@ -95,18 +129,20 @@ object HuaweiHfpController {
         text: String
     ): BatteryParams? {
         val result = HuaweiBatteryParser.parse(text) ?: return null
-        if (!supportsPrivateCommands(device)) {
+        val route = device.huaweiDeviceRoute()
+        if (!route.isSupported) {
             Log.w(TAG, "Huawei battery ignored: unsupported device=${device.address}")
             return null
         }
-        ensureSession(context, device)
-        currentBattery = result.battery
+        ensureSession(context, device, route)
+        val battery = result.battery.normalizedEarbudAvailability()
+        currentBattery = battery
         sendConnectionState("connected")
         sendConnected()
-        sendBattery(result.battery)
-        MiuiStrongToastUtil.showPodsNotificationByMiuiBt(context, result.battery, device)
+        sendBattery(battery)
+        MiuiStrongToastUtil.showPodsNotificationByMiuiBt(context, battery, device)
         Log.i(TAG, "Huawei battery parsed device=${device.address} values=${result.values}")
-        return result.battery
+        return battery
     }
 
     fun setAncMode(status: Int) {
@@ -114,8 +150,12 @@ object HuaweiHfpController {
             Log.w(TAG, "Huawei ANC skipped: device null status=$status")
             return
         }
-        if (!supportsPrivateCommands(currentDevice)) {
+        if (!sessionRoute.isSupported) {
             Log.w(TAG, "Huawei ANC skipped: unsupported device=${currentDevice.address}")
+            return
+        }
+        if (!sessionRoute.supportsAnc) {
+            Log.w(TAG, "Huawei ANC skipped: feature unavailable device=${currentDevice.address}")
             return
         }
         val currentContext = context ?: run {
@@ -123,12 +163,37 @@ object HuaweiHfpController {
             return
         }
         val targetStatus = if (status == 1) 1 else 2
+        val previousStatus = currentAnc
+        val requestedAddress = currentDevice.address
+        val requestedRoute = sessionRoute
+        val requestedGeneration = sessionGeneration
         Log.i(TAG, "Huawei ANC select received rawStatus=$status targetStatus=$targetStatus device=${currentDevice.address}")
-        currentAnc = targetStatus
         Log.i(TAG, "Huawei ANC dispatch enabled=${targetStatus != 1} device=${currentDevice.address}")
-        HuaweiL2capAncController.setAncEnabled(currentContext, currentDevice, targetStatus != 1)
+        HuaweiL2capAncController.setAncEnabled(
+            currentContext,
+            currentDevice,
+            requestedRoute,
+            targetStatus != 1,
+        ) { success ->
+            if (!isCurrentSession(requestedGeneration, requestedAddress, requestedRoute)) return@setAncEnabled
+            val supportsReadback = HuaweiAncPackets.currentStateQuery(requestedRoute) != null
+            if (!success) {
+                Log.w(TAG, "Huawei ANC write failed device=$requestedAddress; requesting confirmed state")
+                if (supportsReadback) {
+                    scheduleAncConfirmation(requestedGeneration, requestedAddress, requestedRoute, previousStatus)
+                } else {
+                    previousStatus?.let(::sendAnc)
+                }
+                return@setAncEnabled
+            }
+            if (supportsReadback) {
+                scheduleAncConfirmation(requestedGeneration, requestedAddress, requestedRoute, targetStatus)
+            } else {
+                currentAnc = targetStatus
+                sendAnc(targetStatus)
+            }
+        }
         Log.i(TAG, "Huawei ANC dispatched enabled=${targetStatus != 1} device=${currentDevice.address}")
-        sendAnc(targetStatus)
         Log.i(TAG, "Huawei ANC requested status=$status mapped=$targetStatus device=${currentDevice.address}")
     }
 
@@ -137,8 +202,12 @@ object HuaweiHfpController {
             Log.w(TAG, "Huawei ANC level skipped: device null level=$level")
             return
         }
-        if (!supportsPrivateCommands(currentDevice)) {
+        if (!sessionRoute.isSupported) {
             Log.w(TAG, "Huawei ANC level skipped: unsupported device=${currentDevice.address}")
+            return
+        }
+        if (sessionRoute != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            Log.w(TAG, "Huawei ANC level skipped: unverified model device=${currentDevice.address}")
             return
         }
         val currentContext = context ?: run {
@@ -154,7 +223,12 @@ object HuaweiHfpController {
         }
         lastDispatchedAncLevel = safeLevel
         Log.i(TAG, "Huawei ANC level dispatch level=$safeLevel device=${currentDevice.address}")
-        HuaweiL2capAncController.setAncLevel(currentContext, currentDevice, safeLevel)
+        HuaweiL2capAncController.setAncLevel(
+            currentContext,
+            currentDevice,
+            sessionRoute,
+            safeLevel,
+        )
         sendAncLevel(safeLevel)
     }
 
@@ -163,7 +237,7 @@ object HuaweiHfpController {
             Log.w(TAG, "Huawei legacy debug skipped: device null")
             return
         }
-        if (!supportsPrivateCommands(currentDevice)) {
+        if (!sessionRoute.isSupported) {
             Log.w(TAG, "Huawei legacy debug skipped: unsupported device=${currentDevice.address}")
             return
         }
@@ -176,7 +250,13 @@ object HuaweiHfpController {
             return
         }
         Log.i(TAG, "Huawei legacy debug send bytes=${packet.size} device=${currentDevice.address}")
-        HuaweiL2capAncController.sendRawPacket(currentContext, currentDevice, packet, "debug")
+        HuaweiL2capAncController.sendRawPacket(
+            currentContext,
+            currentDevice,
+            sessionRoute,
+            packet,
+            "debug",
+        )
     }
 
     fun setGesture(intent: Intent) {
@@ -184,8 +264,12 @@ object HuaweiHfpController {
             Log.w(TAG, "Huawei gesture skipped: device null")
             return
         }
-        if (!supportsPrivateCommands(currentDevice)) {
+        if (!sessionRoute.isSupported) {
             Log.w(TAG, "Huawei gesture skipped: unsupported device=${currentDevice.address}")
+            return
+        }
+        if (sessionRoute != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            Log.w(TAG, "Huawei gesture skipped: unverified model device=${currentDevice.address}")
             return
         }
         val requestedAddress = intent.getStringExtra(HuaweiGestureController.EXTRA_ADDRESS)
@@ -213,25 +297,134 @@ object HuaweiHfpController {
                 return
             }
         Log.i(TAG, "Huawei gesture dispatch side=${side.extraValue} action=${action.extraValue} device=${currentDevice.address}")
-        HuaweiGestureController.setDoubleTap(currentContext, currentDevice, side, action)
+        HuaweiGestureController.setDoubleTap(
+            currentContext,
+            currentDevice,
+            sessionRoute,
+            side,
+            action,
+        )
     }
 
-    private fun ensureSession(context: Context, device: BluetoothDevice) {
+    private fun ensureSession(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+    ) {
         val previousDevice = this.device
         val deviceChanged = previousDevice != null &&
             !previousDevice.address.equals(device.address, ignoreCase = true)
-        if (deviceChanged) {
+        val routeChanged = sessionRoute.isSupported && sessionRoute != route
+        val newSession = previousDevice == null || deviceChanged || routeChanged
+        if (deviceChanged || routeChanged) {
             HuaweiL2capAncController.disconnect(previousDevice)
+        }
+        if (newSession) {
             currentBattery = null
-            currentAnc = 1
+            currentAnc = null
             currentAncLevel = 0
             lastDispatchedAncLevel = null
             connectedBroadcastSent = false
-            Log.i(TAG, "Huawei session switched from=${previousDevice.address} to=${device.address}")
+            lastBatteryRequestAt = 0L
+            lastAncRequestAt = 0L
+            ancRequestInFlight = false
+            sessionGeneration++
+            Log.i(
+                TAG,
+                "Huawei session switched from=${previousDevice?.address} to=${device.address} route=$route",
+            )
         }
         this.context = context.applicationContext ?: context
         this.device = device
+        sessionRoute = route
         registerReceiver()
+    }
+
+    private fun requestPrivateBattery() {
+        val currentContext = context ?: return
+        val currentDevice = device ?: return
+        if (!sessionRoute.supportsRfcommBattery) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBatteryRequestAt < 10_000L) return
+        lastBatteryRequestAt = now
+        val requestedAddress = currentDevice.address
+        HuaweiL2capAncController.requestBattery(
+            currentContext,
+            currentDevice,
+            sessionRoute,
+        ) { battery ->
+            val activeDevice = device
+            if (activeDevice == null || !activeDevice.address.equals(requestedAddress, ignoreCase = true)) {
+                return@requestBattery
+            }
+            val normalizedBattery = battery.normalizedEarbudAvailability()
+            currentBattery = normalizedBattery
+            sendConnectionState("connected")
+            sendConnected()
+            sendBattery(normalizedBattery)
+            MiuiStrongToastUtil.showPodsNotificationByMiuiBt(currentContext, normalizedBattery, activeDevice)
+            Log.i(TAG, "Huawei RFCOMM battery updated device=$requestedAddress")
+        }
+    }
+
+    private fun requestAncState(
+        force: Boolean = false,
+        fallbackStatus: Int? = null,
+    ): Boolean {
+        val currentContext = context ?: return false
+        val currentDevice = device ?: return false
+        val requestedRoute = sessionRoute
+        if (HuaweiAncPackets.currentStateQuery(requestedRoute) == null) return false
+        if (ancRequestInFlight) return true
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastAncRequestAt < ANC_REFRESH_MIN_INTERVAL_MS) return false
+        lastAncRequestAt = now
+        ancRequestInFlight = true
+        val requestedAddress = currentDevice.address
+        val requestedGeneration = sessionGeneration
+        HuaweiL2capAncController.requestAncState(
+            currentContext,
+            currentDevice,
+            requestedRoute,
+        ) { status ->
+            if (!isCurrentSession(requestedGeneration, requestedAddress, requestedRoute)) return@requestAncState
+            ancRequestInFlight = false
+            if (status == null) {
+                Log.w(TAG, "Huawei ANC state query returned no verified state device=$requestedAddress")
+                fallbackStatus?.let {
+                    currentAnc = it
+                    sendAnc(it)
+                }
+                return@requestAncState
+            }
+            currentAnc = status
+            sendAnc(status)
+            Log.i(TAG, "Huawei ANC state confirmed status=$status device=$requestedAddress")
+        }
+        return true
+    }
+
+    private fun scheduleAncConfirmation(
+        generation: Long,
+        address: String,
+        route: HuaweiDeviceRoute,
+        fallbackStatus: Int?,
+    ) {
+        mainHandler.postDelayed({
+            if (!isCurrentSession(generation, address, route)) return@postDelayed
+            requestAncState(force = true, fallbackStatus = fallbackStatus)
+        }, ANC_CONFIRM_DELAY_MS)
+    }
+
+    private fun isCurrentSession(
+        generation: Long,
+        address: String,
+        route: HuaweiDeviceRoute,
+    ): Boolean {
+        val activeDevice = device ?: return false
+        return sessionGeneration == generation &&
+            sessionRoute == route &&
+            activeDevice.address.equals(address, ignoreCase = true)
     }
 
     private fun registerReceiver() {
@@ -249,11 +442,6 @@ object HuaweiHfpController {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_SET)
         }, Context.RECEIVER_EXPORTED)
         receiverRegistered = true
-    }
-
-    private fun supportsPrivateCommands(device: BluetoothDevice): Boolean {
-        val deviceName = device.name ?: device.alias
-        return detectHuaweiDeviceRoute(deviceName) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
     }
 
     private fun sendConnected(force: Boolean = false) {
@@ -281,13 +469,14 @@ object HuaweiHfpController {
     }
 
     private fun sendBattery(battery: BatteryParams) {
+        val normalizedBattery = battery.normalizedEarbudAvailability()
         sendAppBroadcast(HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED) {
-            putExtra("status", battery)
-            putBatteryExtras(battery)
+            putExtra("status", normalizedBattery)
+            putBatteryExtras(normalizedBattery)
         }
         sendExternalBroadcast(HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED) {
-            putExtra("status", battery)
-            putBatteryExtras(battery)
+            putExtra("status", normalizedBattery)
+            putBatteryExtras(normalizedBattery)
         }
     }
 

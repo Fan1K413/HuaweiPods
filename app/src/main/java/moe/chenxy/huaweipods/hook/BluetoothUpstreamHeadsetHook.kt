@@ -15,12 +15,14 @@ import java.lang.reflect.Method
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.pods.HuaweiHfpController
-import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
-import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.isSupported
+import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 import org.json.JSONObject
 
 @SuppressLint("MissingPermission")
@@ -262,22 +264,22 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                         notifyRealStatus("config-changed")
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
-                        currentAddress = receivedIntent.getStringExtra("address") ?: currentAddress
-                        currentName = receivedIntent.getStringExtra("device_name") ?: currentName
-                        rememberKnownAddress(currentAddress)
+                        if (!rememberSupportedDevice(receivedIntent)) return
                     }
                     HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
                         currentAddress = receivedIntent.getStringExtra("address") ?: currentAddress
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
-                        currentAddress = receivedIntent.getStringExtra("address") ?: currentAddress
-                        currentBattery = receivedIntent.batteryStatusFromExtras() ?: receivedIntent.parcelableStatus() ?: currentBattery
-                        rememberKnownAddress(currentAddress)
+                        if (!rememberSupportedDevice(receivedIntent)) return
+                        currentBattery = (
+                            receivedIntent.batteryStatusFromExtras()
+                                ?: receivedIntent.parcelableStatus()
+                                ?: currentBattery
+                            )?.normalizedEarbudAvailability()
                     }
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
-                        currentAddress = receivedIntent.getStringExtra("address") ?: currentAddress
+                        if (!rememberSupportedDevice(receivedIntent)) return
                         currentAnc = receivedIntent.getIntExtra("status", currentAnc)
-                        rememberKnownAddress(currentAddress)
                     }
                 }
                 Log.d(TAG, "state action=${receivedIntent.action} address=$currentAddress name=$currentName anc=$currentAnc battery=${currentBattery.debugString()}")
@@ -689,8 +691,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private fun isHuaweiPod(device: BluetoothDevice?): Boolean {
         if (device == null) return false
         val address = runCatching { device.address }.getOrNull()
-        val name = runCatching { device.name ?: device.alias }.getOrNull().orEmpty()
-        val result = detectHuaweiDeviceRoute(name) == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 ||
+        val result = device.huaweiDeviceRoute().isSupported ||
             (address != null && isHuaweiAddress(address))
         if (result && address != null) knownHuaweiAddresses.add(address.uppercase())
         return result
@@ -917,12 +918,26 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     }
 
     private fun isHuaweiAddress(address: String): Boolean {
-        return address.uppercase() in knownHuaweiAddresses
+        return resolveHuaweiDeviceRoute(address, null).isSupported ||
+            address.uppercase() in knownHuaweiAddresses
     }
 
     private fun rememberKnownAddress(address: String?) {
         val normalized = address?.uppercase() ?: return
         knownHuaweiAddresses.add(normalized)
+    }
+
+    private fun rememberSupportedDevice(intent: Intent): Boolean {
+        val address = intent.getStringExtra("address") ?: currentAddress
+        val name = intent.getStringExtra("device_name") ?: currentName
+        if (!resolveHuaweiDeviceRoute(address, name).isSupported) {
+            Log.w(TAG, "ignored unsupported state device=${name.orEmpty()}/${address.orEmpty()}")
+            return false
+        }
+        currentAddress = address
+        currentName = name
+        rememberKnownAddress(address)
+        return true
     }
 
     @Suppress("UNCHECKED_CAST")

@@ -2,6 +2,7 @@ package moe.chenxy.huaweipods.pods
 
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 
 object HuaweiBatteryParser {
     private val batteryPattern = Regex(
@@ -35,7 +36,7 @@ object HuaweiBatteryParser {
             left = pod(values, BATTERY_LEFT, CHARGING_LEFT),
             right = pod(values, BATTERY_RIGHT, CHARGING_RIGHT),
             case = pod(values, BATTERY_CASE, CHARGING_CASE),
-        )
+        ).normalizedEarbudAvailability()
 
         return Result(battery, values).takeIf {
             battery.left != null || battery.right != null || battery.case != null

@@ -11,6 +11,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import moe.chenxy.huaweipods.R
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -31,7 +32,7 @@ internal fun EarphonesTabPage(
     contentPadding: PaddingValues,
     pageBottomContentPadding: Dp,
     nestedScrollConnection: NestedScrollConnection,
-    onDeviceSelected: (BluetoothDevice) -> Unit,
+    onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit,
     onDeviceDisconnect: (BluetoothDevice) -> Unit,
     onDismissConnectError: () -> Unit,

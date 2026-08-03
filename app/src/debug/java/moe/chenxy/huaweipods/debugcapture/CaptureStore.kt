@@ -106,6 +106,35 @@ object CaptureStore {
         } ?: false
     }
 
+    fun recordHookReady(
+        context: Context,
+        sourcePackage: String,
+        sourceProcess: String?,
+    ): Boolean = synchronized(lock) {
+        withActiveSessionLocked(context.applicationContext) { directory, metadata ->
+            val appended = appendEventLocked(
+                directory = directory,
+                metadata = metadata,
+                type = "hook_status",
+                fields = JSONObject()
+                    .put("status", "ready")
+                    .put("source_package", sanitize(sourcePackage, MAX_SHORT_TEXT_LENGTH))
+                    .putNullable(
+                        "source_process",
+                        sourceProcess?.let { sanitize(it, MAX_SHORT_TEXT_LENGTH) },
+                    ),
+            )
+            if (appended) {
+                metadata.put(
+                    "hook_ready_count",
+                    metadata.optLong("hook_ready_count", 0L) + 1L,
+                )
+                writeMetadataLocked(directory, metadata)
+            }
+            appended
+        } ?: false
+    }
+
     fun stopSession(
         context: Context,
         reason: String = "user",
@@ -329,6 +358,7 @@ object CaptureStore {
         .put("stopped_at_iso", JSONObject.NULL)
         .put("event_count", 0L)
         .put("protocol_event_count", 0L)
+        .put("hook_ready_count", 0L)
         .put("bytes_written", 0L)
         .put("limit_reached", false)
         .put(
@@ -405,6 +435,7 @@ object CaptureStore {
                 stoppedAtEpochMs = metadata.optLongOrNull("stopped_at_epoch_ms"),
                 eventCount = metadata.optLong("event_count", 0L),
                 protocolEventCount = metadata.optLong("protocol_event_count", 0L),
+                hookReadyCount = metadata.optLong("hook_ready_count", 0L),
                 bytesWritten = metadata.optLong("bytes_written", 0L),
             ),
         )
@@ -435,6 +466,7 @@ object CaptureStore {
             stoppedAtEpochMs = values.stoppedAtEpochMs,
             eventCount = values.eventCount,
             protocolEventCount = values.protocolEventCount,
+            hookReadyCount = values.hookReadyCount,
             bytesWritten = values.bytesWritten,
         )
     }
@@ -774,6 +806,7 @@ object CaptureStore {
         val stoppedAtEpochMs: Long?,
         val eventCount: Long,
         val protocolEventCount: Long,
+        val hookReadyCount: Long,
         val bytesWritten: Long,
     )
 

@@ -45,8 +45,10 @@ import androidx.navigation3.ui.NavDisplay
 import moe.chenxy.huaweipods.HuaweiPodsApp
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.config.PodImageResource
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.ui.pages.AboutPage
 import moe.chenxy.huaweipods.ui.pages.ThemeSettingsPage
@@ -146,6 +148,25 @@ fun MainUI(
     val displayBattery = batteryParams.value
     val displayAnc = ancMode.value
     val displayTitle = mainTitle.value.takeIf { it.isNotBlank() && hookConnected.value } ?: mainTitle.value
+
+    LaunchedEffect(xposedService) {
+        val service = xposedService ?: return@LaunchedEffect
+        DeviceRoutePrefs.syncWithRemote(prefs, service)
+        val pendingAddress = connectingDeviceAddress
+            ?.takeIf(BluetoothAdapter::checkBluetoothAddress)
+            ?: return@LaunchedEffect
+        val pendingDevice = context
+            .getSystemService(BluetoothManager::class.java)
+            ?.adapter
+            ?.getRemoteDevice(pendingAddress)
+            ?: return@LaunchedEffect
+        Intent(HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST).apply {
+            putExtra("device", pendingDevice)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            context.sendBroadcast(this)
+        }
+    }
 
     LaunchedEffect(displayTitle) {
         if (displayTitle.isNotEmpty()) {
@@ -321,7 +342,7 @@ fun MainUI(
         while (true) {
             sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_PODS_UI_INIT)
             sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_REFRESH_STATUS)
-            delay(30_000L)
+            delay(if (hookConnected.value) 10_000L else 30_000L)
         }
     }
 
@@ -382,7 +403,13 @@ fun MainUI(
         selectedTab = MainTab.Earphones
     }
 
-    fun onDeviceSelected(device: BluetoothDevice) {
+    fun onDeviceSelected(device: BluetoothDevice, route: HuaweiDeviceRoute) {
+        DeviceRoutePrefs.bind(
+            prefs = prefs,
+            service = xposedService,
+            address = device.address,
+            route = route,
+        )
         connectingDeviceAddress = device.address
         pendingOpenEarphonesAfterPickerLoaded = false
         showConnectErrorDialog = false
@@ -539,7 +566,7 @@ fun MainUI(
                 connectedDeviceAddress = connectedDeviceAddress,
                 connectingDeviceAddress = connectingDeviceAddress,
                 showConnectErrorDialog = showConnectErrorDialog,
-                onDeviceSelected = { onDeviceSelected(it) },
+                onDeviceSelected = { device, route -> onDeviceSelected(device, route) },
                 onConnectedDeviceClick = { onConnectedDeviceClick() },
                 onDeviceDisconnect = { onDeviceDisconnect(it) },
                 onDismissConnectError = { showConnectErrorDialog = false },
