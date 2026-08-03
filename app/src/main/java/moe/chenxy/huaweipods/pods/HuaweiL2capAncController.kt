@@ -38,9 +38,13 @@ object HuaweiL2capAncController {
         device: BluetoothDevice,
         route: HuaweiDeviceRoute,
         enabled: Boolean,
+        onComplete: ((Boolean) -> Unit)? = null,
     ) {
-        val packet = HuaweiAncPackets.enabled(route, enabled) ?: return
-        enqueueWrite(context, device, route, packet, "enabled=$enabled")
+        val packet = HuaweiAncPackets.enabled(route, enabled) ?: run {
+            notifyComplete(onComplete, false)
+            return
+        }
+        enqueueWrite(context, device, route, packet, "enabled=$enabled", onComplete = onComplete)
     }
 
     fun setAncLevel(
@@ -82,6 +86,45 @@ object HuaweiL2capAncController {
         )
     }
 
+    fun requestAncState(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        onResult: (Int?) -> Unit,
+    ) {
+        val packet = HuaweiAncPackets.currentStateQuery(route) ?: run {
+            onResult(null)
+            return
+        }
+        enqueueWrite(
+            context = context,
+            device = device,
+            route = route,
+            packet = packet,
+            description = "anc-state-query",
+            responseWindowMs = 1_500L,
+            responseComplete = { response ->
+                HuaweiRfcommResponseParser.parseAncStatus(response) != null
+            },
+            onComplete = { success ->
+                if (!success) onResult(null)
+            },
+            onResponse = { response ->
+                val status = HuaweiRfcommResponseParser.parseAncStatus(response)
+                RfcommLog.d(
+                    context.applicationContext ?: context,
+                    "RFCOMM/RX",
+                    "anc-state-query ${response.toHexString()}",
+                )
+                logInfo(
+                    context.applicationContext ?: context,
+                    "Huawei ANC state response bytes=${response.size} parsed=${status != null} device=${device.address}",
+                )
+                onResult(status)
+            },
+        )
+    }
+
     fun sendRawPacket(
         context: Context,
         device: BluetoothDevice,
@@ -114,6 +157,7 @@ object HuaweiL2capAncController {
         keepSocket: Boolean = true,
         onComplete: ((Boolean) -> Unit)? = null,
         responseWindowMs: Long = 0L,
+        responseComplete: ((ByteArray) -> Boolean)? = null,
         onResponse: ((ByteArray) -> Unit)? = null,
     ) {
         val appContext = context.applicationContext ?: context
@@ -133,12 +177,16 @@ object HuaweiL2capAncController {
                     val currentSocket = ensureSocket(device)
                     currentSocket.outputStream.write(packet)
                     currentSocket.outputStream.flush()
-                    if (responseWindowMs > 0L && onResponse != null) {
-                        val response = collectSocketResponse(currentSocket, responseWindowMs)
-                        mainHandler.post { onResponse(response) }
-                    }
                     val hex = packet.toHexString()
                     RfcommLog.d(appContext, "RFCOMM/TX", "$description $hex")
+                    if (responseWindowMs > 0L && onResponse != null) {
+                        val response = collectSocketResponse(
+                            currentSocket,
+                            responseWindowMs,
+                            responseComplete,
+                        )
+                        mainHandler.post { onResponse(response) }
+                    }
                     logInfo(
                         appContext,
                         "Huawei ANC RFCOMM write finished $description keepSocket=$keepSocket socket=$socketLabel packet=$hex device=${device.address}"
@@ -263,7 +311,11 @@ object HuaweiL2capAncController {
             .onFailure { Log.w(TAG, "Huawei ANC socket close failed", it) }
     }
 
-    private fun collectSocketResponse(socket: BluetoothSocket, timeoutMs: Long): ByteArray {
+    private fun collectSocketResponse(
+        socket: BluetoothSocket,
+        timeoutMs: Long,
+        responseComplete: ((ByteArray) -> Boolean)?,
+    ): ByteArray {
         val input = socket.inputStream
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(4 * 1024)
@@ -276,10 +328,15 @@ object HuaweiL2capAncController {
                 if (read > 0) {
                     output.write(buffer, 0, read)
                     lastReadAt = System.nanoTime()
+                    if (responseComplete?.invoke(output.toByteArray()) == true) break
                 }
                 continue
             }
-            if (lastReadAt > 0L && System.nanoTime() - lastReadAt >= 200_000_000L) break
+            if (
+                responseComplete == null &&
+                lastReadAt > 0L &&
+                System.nanoTime() - lastReadAt >= 200_000_000L
+            ) break
             Thread.sleep(20L)
         }
         return output.toByteArray()

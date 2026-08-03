@@ -22,3 +22,12 @@ data class BatteryParams(
     var right: PodParams? = null,
     var case: PodParams? = null
 ) : Parcelable
+
+/**
+ * Huawei devices use 0 as the unavailable-earbud sentinel on several battery paths.
+ * Keep the case state untouched because a connected case may legitimately report 0%.
+ */
+fun BatteryParams.normalizedEarbudAvailability(): BatteryParams = copy(
+    left = left?.let { it.copy(isConnected = it.battery > 0) },
+    right = right?.let { it.copy(isConnected = it.battery > 0) },
+)

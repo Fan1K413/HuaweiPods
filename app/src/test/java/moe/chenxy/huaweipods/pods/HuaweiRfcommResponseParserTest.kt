@@ -6,6 +6,22 @@ import org.junit.Test
 
 class HuaweiRfcommResponseParserTest {
     @Test
+    fun `parses FreeBuds Pro 3 ANC main mode from captured state responses`() {
+        assertEquals(1, HuaweiRfcommResponseParser.parseAncStatus(hex("5A0007002B2A010200001531")))
+        assertEquals(2, HuaweiRfcommResponseParser.parseAncStatus(hex("5A0007002B2A010203015043")))
+        assertEquals(1, HuaweiRfcommResponseParser.parseAncStatus(hex("5A0007002B2A010202025311")))
+    }
+
+    @Test
+    fun `uses the latest valid ANC state frame from a combined RFCOMM read`() {
+        val off = hex("5A0007002B2A010200001531")
+        val unrelated = hex("5A0006002B040201003171")
+        val noiseCancellation = hex("5A0007002B2A010203015043")
+
+        assertEquals(2, HuaweiRfcommResponseParser.parseAncStatus(off + unrelated + noiseCancellation))
+    }
+
+    @Test
     fun `parses FreeBuds 5 battery response captured from official app`() {
         val response = hex("5A0014000127010164020364645603030000000402140A075C")
 
@@ -29,6 +45,64 @@ class HuaweiRfcommResponseParserTest {
         assertNotNull(battery)
 
         assertEquals(86, battery?.case?.battery)
+    }
+
+    @Test
+    fun `uses the latest battery frame from a combined RFCOMM read`() {
+        val older = hex("5A001B000127010164020364644C03030000000402140A0502010006010A69E6")
+        val newer = hex("5A001B000108010156020300563503030000000402140A0502000006010AEEEC")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(older + newer)
+
+        assertEquals(0, battery?.left?.battery)
+        assertEquals(86, battery?.right?.battery)
+        assertEquals(53, battery?.case?.battery)
+    }
+
+    @Test
+    fun `does not hide nonzero earbuds using unverified in-case side order`() {
+        val leftInCase = HuaweiRfcommResponseParser.parseBattery(
+            hex("5A001B000127010164020364644C03030000000402140A0502010006010A69E6"),
+        )
+        val rightInCase = HuaweiRfcommResponseParser.parseBattery(
+            hex("5A001B000127010164020364644C03030000000402140A0502000106010AB503"),
+        )
+
+        assertEquals(true, leftInCase?.left?.isConnected)
+        assertEquals(true, leftInCase?.right?.isConnected)
+        assertEquals(true, rightInCase?.left?.isConnected)
+        assertEquals(true, rightInCase?.right?.isConnected)
+    }
+
+    @Test
+    fun `marks a zero percent earbud unavailable`() {
+        val response = hex("5A001B000108010156020300563503030000000402140A0502000006010AEEEC")
+
+        val battery = HuaweiRfcommResponseParser.parseBattery(response)
+
+        assertEquals(0, battery?.left?.battery)
+        assertEquals(true, battery?.right?.isConnected)
+        assertEquals(false, battery?.left?.isConnected)
+        assertEquals(true, battery?.case?.isConnected)
+    }
+
+    @Test
+    fun `keeps both earbuds visible for equal or missing in-case states`() {
+        val bothInCase = HuaweiRfcommResponseParser.parseBattery(
+            hex("5A001B000108010164020364644C03030000000402140A0502010106010AED15"),
+        )
+        val bothOutOfCase = HuaweiRfcommResponseParser.parseBattery(
+            hex("5A001B000108010156020357563503030000000402140A0502000006010A25DA"),
+        )
+        val response = hex("5A0014000127010164020364645603030000000402140A075C")
+        val withoutState = HuaweiRfcommResponseParser.parseBattery(response)
+
+        assertEquals(true, bothInCase?.left?.isConnected)
+        assertEquals(true, bothInCase?.right?.isConnected)
+        assertEquals(true, bothOutOfCase?.left?.isConnected)
+        assertEquals(true, bothOutOfCase?.right?.isConnected)
+        assertEquals(true, withoutState?.left?.isConnected)
+        assertEquals(true, withoutState?.right?.isConnected)
     }
 
     @Test

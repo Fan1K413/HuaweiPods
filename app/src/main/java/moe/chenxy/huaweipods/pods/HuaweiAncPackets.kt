@@ -4,6 +4,8 @@ package moe.chenxy.huaweipods.pods
 internal object HuaweiAncPackets {
     private val huaweiBatteryQuery =
         packet(0x5A, 0x00, 0x09, 0x00, 0x01, 0x08, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0xFB, 0xB9)
+    private val freeBudsPro3CurrentStateQuery =
+        packet(0x5A, 0x00, 0x05, 0x00, 0x2B, 0x2A, 0x01, 0x00, 0x42, 0x7E)
     private val freeBuds3Enabled = mapOf(
         false to packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x00, 0x68, 0x21),
         true to packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x01, 0x78, 0x00),
@@ -61,6 +63,19 @@ internal object HuaweiAncPackets {
         HuaweiDeviceRoute.HUAWEI_FREECLIP2,
         HuaweiDeviceRoute.HUAWEI_EYEWEAR -> huaweiBatteryQuery
         HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
+        HuaweiDeviceRoute.UNSUPPORTED -> null
+    }?.copyOf()
+
+    fun currentStateQuery(route: HuaweiDeviceRoute): ByteArray? = when (route) {
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 -> freeBudsPro3CurrentStateQuery
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+        HuaweiDeviceRoute.HUAWEI_FREECLIP,
+        HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR,
         HuaweiDeviceRoute.UNSUPPORTED -> null
     }?.copyOf()
 

@@ -34,6 +34,7 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -115,6 +116,7 @@ object SettingsHeadsetHook : HookContext() {
     private var currentName: String? = null
     private var currentBattery: BatteryParams = BatteryParams()
     private var currentAnc = 1
+    private var currentAncConfirmed = false
     private var currentHuaweiAncLevel = 0
     private var proxyCheckSupportCalls = 0
     private var proxySetCommonCommandCalls = 0
@@ -315,6 +317,7 @@ object SettingsHeadsetHook : HookContext() {
                 if (!isHuaweiPod(device)) return@hookBefore
                 val huaweiMode = mode(args) ?: return@hookBefore
                 currentAnc = huaweiMode
+                currentAncConfirmed = true
                 sendHuaweiAnc(huaweiMode)
                 sendAncChanged(huaweiMode)
                 this.result = null
@@ -530,9 +533,10 @@ object SettingsHeadsetHook : HookContext() {
                 if (!isHuaweiFragment(instance)) return@hookBefore
                 val updateDevice = args.getOrNull(1) as? Boolean ?: true
                 if (!updateDevice) return@hookBefore
-                val huaweiMode = mode(args) ?: return@hookBefore
-                currentAnc = huaweiMode
-                sendHuaweiAnc(huaweiMode)
+            val huaweiMode = mode(args) ?: return@hookBefore
+            currentAnc = huaweiMode
+            currentAncConfirmed = true
+            sendHuaweiAnc(huaweiMode)
                 sendAncChanged(huaweiMode)
                 runCatching { callMethod(instance, "updateAncUi", settingsAncLevel(), false) }
                 injectFragmentStatus(instance)
@@ -564,10 +568,18 @@ object SettingsHeadsetHook : HookContext() {
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
+                        currentAncConfirmed = false
+                    }
+                    HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
+                        currentAncConfirmed = false
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentBattery = receivedIntent.batteryStatusFromExtras() ?: receivedIntent.parcelableStatus() ?: currentBattery
+                        currentBattery = (
+                            receivedIntent.batteryStatusFromExtras()
+                                ?: receivedIntent.parcelableStatus()
+                                ?: currentBattery
+                            ).normalizedEarbudAvailability()
                         saveState(context)
                         updateBatteryViews()
                         updateFragments()
@@ -575,6 +587,7 @@ object SettingsHeadsetHook : HookContext() {
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
                         currentAnc = receivedIntent.getIntExtra("status", currentAnc)
+                        currentAncConfirmed = true
                         saveState(context)
                         updateFragments()
                     }
@@ -635,6 +648,14 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun injectFragmentStatus(fragment: Any?) {
         runCatching {
+            if (
+                currentHuaweiRoute() == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 &&
+                !currentAncConfirmed
+            ) {
+                schedulePruneFreeBudsUnsupportedViews(fragmentRootView(fragment))
+                Log.d(TAG, "fragment status deferred until FreeBuds Pro 3 ANC state is confirmed")
+                return@runCatching
+            }
             val payload = "${settingsAncMode()}|$SETTINGS_FREEBUDS_ANC_OPTIONS|${settingsBatteryString()}|00"
             Log.d(TAG, "injectFragmentStatus payload=$payload ${fragmentDebug(fragment)}")
             callMethod(fragment, "updateAtUiInfo", payload)
@@ -1593,6 +1614,7 @@ object SettingsHeadsetHook : HookContext() {
             currentName = null
             currentBattery = BatteryParams()
             currentAnc = 1
+            currentAncConfirmed = false
             currentHuaweiAncLevel = 0
             knownHuaweiAddresses.clear()
             prefs.edit()
@@ -1641,7 +1663,7 @@ object SettingsHeadsetHook : HookContext() {
                 prefs.getBoolean("case_connected", currentBattery.case?.isConnected == true),
                 0
             )
-        )
+        ).normalizedEarbudAvailability()
     }
 
     private fun hasCurrentBattery(): Boolean {

@@ -102,6 +102,19 @@ class HuaweiAncPacketsTest {
         assertNull(HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
     }
 
+    @Test
+    fun `only FreeBuds Pro 3 exposes the verified ANC state query`() {
+        val query = hex("5A0005002B2A0100427E")
+
+        assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3))
+        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
+        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS5))
+        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I))
+        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4))
+        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
+        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2))
+    }
+
     private fun hex(value: String): ByteArray = value.chunked(2)
         .map { it.toInt(16).toByte() }
         .toByteArray()

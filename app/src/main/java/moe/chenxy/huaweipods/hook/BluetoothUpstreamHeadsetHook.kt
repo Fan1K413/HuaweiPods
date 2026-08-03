@@ -22,6 +22,7 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 import org.json.JSONObject
 
 @SuppressLint("MissingPermission")
@@ -270,7 +271,11 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentBattery = receivedIntent.batteryStatusFromExtras() ?: receivedIntent.parcelableStatus() ?: currentBattery
+                        currentBattery = (
+                            receivedIntent.batteryStatusFromExtras()
+                                ?: receivedIntent.parcelableStatus()
+                                ?: currentBattery
+                            )?.normalizedEarbudAvailability()
                     }
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
