@@ -16,25 +16,25 @@
 
 HuaweiPods is an Xposed module for Xiaomi HyperOS. It integrates supported Huawei audio devices with the system headset popup, Super Island, Fusion Device Center, and Bluetooth detail page.
 
-Starting with 1.2.0, the 11 models below are included in one release APK. Inclusion in the unified build does not mean that every feature has completed device testing.
+The unified build supports the 11 models below in one APK. Model-specific test APKs are no longer distributed.
 
-## Support status
+## Supported models
 
 | Model | Status | Integrated capabilities |
 | --- | --- | --- |
 | HUAWEI FreeBuds 3 | Stable | Battery, ANC on/off, nine-position spatial ANC dial, double-tap gestures, and system UI integration |
-| HUAWEI FreeBuds 5 | Basic support needs retesting | Battery and ANC/off; no verified ANC state readback or gesture settings |
-| HUAWEI FreeBuds 6i | Extended features need retesting | Battery, transparency/ANC/off, four ANC levels, voice transparency, double/triple-tap gestures, and dedicated images |
-| HUAWEI FreeBuds Pro 3 | Extended features need retesting | Battery, three-mode control and readback, four ANC levels, voice transparency, long-press/pinch/swipe gestures |
-| HUAWEI FreeBuds Pro 4 | Basic support needs retesting | Battery and ANC/off; no verified ANC state readback or gesture settings |
-| HUAWEI FreeBuds Pro 5 | Basic support needs retesting | Battery, transparency/ANC/off, and state readback; ANC levels and gestures remain pending |
-| HUAWEI FreeBuds 7i | Basic support needs retesting | Battery and ANC/off; no verified ANC state readback or gesture settings |
-| HUAWEI FreeClip | Basic support needs retesting | Left/right/case battery; no traditional ANC |
-| HUAWEI FreeClip 2 | Extended features need retesting | Battery, double/triple-tap and swipe gestures, spatial audio, and selected wearing/audio settings; no traditional ANC |
-| HUAWEI Eyewear (1st generation) | Basic support needs retesting | Left/right temple battery and system UI integration; no ANC |
-| HUAWEI Eyewear 2 | Basic support needs retesting | Left/right temple battery and double-tap/swipe gestures; no ANC |
+| HUAWEI FreeBuds 5 | Basic support | Battery and ANC/off; no verified ANC state readback or gesture settings |
+| HUAWEI FreeBuds 6i | Extended support | Battery, transparency/ANC/off, four ANC levels, voice transparency, double/triple-tap gestures, and dedicated images |
+| HUAWEI FreeBuds Pro 3 | Extended support | Battery, three-mode control and readback, four ANC levels, voice transparency, long-press/pinch/swipe gestures |
+| HUAWEI FreeBuds Pro 4 | Basic support | Battery and ANC/off; no verified ANC state readback or gesture settings |
+| HUAWEI FreeBuds Pro 5 | Basic support | Battery, transparency/ANC/off, and state readback; ANC levels and gestures remain pending |
+| HUAWEI FreeBuds 7i | Basic support | Battery and ANC/off; no verified ANC state readback or gesture settings |
+| HUAWEI FreeClip | Basic support | Left/right/case battery; no traditional ANC |
+| HUAWEI FreeClip 2 | Extended support | Battery, double/triple-tap and swipe gestures, spatial audio, and selected wearing/audio settings; no traditional ANC |
+| HUAWEI Eyewear (1st generation) | Basic support | Left/right temple battery and system UI integration; no ANC |
+| HUAWEI Eyewear 2 | Basic support | Left/right temple battery and double-tap/swipe gestures; no ANC |
 
-“Extended features need retesting” means that core behavior has tester feedback but newly added controls still need a full model-specific regression. “Basic support needs retesting” means that identification, battery, or the core protocol is integrated without a complete device test pass.
+“Stable” means the model has received substantial device testing. “Extended support” includes additional protocol controls, while “Basic support” covers identification, battery, or core controls. Models not marked stable still benefit from real-device regression testing, and unlisted official features should not be assumed to work.
 
 ## Features
 
