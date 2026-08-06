@@ -10,13 +10,18 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Bundle
+import android.os.Binder
 import android.os.Parcel
+import android.os.SystemClock
 import java.lang.reflect.Method
+import java.util.concurrent.ConcurrentHashMap
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.pods.HuaweiAncState
 import moe.chenxy.huaweipods.pods.HuaweiHfpController
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
+import moe.chenxy.huaweipods.pods.decodeHuaweiDeviceRouteFromBroadcast
+import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
@@ -32,20 +37,42 @@ import org.json.JSONObject
 
 @SuppressLint("MissingPermission")
 class BluetoothUpstreamHeadsetHook : HookContext() {
+    private data class RegisteredHuaweiCallback(
+        val callback: Any,
+        val address: String,
+    )
+
+    private data class CallbackCaller(
+        val uid: Int,
+        val pid: Int,
+    )
+
+    private data class PendingHuaweiCallback(
+        val address: String,
+        val createdAtMs: Long,
+    )
+
     private val TAG = "HuaweiPods-Upstream"
     private val DESCRIPTOR = "com.android.bluetooth.ble.app.IMiuiHeadsetService"
     private val knownHuaweiAddresses = linkedSetOf<String>()
-    private val callbacks = linkedMapOf<IBinder, Any>()
+    private val callbacks = ConcurrentHashMap<IBinder, RegisteredHuaweiCallback>()
+    private val pendingHuaweiCallbacks = ConcurrentHashMap<CallbackCaller, PendingHuaweiCallback>()
+    private val pendingHuaweiCallbackTtlMs = 3_000L
     private val handler = Handler(Looper.getMainLooper())
     private val hookedBinderClasses = linkedSetOf<String>()
+    @Volatile
     private var lastHuaweiDevice: BluetoothDevice? = null
     private var context: Context? = null
     private var receiverRegistered = false
     private var currentBattery: BatteryParams? = null
     private var currentAnc = 1
     private var currentAncSubMode: Int? = null
+    @Volatile
     private var currentAddress: String? = null
+    @Volatile
     private var currentName: String? = null
+    @Volatile
+    private var currentRoute: HuaweiDeviceRoute? = null
 
     override fun onHook() {
         hookHeadsetServiceBinder()
@@ -233,10 +260,9 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
             Log.w(TAG, "Huawei HFP battery skipped: device null reason=$reason text=$text")
             return
         }
+        if (!isHuaweiPod(currentDevice)) return
         val battery = HuaweiHfpController.handleAtCommand(ctx, currentDevice, text) ?: return
         currentBattery = battery
-        currentAddress = currentDevice.address
-        currentName = currentDevice.name ?: currentDevice.alias
     }
 
     private fun contextFrom(source: Any?): Context? {
@@ -273,7 +299,9 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                         if (!rememberSupportedDevice(receivedIntent)) return
                     }
                     HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
-                        currentAddress = receivedIntent.getStringExtra("address") ?: currentAddress
+                        if (!targetsCurrentHuaweiDevice(receivedIntent)) return
+                        pendingHuaweiCallbacks.clear()
+                        clearCurrentDeviceStatus()
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
@@ -319,8 +347,12 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         runCatching {
             hookBefore(binderClass.method("checkSupport", BluetoothDevice::class.java)) {
                 val device = args[0] as? BluetoothDevice
-                if (!isHuaweiPod(device)) return@hookBefore
+                if (!isHuaweiPod(device)) {
+                    clearPendingHuaweiCallback()
+                    return@hookBefore
+                }
                 lastHuaweiDevice = device
+                rememberPendingHuaweiCallback(device?.address)
                 result = fakeSupport()
                 Log.d(TAG, "BinderC6776v.checkSupport forced device=${device.describe()} support=$result")
             }
@@ -361,21 +393,21 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
             val callbackClass = findClass("com.android.bluetooth.ble.app.IMiuiHeadsetCallback")
             hookBefore(binderClass.method("register", callbackClass)) {
                 val callback = args[0]
-                if (callback != null && lastHuaweiDevice != null) {
-                    rememberCallback(callback)
-                    result = null
-                    Log.d(TAG, "BinderC6776v.register swallowed callback=$callback device=${lastHuaweiDevice.describe()}")
-                    requestBluetoothStatus("register")
-                    sendRealStatus(lastHuaweiDevice, "register")
-                    sendRealStatusDelayed(lastHuaweiDevice, "register-refresh", 350L)
-                }
+                val address = consumePendingHuaweiCallbackAddress()
+                if (callback == null || address == null) return@hookBefore
+                rememberCallback(callback, address)
+                result = null
+                Log.d(TAG, "BinderC6776v.register swallowed callback=$callback address=$address")
+                requestBluetoothStatus("register")
+                sendRealStatus(address, "register")
+                sendRealStatusDelayed(address, "register-refresh", 350L)
             }
             hookBefore(binderClass.method("registerCallbackDevice", callbackClass, BluetoothDevice::class.java)) {
                 val callback = args[0]
                 val device = args[1] as? BluetoothDevice
                 if (!isHuaweiPod(device) || callback == null) return@hookBefore
                 lastHuaweiDevice = device
-                rememberCallback(callback)
+                rememberCallback(callback, device)
                 result = null
                 Log.d(TAG, "BinderC6776v.registerCallbackDevice swallowed callback=$callback device=${device.describe()}")
                 requestBluetoothStatus("registerCallbackDevice")
@@ -469,7 +501,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                 if (!isHuaweiPod(device)) return@hookBefore
                 lastHuaweiDevice = device
                 result = null
-                val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+                val route = currentHuaweiRoute()
                 val selection = mode?.let { upstreamHuaweiAncStateForMode(route, it, currentHuaweiAncState()) }
                 Log.d(TAG, "BinderC6776v.changeAncMode swallowed mode=$mode route=$route selection=$selection device=${device.describe()}")
                 selection?.let { sendHuaweiAnc(route, it, device) }
@@ -486,7 +518,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                 if (!isHuaweiPod(device)) return@hookBefore
                 lastHuaweiDevice = device
                 result = null
-                val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+                val route = currentHuaweiRoute()
                 val selection = level?.let { upstreamHuaweiAncStateForLevel(route, it, currentHuaweiAncState()) }
                 Log.d(TAG, "BinderC6776v.changeAncLevel swallowed level=$level route=$route selection=$selection device=${device.describe()}")
                 selection?.let { sendHuaweiAnc(route, it, device) }
@@ -495,8 +527,15 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         }.onFailure { Log.w(TAG, "hook BinderC6776v.changeAncLevel skipped", it) }
     }
 
-    private fun rememberCallback(callback: Any) {
-        (callMethod(callback, "asBinder") as? IBinder)?.let { callbacks[it] = callback }
+    private fun rememberCallback(callback: Any, device: BluetoothDevice?) {
+        val address = runCatching { device?.address }.getOrNull()?.takeIf(String::isNotBlank) ?: return
+        rememberCallback(callback, address)
+    }
+
+    private fun rememberCallback(callback: Any, address: String) {
+        (callMethod(callback, "asBinder") as? IBinder)?.let {
+            callbacks[it] = RegisteredHuaweiCallback(callback, address)
+        }
     }
 
     private fun forgetCallback(callback: Any) {
@@ -564,8 +603,12 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         val device = data.readDevice()
         val isHuawei = isHuaweiPod(device)
         Log.d(TAG, "checkSupport upstream device=${device.describe()} isHuawei=$isHuawei")
-        if (!isHuawei) return null
+        if (!isHuawei) {
+            clearPendingHuaweiCallback()
+            return null
+        }
         lastHuaweiDevice = device
+        rememberPendingHuaweiCallback(device?.address)
         reply.writeNoException()
         val support = fakeSupport()
         reply.writeString(support)
@@ -575,11 +618,12 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
 
     private fun handleRegister(data: Parcel, reply: Parcel): Boolean? {
         val callback = data.readCallbackBinder()
-        Log.d(TAG, "register upstream callback=$callback lastDevice=${lastHuaweiDevice.describe()}")
-        if (callback == null || lastHuaweiDevice == null) return null
-        (callMethod(callback, "asBinder") as? IBinder)?.let { callbacks[it] = callback }
+        val address = consumePendingHuaweiCallbackAddress()
+        Log.d(TAG, "register upstream callback=$callback pendingAddress=$address")
+        if (callback == null || address == null) return null
+        rememberCallback(callback, address)
         reply.writeNoException()
-        sendRealStatus(lastHuaweiDevice, "register")
+        sendRealStatus(address, "register")
         return true
     }
 
@@ -609,7 +653,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         Log.d(TAG, "changeAncMode upstream mode=$mode device=${device.describe()} isHuawei=$isHuawei")
         if (!isHuawei) return null
         lastHuaweiDevice = device
-        val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+        val route = currentHuaweiRoute()
         val selection = upstreamHuaweiAncStateForMode(route, mode, currentHuaweiAncState())
         selection?.let { sendHuaweiAnc(route, it, device) }
         reply.writeNoException()
@@ -624,7 +668,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         Log.d(TAG, "changeAncLevel upstream level=$level device=${device.describe()} isHuawei=$isHuawei")
         if (!isHuawei) return null
         lastHuaweiDevice = device
-        val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+        val route = currentHuaweiRoute()
         val selection = level?.let { upstreamHuaweiAncStateForLevel(route, it, currentHuaweiAncState()) }
         selection?.let { sendHuaweiAnc(route, it, device) }
         reply.writeNoException()
@@ -693,7 +737,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         Log.d(TAG, "registerCallbackDevice upstream callback=$callback device=${device.describe()} isHuawei=$isHuawei")
         if (!isHuawei || callback == null) return null
         lastHuaweiDevice = device
-        (callMethod(callback, "asBinder") as? IBinder)?.let { callbacks[it] = callback }
+        rememberCallback(callback, device)
         reply.writeNoException()
         sendRealStatus(device, "registerCallbackDevice")
         return true
@@ -716,19 +760,19 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private fun isHuaweiPod(device: BluetoothDevice?): Boolean {
         if (device == null) return false
         val address = runCatching { device.address }.getOrNull()
-        val result = device.huaweiDeviceRoute().isSupported ||
+        val name = runCatching { device.name ?: device.alias }.getOrNull()
+        val route = device.huaweiDeviceRoute()
+        val result = route.isSupported ||
             (address != null && isHuaweiAddress(address))
-        if (result && address != null) knownHuaweiAddresses.add(address.uppercase())
-        return result
+        if (!result) return false
+        rememberCurrentHuaweiDevice(address, name, route, device)
+        return true
     }
 
     private fun notifyRealStatus(reason: String) {
-        val device = lastHuaweiDevice
-        if (device != null) {
-            sendRealStatus(device, reason)
-            return
-        }
-        val address = currentAddress ?: return
+        val address = currentAddress?.takeIf(String::isNotBlank)
+            ?: lastHuaweiDevice?.let { runCatching { it.address }.getOrNull() }
+            ?: return
         sendRealStatus(address, reason)
     }
 
@@ -739,17 +783,37 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
 
     private fun sendRealStatusDelayed(device: BluetoothDevice?, reason: String, delayMs: Long) {
         val address = device?.address ?: return
+        sendRealStatusDelayed(address, reason, delayMs)
+    }
+
+    private fun sendRealStatusDelayed(address: String, reason: String, delayMs: Long) {
         handler.postDelayed({ sendRealStatus(address, reason) }, delayMs)
     }
 
     private fun sendRealStatus(address: String, reason: String) {
-        if (callbacks.isEmpty()) {
+        if (!isCurrentStatusAddress(address)) {
+            Log.d(TAG, "send real status skipped: stale target reason=$reason target=$address current=$currentAddress")
+            return
+        }
+        val targetCallbacks = callbacks.values.filter {
+            it.address.equals(address, ignoreCase = true)
+        }
+        if (targetCallbacks.isEmpty()) {
             Log.d(TAG, "send real status skipped: no callback reason=$reason address=$address")
             return
         }
         val payload = realRefreshPayload()
+        if (!isCurrentStatusAddress(address)) {
+            Log.d(TAG, "send real status skipped: identity changed while snapshotting reason=$reason target=$address current=$currentAddress")
+            return
+        }
         handler.post {
-            callbacks.values.toList().forEach { callback ->
+            if (!isCurrentStatusAddress(address)) {
+                Log.d(TAG, "send real status skipped: queued target is stale reason=$reason target=$address current=$currentAddress")
+                return@post
+            }
+            targetCallbacks.forEach { registration ->
+                val callback = registration.callback
                 runCatching {
                     callMethod(callback, "refreshStatus", address, payload)
                     Log.d(TAG, "sent real refreshStatus reason=$reason address=$address payload=$payload callback=$callback")
@@ -763,6 +827,11 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
 
     private fun realRefreshPayload(): String {
         return miuiRefreshPayload(currentBattery, currentHuaweiRoute(), currentHuaweiAncState())
+    }
+
+    private fun isCurrentStatusAddress(address: String): Boolean {
+        val activeAddress = currentAddress?.takeIf(String::isNotBlank) ?: return true
+        return address.equals(activeAddress, ignoreCase = true)
     }
 
     private fun effectiveBattery(): BatteryParams? {
@@ -883,6 +952,9 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
             putExtra("status", state.mode.broadcastStatus)
             state.subMode?.let { putExtra("submode", it) }
+            encodeHuaweiDeviceRouteForBroadcast(route)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
             device?.let {
                 putExtra("address", it.address)
                 putExtra("device_name", it.name ?: it.alias ?: "")
@@ -945,25 +1017,100 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private fun rememberSupportedDevice(intent: Intent): Boolean {
         val address = intent.getStringExtra("address") ?: currentAddress
         val name = intent.getStringExtra("device_name") ?: currentName
-        if (!resolveHuaweiDeviceRoute(address, name).isSupported) {
+        val route = decodeHuaweiDeviceRouteFromBroadcast(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE),
+        ) ?: resolveHuaweiDeviceRoute(address, name)
+        if (!route.isSupported) {
             Log.w(TAG, "ignored unsupported state device=${name.orEmpty()}/${address.orEmpty()}")
             return false
         }
-        currentAddress = address
-        currentName = name
-        rememberKnownAddress(address)
+        rememberCurrentHuaweiDevice(address, name, route)
         return true
     }
 
+    private fun targetsCurrentHuaweiDevice(intent: Intent): Boolean {
+        val activeAddress = currentAddress?.takeIf(String::isNotBlank) ?: return false
+        val targetAddress = intent.getStringExtra("address")?.takeIf(String::isNotBlank) ?: return false
+        if (!activeAddress.equals(targetAddress, ignoreCase = true)) return false
+        val targetRoute = decodeHuaweiDeviceRouteFromBroadcast(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE),
+        ) ?: resolveHuaweiDeviceRoute(targetAddress, intent.getStringExtra("device_name"))
+        return targetRoute.isSupported && targetRoute == currentHuaweiRoute()
+    }
+
+    private fun consumePendingHuaweiCallbackAddress(): String? {
+        val pending = pendingHuaweiCallbacks.remove(callbackCaller()) ?: return null
+        if (SystemClock.elapsedRealtime() - pending.createdAtMs > pendingHuaweiCallbackTtlMs) return null
+        val address = pending.address.takeIf(String::isNotBlank) ?: return null
+        val activeAddress = currentAddress?.takeIf(String::isNotBlank) ?: return null
+        return address.takeIf { it.equals(activeAddress, ignoreCase = true) }
+    }
+
+    private fun rememberPendingHuaweiCallback(address: String?) {
+        val normalizedAddress = address?.takeIf(String::isNotBlank) ?: run {
+            clearPendingHuaweiCallback()
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        pendingHuaweiCallbacks.entries.forEach { (caller, pending) ->
+            if (now - pending.createdAtMs > pendingHuaweiCallbackTtlMs) {
+                pendingHuaweiCallbacks.remove(caller, pending)
+            }
+        }
+        pendingHuaweiCallbacks[callbackCaller()] = PendingHuaweiCallback(normalizedAddress, now)
+    }
+
+    private fun clearPendingHuaweiCallback() {
+        pendingHuaweiCallbacks.remove(callbackCaller())
+    }
+
+    private fun callbackCaller(): CallbackCaller = CallbackCaller(
+        uid = Binder.getCallingUid(),
+        pid = Binder.getCallingPid(),
+    )
+
+    private fun rememberCurrentHuaweiDevice(
+        address: String?,
+        name: String?,
+        route: HuaweiDeviceRoute,
+        device: BluetoothDevice? = null,
+    ) {
+        val identityChanged = when {
+            !address.isNullOrBlank() -> !address.equals(currentAddress, ignoreCase = true)
+            else -> name != currentName
+        }
+        if (identityChanged || currentRoute != route) {
+            clearCurrentDeviceStatus()
+        }
+        if (identityChanged) {
+            pendingHuaweiCallbacks.clear()
+            lastHuaweiDevice = null
+        }
+        currentAddress = address
+        currentName = name
+        currentRoute = route
+        if (device != null) {
+            lastHuaweiDevice = device
+        }
+        rememberKnownAddress(address)
+    }
+
+    private fun clearCurrentDeviceStatus() {
+        currentBattery = null
+        currentAnc = NoiseControlMode.OFF.broadcastStatus
+        currentAncSubMode = null
+    }
+
     private fun normalizeBatteryAvailabilityForCurrentRoute(status: BatteryParams): BatteryParams =
-        if (resolveHuaweiDeviceRoute(currentAddress, currentName).usesReportedEarbudAvailability) {
+        if (currentHuaweiRoute().usesReportedEarbudAvailability) {
             status
         } else {
             status.normalizedEarbudAvailability()
         }
 
     private fun currentHuaweiRoute(): HuaweiDeviceRoute =
-        lastHuaweiDevice?.huaweiDeviceRoute()?.takeIf { it.isSupported }
+        currentRoute?.takeIf { it.isSupported }
+            ?: lastHuaweiDevice?.huaweiDeviceRoute()?.takeIf { it.isSupported }
             ?: resolveHuaweiDeviceRoute(currentAddress, currentName)
 
     private fun currentHuaweiAncState(): HuaweiAncState = HuaweiAncState(

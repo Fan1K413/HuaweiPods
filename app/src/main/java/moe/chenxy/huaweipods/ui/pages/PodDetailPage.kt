@@ -61,6 +61,8 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.hasChargingCase
+import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
@@ -252,7 +254,8 @@ private fun LazyListScope.podControlItems(
         ) {
             PodStatus(
                 batteryParams = batteryParams,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+                showCase = !deviceRoute.isSupported || deviceRoute.hasChargingCase
             )
         }
     }

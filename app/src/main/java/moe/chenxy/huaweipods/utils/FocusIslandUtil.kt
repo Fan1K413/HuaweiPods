@@ -19,8 +19,11 @@ object FocusIslandUtil {
     private const val CHANNEL_ID = "huaweipods_focus_island"
     private const val CHANNEL_NAME = "HuaweiPods Battery"
     private const val NOTIFICATION_ID = 10086
-    private const val ISLAND_TIMEOUT_SECONDS = 3
-    private const val DISMISS_DELAY_MS = 4000L
+    private const val ISLAND_TIMEOUT_SECONDS = 8
+    private const val DISMISS_DELAY_MS = ISLAND_TIMEOUT_SECONDS * 1_000L
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var dismissRunnable: Runnable? = null
 
     fun showBatteryIsland(
         context: Context,
@@ -75,6 +78,7 @@ object FocusIslandUtil {
                 isShowNotification = false
                 island {
                     islandProperty = 1
+                    islandTimeout = ISLAND_TIMEOUT_SECONDS
                     bigIslandArea {
                         imageTextInfoLeft {
                             type = 1
@@ -116,10 +120,7 @@ object FocusIslandUtil {
                 .build()
 
             nm.notify(NOTIFICATION_ID, notification)
-
-            Handler(Looper.getMainLooper()).postDelayed({
-                try { nm.cancel(NOTIFICATION_ID) } catch (_: Exception) {}
-            }, DISMISS_DELAY_MS)
+            scheduleDismiss(nm)
 
             Log.d(TAG, "Focus Island shown: L=$leftText% R=$rightText%")
             return true
@@ -133,5 +134,17 @@ object FocusIslandUtil {
             Log.e(TAG, "Failed to show Focus Island safely", t)
             return false
         }
+    }
+
+    @Synchronized
+    private fun scheduleDismiss(notificationManager: NotificationManager) {
+        dismissRunnable?.let(mainHandler::removeCallbacks)
+        dismissRunnable = Runnable {
+            try {
+                notificationManager.cancel(NOTIFICATION_ID)
+            } catch (_: Exception) {
+                // SystemUI 或通知服务重启时无需继续处理。
+            }
+        }.also { mainHandler.postDelayed(it, DISMISS_DELAY_MS) }
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import moe.chenxy.huaweipods.config.AppLifecyclePrefs
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.ui.App
 import moe.chenxy.huaweipods.ui.AppLocale
@@ -24,6 +25,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val lifecyclePrefs = AppLifecyclePrefs(this)
+        val launchDecision = lifecyclePrefs.consumeLaunchDecision(
+            currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+            currentVersionName = BuildConfig.VERSION_NAME,
+        )
 
         setContent {
             val prefs = remember { getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE) }
@@ -51,6 +58,7 @@ class MainActivity : ComponentActivity() {
             }
 
             App(
+                initialLaunchDecision = launchDecision,
                 themeMode = themeMode,
                 onThemeModeChange = {
                     themeMode.value = it

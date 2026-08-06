@@ -24,4 +24,32 @@ class BatteryIslandTriggerPolicyTest {
         policy.onNewSession()
         assertTrue(policy.shouldTrigger("AA:BB", hasConnectedEarBattery = true, now = 41_000L))
     }
+
+    @Test
+    fun `suppressed reconnect does not show later during the same session`() {
+        val policy = BatteryIslandTriggerPolicy(reconnectCooldownMs = 30_000L)
+
+        assertTrue(policy.shouldTrigger("AA:BB", hasConnectedEarBattery = true, now = 10_000L))
+        policy.onNewSession()
+        assertFalse(policy.shouldTrigger("AA:BB", hasConnectedEarBattery = true, now = 20_000L))
+        assertFalse(policy.shouldTrigger("AA:BB", hasConnectedEarBattery = true, now = 41_000L))
+    }
+
+    @Test
+    fun `allows same device at cooldown boundary`() {
+        val policy = BatteryIslandTriggerPolicy(reconnectCooldownMs = 30_000L)
+
+        assertTrue(policy.shouldTrigger("AA:BB", hasConnectedEarBattery = true, now = 10_000L))
+        policy.onNewSession()
+        assertTrue(policy.shouldTrigger("aa:bb", hasConnectedEarBattery = true, now = 40_000L))
+    }
+
+    @Test
+    fun `cooldown is independent for different devices`() {
+        val policy = BatteryIslandTriggerPolicy(reconnectCooldownMs = 30_000L)
+
+        assertTrue(policy.shouldTrigger("AA:BB", hasConnectedEarBattery = true, now = 10_000L))
+        policy.onNewSession()
+        assertTrue(policy.shouldTrigger("CC:DD", hasConnectedEarBattery = true, now = 11_000L))
+    }
 }

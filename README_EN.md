@@ -45,6 +45,8 @@ Starting with 1.2.0, the 11 models below are included in one release APK. Inclus
 - **Super Island / popup** status display and quick ANC controls.
 - **Fusion Device Center** headset display and transfer between paired devices.
 - **Manual model binding** by Bluetooth address when a device has been renamed or cannot be identified automatically.
+- **First-run setup guide** and in-app GitHub release checks.
+- **Post-update scope restart prompt** after installing a newer APK.
 
 ## Requirements
 
@@ -55,7 +57,7 @@ Starting with 1.2.0, the 11 models below are included in one release APK. Inclus
 
 ## Usage
 
-1. Install the HuaweiPods APK.
+1. Install the HuaweiPods APK and follow the first-run guide to check LSPosed and the core scopes.
 2. Enable the module in LSPosed.
 3. Select the recommended scopes:
    - `com.android.bluetooth`
@@ -76,6 +78,7 @@ Internal package names, broadcast actions, configuration names, and the public a
 - [OppoPods](https://github.com/1812z/OppoPods) by 1812z — the fork HuaweiPods was directly adapted from.
 - [OppoPods](https://github.com/Leaf-lsgtky/OppoPods) by Leaf-lsgtky — the original upstream OppoPods project.
 - [HyperPods](https://github.com/Art-Chen/HyperPods) by Art_Chen — original HyperOS headset integration ideas.
+- [HyperIsland](https://github.com/1812z/HyperIsland) by 1812z — interaction reference for update checks and onboarding.
 - [Miuix](https://github.com/YuKongA/miuix) — HyperOS-style Compose UI components.
 
 ## License

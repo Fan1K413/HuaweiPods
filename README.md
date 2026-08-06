@@ -52,6 +52,8 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 - 显示左右耳、充电盒或眼镜左右镜腿电量
 - 按机型提供主动降噪、通透模式、降噪等级和手势设置
 - 耳机名称被修改或无法自动识别时，可按蓝牙地址手动选择型号
+- 首次启动提供设置引导，并可在应用内检查 GitHub 更新
+- 覆盖安装新版本后提示重启作用域，无需直接重启手机
 
 ## 使用要求
 
@@ -62,7 +64,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/Nshpiter/HuaweiPods/releases) 下载并安装 APK。
+1. 从 [GitHub Releases](https://github.com/Nshpiter/HuaweiPods/releases) 下载并安装 APK；首次打开可按引导检查 LSPosed 与核心作用域。
 2. 在 LSPosed 中启用 HuaweiPods。
 3. 勾选以下作用域：
 
@@ -98,9 +100,10 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 
 ## 致谢
 
-- [OppoPods](https://github.com/1812z/OppoPods) by 1812z
-- [OppoPods](https://github.com/Leaf-lsgtky/OppoPods) by Leaf-lsgtky
+- [OppoPods](https://github.com/1812z/OppoPods) by 1812z（HuaweiPods 直接基于）
+- [OppoPods](https://github.com/Leaf-lsgtky/OppoPods) by Leaf-lsgtky（上游原始项目）
 - [HyperPods](https://github.com/Art-Chen/HyperPods) by Art_Chen
+- [HyperIsland](https://github.com/1812z/HyperIsland) by 1812z（更新与首次引导交互参考）
 - [Miuix](https://github.com/YuKongA/miuix)
 
 ## 许可证

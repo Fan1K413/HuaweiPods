@@ -24,6 +24,7 @@ data class HuaweiDeviceCapabilities(
     val supportsDiscreteAncLevels: Boolean = false,
     val supportsAncDirectionDial: Boolean = false,
     val supportsRfcommBattery: Boolean = false,
+    val supportsBackgroundBatteryRefresh: Boolean = false,
     val supportsGestureConfiguration: Boolean = false,
     val hasChargingCase: Boolean = false,
     val usesReportedEarbudAvailability: Boolean = false,
@@ -101,6 +102,7 @@ private val routeCapabilities = linkedMapOf(
         displayName = "HUAWEI FreeClip 2",
         aliases = setOf("huaweifreeclip2", "freeclip2"),
         supportsRfcommBattery = true,
+        supportsBackgroundBatteryRefresh = true,
         supportsGestureConfiguration = true,
         hasChargingCase = true,
     ),
@@ -121,6 +123,24 @@ private val normalizedAliasRoutes: Map<String, HuaweiDeviceRoute> = buildMap {
     routeCapabilities.forEach { (route, capabilities) ->
         capabilities.aliases.forEach { alias -> put(alias, route) }
     }
+}
+
+private val broadcastValueByRoute = mapOf(
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS3 to "HUAWEI_FREEBUDS3",
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS5 to "HUAWEI_FREEBUDS5",
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS6I to "HUAWEI_FREEBUDS6I",
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 to "HUAWEI_FREEBUDS_PRO3",
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 to "HUAWEI_FREEBUDS_PRO4",
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 to "HUAWEI_FREEBUDS_PRO5",
+    HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to "HUAWEI_FREEBUDS7I",
+    HuaweiDeviceRoute.HUAWEI_FREECLIP to "HUAWEI_FREECLIP",
+    HuaweiDeviceRoute.HUAWEI_FREECLIP2 to "HUAWEI_FREECLIP2",
+    HuaweiDeviceRoute.HUAWEI_EYEWEAR to "HUAWEI_EYEWEAR",
+    HuaweiDeviceRoute.HUAWEI_EYEWEAR2 to "HUAWEI_EYEWEAR2",
+)
+
+private val routeByBroadcastValue = broadcastValueByRoute.entries.associate { (route, value) ->
+    value to route
 }
 
 val HuaweiDeviceRoute.capabilities: HuaweiDeviceCapabilities?
@@ -150,6 +170,9 @@ val HuaweiDeviceRoute.supportsAncDirectionDial: Boolean
 val HuaweiDeviceRoute.supportsRfcommBattery: Boolean
     get() = capabilities?.supportsRfcommBattery == true
 
+val HuaweiDeviceRoute.supportsBackgroundBatteryRefresh: Boolean
+    get() = capabilities?.supportsBackgroundBatteryRefresh == true
+
 val HuaweiDeviceRoute.supportsGestureConfiguration: Boolean
     get() = capabilities?.supportsGestureConfiguration == true
 
@@ -162,6 +185,22 @@ val HuaweiDeviceRoute.usesReportedEarbudAvailability: Boolean
 fun enabledHuaweiDeviceRoutes(): List<HuaweiDeviceRoute> = routeCapabilities.keys.toList()
 
 fun isHuaweiDeviceRouteEnabled(route: HuaweiDeviceRoute): Boolean = route in routeCapabilities
+
+fun encodeHuaweiDeviceRouteForBroadcast(route: HuaweiDeviceRoute): String? =
+    encodeHuaweiDeviceRouteForBroadcast(route, ::isHuaweiDeviceRouteEnabled)
+
+internal fun encodeHuaweiDeviceRouteForBroadcast(
+    route: HuaweiDeviceRoute,
+    isRouteEnabled: (HuaweiDeviceRoute) -> Boolean,
+): String? = broadcastValueByRoute[route]?.takeIf { isRouteEnabled(route) }
+
+fun decodeHuaweiDeviceRouteFromBroadcast(value: String?): HuaweiDeviceRoute? =
+    decodeHuaweiDeviceRouteFromBroadcast(value, ::isHuaweiDeviceRouteEnabled)
+
+internal fun decodeHuaweiDeviceRouteFromBroadcast(
+    value: String?,
+    isRouteEnabled: (HuaweiDeviceRoute) -> Boolean,
+): HuaweiDeviceRoute? = value?.let(routeByBroadcastValue::get)?.takeIf(isRouteEnabled)
 
 fun detectHuaweiDeviceRoute(deviceName: String?): HuaweiDeviceRoute =
     detectKnownHuaweiDeviceRoute(deviceName).takeIf(::isHuaweiDeviceRouteEnabled)

@@ -16,6 +16,14 @@ import top.yukonga.miuix.kmp.basic.Card
 fun AboutPage(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    appVersion: String,
+    checkingForUpdates: Boolean,
+    onCheckForUpdates: () -> Unit,
+    onOpenGitHub: () -> Unit,
+    onOpenIssues: () -> Unit,
+    onCopyQqGroup: () -> Unit,
+    qqGroupNumber: String,
+    onOpenOnboarding: () -> Unit,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -31,11 +39,46 @@ fun AboutPage(
             Card {
                 BasicComponent(
                     title = "HuaweiPods",
-                    summary = stringResource(R.string.app_subtitle)
+                    summary = stringResource(R.string.about_version_summary, appVersion),
                 )
                 BasicComponent(
                     title = stringResource(R.string.based_on),
-                    summary = "Leaf-lsgtky upstream"
+                    summary = "1812z/OppoPods",
+                )
+            }
+        }
+        item {
+            Card {
+                BasicComponent(
+                    title = stringResource(R.string.check_for_updates),
+                    summary = stringResource(
+                        if (checkingForUpdates) R.string.checking_for_updates else R.string.check_for_updates_summary,
+                    ),
+                    onClick = onCheckForUpdates,
+                )
+                BasicComponent(
+                    title = stringResource(R.string.github_repository),
+                    summary = "Nshpiter/HuaweiPods",
+                    onClick = onOpenGitHub,
+                )
+                BasicComponent(
+                    title = stringResource(R.string.github_issues),
+                    summary = stringResource(R.string.github_issues_summary),
+                    onClick = onOpenIssues,
+                )
+                BasicComponent(
+                    title = stringResource(R.string.qq_group),
+                    summary = stringResource(R.string.qq_group_summary, qqGroupNumber),
+                    onClick = onCopyQqGroup,
+                )
+            }
+        }
+        item {
+            Card {
+                BasicComponent(
+                    title = stringResource(R.string.open_onboarding),
+                    summary = stringResource(R.string.open_onboarding_summary),
+                    onClick = onOpenOnboarding,
                 )
             }
         }

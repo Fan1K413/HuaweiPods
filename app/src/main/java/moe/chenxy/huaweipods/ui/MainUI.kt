@@ -6,6 +6,8 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -38,12 +40,14 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.navigation3.ui.NavDisplay
 import moe.chenxy.huaweipods.HuaweiPodsApp
 import moe.chenxy.huaweipods.R
+import moe.chenxy.huaweipods.config.AppLifecyclePrefs
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.config.PodImagePrefs
@@ -51,14 +55,20 @@ import moe.chenxy.huaweipods.config.PodImageResource
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.NoiseControlMode
+import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.pods.isKnown
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsAncStateReadback
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
 import moe.chenxy.huaweipods.pods.supportsTransparency
+import moe.chenxy.huaweipods.ui.dialogs.AvailableUpdateDialog
+import moe.chenxy.huaweipods.ui.dialogs.UpdatedAppDialog
 import moe.chenxy.huaweipods.ui.pages.AboutPage
 import moe.chenxy.huaweipods.ui.pages.ThemeSettingsPage
+import moe.chenxy.huaweipods.update.GitHubRelease
+import moe.chenxy.huaweipods.update.GitHubReleaseChecker
+import moe.chenxy.huaweipods.update.UpdateCheckResult
 import moe.chenxy.huaweipods.utils.RootManager
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
@@ -88,11 +98,16 @@ sealed interface Screen : NavKey {
 }
 
 private const val DEVICE_CONNECT_TIMEOUT_MS = 15_000L
+private const val GITHUB_REPOSITORY_URL = "https://github.com/Nshpiter/HuaweiPods"
+private const val GITHUB_ISSUES_URL = "$GITHUB_REPOSITORY_URL/issues"
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun MainUI(
     backStack: SnapshotStateList<Screen>,
+    showUpdatedDialogOnLaunch: Boolean = false,
+    onUpdatedDialogHandled: () -> Unit = {},
+    onOpenOnboarding: () -> Unit = {},
     themeMode: MutableState<Int> = mutableStateOf(0),
     onThemeModeChange: (Int) -> Unit = {},
     accentMode: MutableState<Int> = mutableStateOf(0),
@@ -106,6 +121,7 @@ fun MainUI(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val qqGroupNumber = stringResource(R.string.qq_group_number)
 
     val mainTitle = remember { mutableStateOf("") }
     val batteryParams = remember { mutableStateOf(BatteryParams()) }
@@ -121,6 +137,7 @@ fun MainUI(
     var xposedService by remember { mutableStateOf(HuaweiPodsApp.xposedService) }
     var showDevicePicker by remember { mutableStateOf(false) }
     var showRestartScopeDialog by remember { mutableStateOf(false) }
+    var restartRequestedByUpdate by remember { mutableStateOf(false) }
     var restartingScopes by remember { mutableStateOf(false) }
     var connectingDeviceAddress by remember { mutableStateOf<String?>(null) }
     var connectedDeviceAddress by remember { mutableStateOf("") }
@@ -142,6 +159,7 @@ fun MainUI(
     }
 
     val prefs = remember { context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE) }
+    val lifecyclePrefs = remember(context) { AppLifecyclePrefs(context) }
     val appConfig = remember { ConfigManager.refreshFromPrefs(prefs) }
     val notificationClickAction = remember { mutableStateOf(appConfig.notificationClickAction) }
     val moreClickAction = remember { mutableStateOf(appConfig.moreClickAction) }
@@ -150,12 +168,64 @@ fun MainUI(
     val fakeDeviceId = remember { mutableStateOf(appConfig.fakeDeviceId) }
     val islandMode = remember { mutableStateOf(appConfig.islandMode) }
     val earphonePrefs = remember { mutableStateOf(PodImagePrefs.load(prefs)) }
+    val checkUpdatesOnLaunch = remember {
+        mutableStateOf(lifecyclePrefs.checkUpdatesOnLaunch())
+    }
+    var checkingForUpdates by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<GitHubRelease?>(null) }
 
     fun currentDeviceRoute(): HuaweiDeviceRoute = DeviceRoutePrefs.resolve(
         prefs = prefs,
         address = connectedDeviceAddress,
         deviceName = mainTitle.value,
     )
+
+    fun checkForUpdates(manual: Boolean) {
+        if (checkingForUpdates) return
+        if (!manual) {
+            lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+        }
+        checkingForUpdates = true
+        coroutineScope.launch {
+            when (
+                val result = GitHubReleaseChecker.check(
+                    currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                    currentVersionName = BuildConfig.VERSION_NAME,
+                )
+            ) {
+                is UpdateCheckResult.Available -> {
+                    if (manual) lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                    availableUpdate = result.release
+                }
+
+                is UpdateCheckResult.UpToDate -> {
+                    if (manual) lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                    if (manual) {
+                        Toast.makeText(context, R.string.already_latest_version, Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                is UpdateCheckResult.Failure -> {
+                    if (manual) {
+                        Toast.makeText(context, R.string.update_check_failed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            checkingForUpdates = false
+        }
+    }
+
+    fun copyQqGroup() {
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        clipboard?.setPrimaryClip(ClipData.newPlainText("HuaweiPods QQ", qqGroupNumber))
+        Toast.makeText(context, R.string.qq_group_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    LaunchedEffect(showUpdatedDialogOnLaunch) {
+        if (!showUpdatedDialogOnLaunch && lifecyclePrefs.shouldRunAutomaticCheck()) {
+            checkForUpdates(manual = false)
+        }
+    }
 
     val connectedAddressValid = BluetoothAdapter.checkBluetoothAddress(connectedDeviceAddress)
     val canShowDetailPage = hookConnected.value && connectedAddressValid
@@ -423,6 +493,11 @@ fun MainUI(
         }
         ancMode.value = normalizedMode
         Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
+            putExtra("address", connectedDeviceAddress)
+            putExtra("device_name", mainTitle.value)
+            encodeHuaweiDeviceRouteForBroadcast(route)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
             putExtra("status", normalizedMode.broadcastStatus)
             if (route.supportsDiscreteAncLevels || normalizedMode == NoiseControlMode.TRANSPARENCY && route.supportsTransparency) {
                 val subMode = when (normalizedMode) {
@@ -463,6 +538,11 @@ fun MainUI(
             hasHuaweiAncLevel.value = true
         }
         Intent(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_SET).apply {
+            putExtra("address", connectedDeviceAddress)
+            putExtra("device_name", mainTitle.value)
+            encodeHuaweiDeviceRouteForBroadcast(route)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
             this.putExtra("level", safeLevel)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
@@ -667,6 +747,14 @@ fun MainUI(
                     desktopIconHidden.value = it
                     setLauncherIconHidden(context, it)
                 },
+                checkUpdatesOnLaunch = checkUpdatesOnLaunch,
+                onCheckUpdatesOnLaunchChange = {
+                    checkUpdatesOnLaunch.value = it
+                    lifecyclePrefs.setCheckUpdatesOnLaunch(it)
+                    if (it && lifecyclePrefs.shouldRunAutomaticCheck()) {
+                        checkForUpdates(manual = false)
+                    }
+                },
                 logLevel = logLevel,
                 onLogLevelChange = {
                     logLevel.value = it
@@ -712,8 +800,17 @@ fun MainUI(
                 showRestartScopeDialog = showRestartScopeDialog,
                 restartingScopes = restartingScopes,
                 onShowRestartScopeDialog = { showRestartScopeDialog = true },
-                onDismissRestartScopeDialog = { showRestartScopeDialog = false },
-                onRestartScopes = { restartScopes(it) },
+                onDismissRestartScopeDialog = {
+                    showRestartScopeDialog = false
+                    restartRequestedByUpdate = false
+                },
+                onRestartScopes = {
+                    if (restartRequestedByUpdate) {
+                        onUpdatedDialogHandled()
+                        restartRequestedByUpdate = false
+                    }
+                    restartScopes(it)
+                },
                 onBackToDevicePicker = { backToDevicePicker() },
                 onOpenSystemHeadsetSettings = { openSystemHeadsetSettings() },
                 onSavePodImages = { address, name, images, clearedImages ->
@@ -749,6 +846,14 @@ fun MainUI(
                             .overScrollVertical()
                             .nestedScroll(aboutScrollBehavior.nestedScrollConnection),
                         contentPadding = PaddingValues(bottom = pageBottomContentPadding),
+                        appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        checkingForUpdates = checkingForUpdates,
+                        onCheckForUpdates = { checkForUpdates(manual = true) },
+                        onOpenGitHub = { openExternalUrl(context, GITHUB_REPOSITORY_URL) },
+                        onOpenIssues = { openExternalUrl(context, GITHUB_ISSUES_URL) },
+                        onCopyQqGroup = { copyQqGroup() },
+                        qqGroupNumber = qqGroupNumber,
+                        onOpenOnboarding = onOpenOnboarding,
                     )
                 }
             }
@@ -810,10 +915,49 @@ fun MainUI(
             }
         }
     )
+
+    val release = availableUpdate
+    AvailableUpdateDialog(
+        show = release != null,
+        currentVersion = BuildConfig.VERSION_NAME,
+        latestVersion = release?.versionName.orEmpty(),
+        releaseNotes = release?.changelog.orEmpty(),
+        onLater = { availableUpdate = null },
+        onOpenRelease = {
+            release?.let {
+                if (openExternalUrl(context, it.releaseUrl)) {
+                    availableUpdate = null
+                }
+            }
+        },
+    )
+
+    UpdatedAppDialog(
+        show = showUpdatedDialogOnLaunch && !restartRequestedByUpdate,
+        versionName = BuildConfig.VERSION_NAME,
+        onLater = onUpdatedDialogHandled,
+        onRestartScope = {
+            while (backStack.size > 1) {
+                backStack.removeLast()
+            }
+            restartRequestedByUpdate = true
+            showRestartScopeDialog = true
+        },
+    )
 }
 
 @Composable
 fun appBackground(): Color = MiuixTheme.colorScheme.surface
+
+private fun openExternalUrl(context: Context, url: String): Boolean = runCatching {
+    context.startActivity(
+        Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+    true
+}.getOrElse {
+    Toast.makeText(context, R.string.open_link_failed, Toast.LENGTH_SHORT).show()
+    false
+}
 
 private data class BluetoothSummary(
     val enabled: Boolean,

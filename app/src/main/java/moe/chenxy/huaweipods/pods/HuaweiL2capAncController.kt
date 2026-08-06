@@ -13,8 +13,10 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.ExperimentalStdlibApi
 import kotlin.text.HexFormat
@@ -28,6 +30,8 @@ object HuaweiL2capAncController {
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val submissionLock = Any()
+    private val transportGeneration = HuaweiRfcommTransportGeneration()
     private var socket: BluetoothSocket? = null
     private var deviceAddress: String? = null
     private var socketLabel: String? = null
@@ -85,14 +89,19 @@ object HuaweiL2capAncController {
         device: BluetoothDevice,
         route: HuaweiDeviceRoute,
         onBattery: (BatteryParams) -> Unit,
+        onComplete: ((Boolean) -> Unit)? = null,
     ) {
-        val packet = HuaweiAncPackets.batteryQuery(route) ?: return
+        val packet = HuaweiAncPackets.batteryQuery(route) ?: run {
+            notifyComplete(onComplete, false)
+            return
+        }
         enqueueWrite(
             context = context,
             device = device,
             route = route,
             packet = packet,
             description = "battery-query",
+            onComplete = onComplete,
             responseWindowMs = 1_500L,
             onResponse = { response ->
                 val battery = HuaweiRfcommResponseParser.parseBattery(
@@ -204,6 +213,7 @@ object HuaweiL2capAncController {
         responseComplete: ((ByteArray) -> Boolean)? = null,
         onResponse: ((ByteArray) -> Unit)? = null,
     ) {
+        val requestGeneration = transportGeneration.snapshot()
         val appContext = context.applicationContext ?: context
         if (!isHuaweiDeviceRouteEnabled(route)) {
             logInfo(
@@ -215,33 +225,66 @@ object HuaweiL2capAncController {
         }
         logInfo(appContext, "Huawei ANC enqueue $description keepSocket=$keepSocket device=${device.address}")
         runCatching {
-            executor.execute {
-                runCatching {
-                    logInfo(appContext, "Huawei ANC worker started $description keepSocket=$keepSocket device=${device.address}")
-                    val currentSocket = ensureSocket(device)
-                    currentSocket.outputStream.write(packet)
-                    currentSocket.outputStream.flush()
-                    val hex = packet.toHexString()
-                    RfcommLog.d(appContext, "RFCOMM/TX", "$description $hex")
-                    if (responseWindowMs > 0L && onResponse != null) {
-                        val response = collectSocketResponse(
-                            currentSocket,
-                            responseWindowMs,
-                            responseComplete,
-                        )
-                        mainHandler.post { onResponse(response) }
-                    }
+            synchronized(submissionLock) {
+                if (!transportGeneration.isCurrent(requestGeneration)) {
                     logInfo(
                         appContext,
-                        "Huawei ANC RFCOMM write finished $description keepSocket=$keepSocket socket=$socketLabel packet=$hex device=${device.address}"
+                        "Huawei ANC canceled stale pre-submit request $description device=${device.address}",
                     )
-                }.onFailure {
-                    closeSocket()
-                    logError(appContext, "Huawei ANC send failed $description device=${device.address}", it)
                     notifyComplete(onComplete, false)
-                }.onSuccess {
-                    if (!keepSocket) closeSocket()
-                    notifyComplete(onComplete, true)
+                    return@synchronized
+                }
+                executor.execute worker@{
+                    if (!transportGeneration.isCurrent(requestGeneration)) {
+                        logInfo(
+                            appContext,
+                            "Huawei ANC canceled stale queued request $description device=${device.address}",
+                        )
+                        notifyComplete(onComplete, false)
+                        return@worker
+                    }
+                    runCatching {
+                        logInfo(appContext, "Huawei ANC worker started $description keepSocket=$keepSocket device=${device.address}")
+                        val currentSocket = ensureSocket(device, requestGeneration)
+                        ensureCurrentTransportGeneration(requestGeneration)
+                        currentSocket.outputStream.write(packet)
+                        currentSocket.outputStream.flush()
+                        ensureCurrentTransportGeneration(requestGeneration)
+                        val hex = packet.toHexString()
+                        RfcommLog.d(appContext, "RFCOMM/TX", "$description $hex")
+                        if (responseWindowMs > 0L && onResponse != null) {
+                            val response = collectSocketResponse(
+                                currentSocket,
+                                responseWindowMs,
+                                responseComplete,
+                            )
+                            ensureCurrentTransportGeneration(requestGeneration)
+                            mainHandler.post {
+                                if (transportGeneration.isCurrent(requestGeneration)) {
+                                    onResponse(response)
+                                }
+                            }
+                        }
+                        ensureCurrentTransportGeneration(requestGeneration)
+                        logInfo(
+                            appContext,
+                            "Huawei ANC RFCOMM write finished $description keepSocket=$keepSocket socket=$socketLabel packet=$hex device=${device.address}"
+                        )
+                    }.onFailure {
+                        closeSocket()
+                        if (it is CancellationException) {
+                            logInfo(
+                                appContext,
+                                "Huawei ANC canceled stale active request $description device=${device.address}",
+                            )
+                        } else {
+                            logError(appContext, "Huawei ANC send failed $description device=${device.address}", it)
+                        }
+                        notifyComplete(onComplete, false)
+                    }.onSuccess {
+                        if (!keepSocket) closeSocket()
+                        notifyComplete(onComplete, true, requestGeneration)
+                    }
                 }
             }
         }.onFailure {
@@ -251,11 +294,21 @@ object HuaweiL2capAncController {
     }
 
     fun disconnect(device: BluetoothDevice? = null) {
-        if (device != null && deviceAddress != device.address) return
-        executor.execute { closeSocket() }
+        synchronized(submissionLock) {
+            val invalidatedGeneration = transportGeneration.invalidate()
+            Log.w(
+                TAG,
+                "Huawei ANC disconnect queued generation=$invalidatedGeneration device=${device?.address.orEmpty()}",
+            )
+            executor.execute { closeSocket() }
+        }
     }
 
-    private fun ensureSocket(device: BluetoothDevice): BluetoothSocket {
+    private fun ensureSocket(
+        device: BluetoothDevice,
+        requestGeneration: Long,
+    ): BluetoothSocket {
+        ensureCurrentTransportGeneration(requestGeneration)
         val currentSocket = socket
         if (currentSocket != null && deviceAddress == device.address) {
             Log.w(TAG, "Huawei ANC reusing RFCOMM socket label=$socketLabel device=${device.address}")
@@ -266,18 +319,25 @@ object HuaweiL2capAncController {
         var lastFailure: Throwable? = null
         for (candidate in socketCandidates(device)) {
             repeat(RFCOMM_CONNECT_ATTEMPTS) { attempt ->
+                ensureCurrentTransportGeneration(requestGeneration)
                 Log.w(
                     TAG,
                     "Huawei ANC connecting RFCOMM label=${candidate.label} attempt=${attempt + 1} device=${device.address}"
                 )
                 runCatching {
                     val newSocket = connectSocketWithTimeout(candidate.create(), candidate.label)
+                    if (!transportGeneration.isCurrent(requestGeneration)) {
+                        runCatching { newSocket.close() }
+                            .onFailure { Log.w(TAG, "Huawei ANC stale RFCOMM close failed", it) }
+                        ensureCurrentTransportGeneration(requestGeneration)
+                    }
                     socket = newSocket
                     deviceAddress = device.address
                     socketLabel = candidate.label
                     Log.w(TAG, "Huawei ANC RFCOMM connected label=${candidate.label} device=${device.address}")
                     return newSocket
                 }.onFailure {
+                    if (it is CancellationException) throw it
                     lastFailure = it
                     Log.w(
                         TAG,
@@ -291,6 +351,12 @@ object HuaweiL2capAncController {
             }
         }
         throw lastFailure ?: IOException("No Huawei ANC RFCOMM candidate succeeded")
+    }
+
+    private fun ensureCurrentTransportGeneration(requestGeneration: Long) {
+        if (!transportGeneration.isCurrent(requestGeneration)) {
+            throw CancellationException("Stale Huawei RFCOMM transport generation")
+        }
     }
 
     private fun socketCandidates(device: BluetoothDevice): List<SocketCandidate> {
@@ -406,8 +472,26 @@ object HuaweiL2capAncController {
         RfcommLog.e(context, TAG, "$message: ${throwable.message.orEmpty()}")
     }
 
-    private fun notifyComplete(callback: ((Boolean) -> Unit)?, success: Boolean) {
+    private fun notifyComplete(
+        callback: ((Boolean) -> Unit)?,
+        success: Boolean,
+        requestGeneration: Long? = null,
+    ) {
         callback ?: return
-        mainHandler.post { callback(success) }
+        mainHandler.post {
+            val belongsToCurrentGeneration = requestGeneration == null ||
+                transportGeneration.isCurrent(requestGeneration)
+            callback(success && belongsToCurrentGeneration)
+        }
     }
+}
+
+internal class HuaweiRfcommTransportGeneration {
+    private val value = AtomicLong(0L)
+
+    fun snapshot(): Long = value.get()
+
+    fun invalidate(): Long = value.incrementAndGet()
+
+    fun isCurrent(snapshot: Long): Boolean = value.get() == snapshot
 }

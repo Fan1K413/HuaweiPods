@@ -95,17 +95,33 @@ class PodImageLoaderTest {
     }
 
     @Test
-    fun `models without dedicated images keep the global fallback`() {
-        val globalFallback = R.drawable.img_box
-
-        assertEquals(
-            globalFallback,
-            PodImageLoader.modelFallbackResId(
-                HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-                PodImageResource.BOX,
-                globalFallback,
-            ),
+    fun `models without dedicated images keep every global fallback`() {
+        val routesWithoutDedicatedImages = listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+            HuaweiDeviceRoute.HUAWEI_FREECLIP,
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR,
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
         )
+        val globalFallbacks = mapOf(
+            PodImageResource.BOX to R.drawable.img_box,
+            PodImageResource.LEFT to R.drawable.img_left,
+            PodImageResource.RIGHT to R.drawable.img_right,
+        )
+
+        routesWithoutDedicatedImages.forEach { route ->
+            globalFallbacks.forEach { (resource, globalFallback) ->
+                assertEquals(
+                    "${route.name} $resource",
+                    globalFallback,
+                    PodImageLoader.modelFallbackResId(route, resource, globalFallback),
+                )
+            }
+        }
     }
 
     private fun sharedPreferencesWithEarphones(json: String): SharedPreferences {

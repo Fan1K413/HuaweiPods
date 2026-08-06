@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +50,7 @@ fun RestartScopeDialog(
     }
 
     OverlayDialog(
+        modifier = responsiveOverlayDialogModifier(),
         title = stringResource(R.string.restart_scope_title),
         summary = stringResource(R.string.restart_scope_summary),
         show = show,
@@ -80,12 +82,17 @@ fun RestartScopeDialog(
             TextButton(
                 text = stringResource(R.string.cancel),
                 onClick = onDismissRequest,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp),
             )
             TextButton(
                 text = stringResource(R.string.confirm),
                 onClick = { onConfirm(selectedPackages.toList()) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp),
+                enabled = selectedPackages.isNotEmpty(),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
             )
         }

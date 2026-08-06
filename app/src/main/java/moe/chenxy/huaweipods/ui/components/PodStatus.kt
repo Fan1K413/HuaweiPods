@@ -42,7 +42,8 @@ import top.yukonga.miuix.kmp.basic.Text
 fun PodStatus(
     batteryParams: BatteryParams,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    showCase: Boolean = true
 ) {
     val dividerColor = if (isSystemInDarkTheme()) Color(0xFF333333) else Color(0xFFEEEEEE)
     val dividerHeight = if (compact) 40.dp else 56.dp
@@ -69,18 +70,20 @@ fun PodStatus(
             modifier = Modifier.weight(1f),
             compact = compact
         )
-        Box(
-            modifier = Modifier
-                .width(0.5.dp)
-                .height(dividerHeight)
-                .background(dividerColor)
-        )
-        BatteryColumn(
-            label = stringResource(R.string.pod_case),
-            pod = batteryParams.case,
-            modifier = Modifier.weight(1f),
-            compact = compact
-        )
+        if (showCase) {
+            Box(
+                modifier = Modifier
+                    .width(0.5.dp)
+                    .height(dividerHeight)
+                    .background(dividerColor)
+            )
+            BatteryColumn(
+                label = stringResource(R.string.pod_case),
+                pod = batteryParams.case,
+                modifier = Modifier.weight(1f),
+                compact = compact
+            )
+        }
     }
 }
 

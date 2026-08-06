@@ -2,6 +2,7 @@ package moe.chenxy.huaweipods.pods
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -80,6 +81,22 @@ class DeviceCapabilitiesTest {
     }
 
     @Test
+    fun `only eyewear models omit the charging case`() {
+        val routesWithoutChargingCase = setOf(
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR,
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+        )
+
+        enabledHuaweiDeviceRoutes().forEach { route ->
+            assertEquals(
+                route.name,
+                route !in routesWithoutChargingCase,
+                route.hasChargingCase,
+            )
+        }
+    }
+
+    @Test
     fun `gesture configuration is only exposed for implemented routes`() {
         listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
@@ -101,5 +118,77 @@ class DeviceCapabilitiesTest {
                 route.usesReportedEarbudAvailability,
             )
         }
+    }
+
+    @Test
+    fun `background battery refresh is restricted to FreeClip 2`() {
+        HuaweiDeviceRoute.entries.forEach { route ->
+            assertEquals(
+                route.name,
+                route == HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                route.supportsBackgroundBatteryRefresh,
+            )
+        }
+    }
+
+    @Test
+    fun `broadcast route codec uses stable values and round trips every enabled route`() {
+        val expectedValues = linkedMapOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS3 to "HUAWEI_FREEBUDS3",
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS5 to "HUAWEI_FREEBUDS5",
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I to "HUAWEI_FREEBUDS6I",
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 to "HUAWEI_FREEBUDS_PRO3",
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 to "HUAWEI_FREEBUDS_PRO4",
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 to "HUAWEI_FREEBUDS_PRO5",
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to "HUAWEI_FREEBUDS7I",
+            HuaweiDeviceRoute.HUAWEI_FREECLIP to "HUAWEI_FREECLIP",
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2 to "HUAWEI_FREECLIP2",
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR to "HUAWEI_EYEWEAR",
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2 to "HUAWEI_EYEWEAR2",
+        )
+
+        assertEquals(enabledHuaweiDeviceRoutes(), expectedValues.keys.toList())
+        expectedValues.forEach { (route, value) ->
+            assertEquals(route.name, value, encodeHuaweiDeviceRouteForBroadcast(route))
+            assertEquals(value, route, decodeHuaweiDeviceRouteFromBroadcast(value))
+        }
+        assertEquals(expectedValues.size, expectedValues.values.toSet().size)
+    }
+
+    @Test
+    fun `broadcast route codec rejects unsupported null and unknown values`() {
+        assertNull(encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.UNSUPPORTED))
+        listOf(
+            null,
+            "",
+            "UNSUPPORTED",
+            "FREEBUDS3",
+            "HUAWEI_FREEBUDS_3",
+            "huawei_freebuds3",
+            " HUAWEI_FREEBUDS3 ",
+        ).forEach { value ->
+            assertNull(value, decodeHuaweiDeviceRouteFromBroadcast(value))
+        }
+    }
+
+    @Test
+    fun `broadcast route codec rejects a known route disabled by feature gate`() {
+        val disabledRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+        val featureGate: (HuaweiDeviceRoute) -> Boolean = { route ->
+            route != disabledRoute && isHuaweiDeviceRouteEnabled(route)
+        }
+
+        assertNull(encodeHuaweiDeviceRouteForBroadcast(disabledRoute, featureGate))
+        assertNull(decodeHuaweiDeviceRouteFromBroadcast("HUAWEI_FREEBUDS6I", featureGate))
+
+        val enabledRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3
+        assertEquals(
+            "HUAWEI_FREEBUDS_PRO3",
+            encodeHuaweiDeviceRouteForBroadcast(enabledRoute, featureGate),
+        )
+        assertEquals(
+            enabledRoute,
+            decodeHuaweiDeviceRouteFromBroadcast("HUAWEI_FREEBUDS_PRO3", featureGate),
+        )
     }
 }

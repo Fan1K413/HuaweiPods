@@ -22,6 +22,7 @@ import moe.chenxy.huaweipods.utils.SystemApisUtils.notifyAsUser
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
@@ -125,6 +126,9 @@ object MiBluetoothToastHook : HookContext() {
                         setIdentifier("BTHeadset$address")
                         putExtra("address", address)
                         putExtra("device_name", deviceName)
+                        encodeHuaweiDeviceRouteForBroadcast(deviceRoute)?.let {
+                            putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+                        }
                         addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
                     }
                     val ancCyclePendingIntent = PendingIntent.getBroadcast(

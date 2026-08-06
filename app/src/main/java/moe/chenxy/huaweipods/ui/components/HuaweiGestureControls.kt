@@ -52,6 +52,7 @@ import moe.chenxy.huaweipods.pods.HuaweiGestureKind
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
 import moe.chenxy.huaweipods.pods.HuaweiSwipeAction
 import moe.chenxy.huaweipods.pods.HuaweiTapAction
+import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Checkbox
@@ -583,6 +584,9 @@ private fun Context.requestFreeClip2GestureState(
     val request = {
         targetContext.sendBroadcast(Intent(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_REFRESH).apply {
             putExtra(HuaweiGestureController.EXTRA_ADDRESS, address)
+            encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
             putExtra("force", force)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)

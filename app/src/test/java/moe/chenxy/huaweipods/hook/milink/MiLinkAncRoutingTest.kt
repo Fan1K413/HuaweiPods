@@ -3,7 +3,9 @@ package moe.chenxy.huaweipods.hook.milink
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MiLinkAncRoutingTest {
@@ -90,5 +92,24 @@ class MiLinkAncRoutingTest {
                 storedSubMode = null,
             ),
         )
+    }
+
+    @Test
+    fun `dynamic MiLink state requires the same address and route`() {
+        val address = "AA:BB:CC:DD:EE:01"
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+
+        assertTrue(matchesMiLinkStateOwner(address, route, address.lowercase(), route))
+        assertFalse(matchesMiLinkStateOwner(address, route, "AA:BB:CC:DD:EE:02", route))
+        assertFalse(
+            matchesMiLinkStateOwner(
+                address,
+                route,
+                address,
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            ),
+        )
+        assertFalse(matchesMiLinkStateOwner(null, route, address, route))
+        assertFalse(matchesMiLinkStateOwner(address, route, null, route))
     }
 }

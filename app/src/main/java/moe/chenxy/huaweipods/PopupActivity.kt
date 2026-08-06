@@ -37,6 +37,10 @@ import kotlinx.coroutines.delay
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
+import moe.chenxy.huaweipods.pods.decodeHuaweiDeviceRouteFromBroadcast
+import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
+import moe.chenxy.huaweipods.pods.hasChargingCase
+import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.pods.isKnown
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
@@ -71,6 +75,13 @@ class PopupActivity : ComponentActivity() {
         val prefs = getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
         val appConfig = ConfigManager.refreshFromPrefs(prefs)
         val bluetoothDevice = intent.parcelableDevice("android.bluetooth.device.extra.DEVICE")
+        DeviceRoutePrefs.syncWithRemote(prefs, HuaweiPodsApp.xposedService)
+        val popupTarget = bluetoothDevice?.let { resolvePopupDeviceTarget(it, prefs) }
+        if (popupTarget == null) {
+            openModule()
+            finish()
+            return
+        }
         if (appConfig.notificationClickAction != ConfigManager.NOTIFICATION_CLICK_MODULE_POPUP) {
             openNotificationTarget(appConfig.notificationClickAction, bluetoothDevice)
             finish()
@@ -85,6 +96,7 @@ class PopupActivity : ComponentActivity() {
             }
             AppTheme(colorSchemeMode = colorSchemeMode, accentMode = prefs.getInt("accent_mode", 0)) {
                 PopupContent(
+                    target = popupTarget,
                     onMore = {
                         val latestConfig = ConfigManager.refreshFromPrefs(prefs)
                         openMoreTarget(latestConfig.moreClickAction, bluetoothDevice)
@@ -135,11 +147,35 @@ class PopupActivity : ComponentActivity() {
     private fun Intent.parcelableDevice(key: String): BluetoothDevice? {
         return getParcelableExtra(key, BluetoothDevice::class.java)
     }
+
+    @SuppressLint("MissingPermission")
+    private fun resolvePopupDeviceTarget(
+        device: BluetoothDevice,
+        prefs: android.content.SharedPreferences,
+    ): PopupDeviceTarget? {
+        val address = runCatching { device.address }.getOrNull()
+        val deviceName = runCatching {
+            device.name?.takeIf(String::isNotBlank)
+                ?: device.alias?.takeIf(String::isNotBlank)
+                ?: ""
+        }.getOrDefault("")
+        val route = DeviceRoutePrefs.resolve(
+            prefs = prefs,
+            address = address,
+            deviceName = deviceName,
+        )
+        return popupDeviceTargetOrNull(address, deviceName, route)
+    }
 }
 @Composable
-private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
+private fun PopupContent(
+    target: PopupDeviceTarget,
+    onMore: () -> Unit,
+    onDone: () -> Unit,
+) {
     val context = LocalContext.current
     val showDialog = remember { mutableStateOf(false) }
+    val terminalClosed = remember { mutableStateOf(false) }
 
     val prefs = remember { context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE) }
     val themeMode = remember { prefs.getInt("theme_mode", 0) }
@@ -155,28 +191,25 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     val ancLevel = remember { mutableStateOf(HuaweiAncLevel.ADAPTIVE.protocolValue) }
     val hasAncLevel = remember { mutableStateOf(false) }
     val transparencySubMode = remember { mutableStateOf(-1) }
-    val deviceName = remember { mutableStateOf("") }
-    val deviceAddress = remember { mutableStateOf("") }
-    val xposedService = remember { mutableStateOf(HuaweiPodsApp.xposedService) }
-    val routeSyncVersion = remember { mutableStateOf(0) }
 
     val broadcastReceiver = remember {
         object : BroadcastReceiver() {
             override fun onReceive(p0: Context?, p1: Intent?) {
                 val intent = p1 ?: return
-                intent.getStringExtra("address")?.let { deviceAddress.value = it }
-                intent.getStringExtra("device_name")?.let { deviceName.value = it }
+                val identity = PopupBroadcastIdentity(
+                    address = intent.getStringExtra("address"),
+                    deviceName = intent.getStringExtra("device_name"),
+                    route = decodeHuaweiDeviceRouteFromBroadcast(
+                        intent.getStringExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE),
+                    ),
+                )
+                if (!popupBroadcastMatchesTarget(target, identity)) return
                 when (HuaweiPodsAction.canonical(intent.action)) {
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         val reportedMode = NoiseControlMode.fromBroadcastStatus(
                             intent.getIntExtra("status", NoiseControlMode.UNKNOWN.broadcastStatus),
                         )
                         ancMode.value = reportedMode
-                        val route = DeviceRoutePrefs.resolve(
-                            prefs = prefs,
-                            address = deviceAddress.value,
-                            deviceName = deviceName.value,
-                        )
                         intent.getIntExtra("submode", -1)
                             .takeIf { intent.hasExtra("submode") && it >= 0 }
                             ?.let { subMode ->
@@ -187,7 +220,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                                             hasAncLevel.value = true
                                         }
                                     NoiseControlMode.TRANSPARENCY ->
-                                        if (subMode in popupTransparencySubModes(route)) {
+                                        if (subMode in popupTransparencySubModes(target.route)) {
                                             transparencySubMode.value = subMode
                                         }
                                     NoiseControlMode.UNKNOWN,
@@ -196,15 +229,10 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                             }
                     }
                     HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED -> {
-                        val route = DeviceRoutePrefs.resolve(
-                            prefs = prefs,
-                            address = deviceAddress.value,
-                            deviceName = deviceName.value,
-                        )
                         val level = intent.getIntExtra("level", ancLevel.value)
                         when {
-                            route.supportsAncDirectionDial -> ancLevel.value = level.coerceIn(0, 8)
-                            route.supportsDiscreteAncLevels ->
+                            target.route.supportsAncDirectionDial -> ancLevel.value = level.coerceIn(0, 8)
+                            target.route.supportsDiscreteAncLevels ->
                                 HuaweiAncLevel.fromProtocolValue(level)?.let {
                                     ancLevel.value = it.protocolValue
                                     hasAncLevel.value = true
@@ -217,10 +245,12 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                         }
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
-                        if (!showDialog.value) showDialog.value = true
+                        if (!terminalClosed.value && !showDialog.value) showDialog.value = true
                     }
                     HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
+                        terminalClosed.value = true
                         showDialog.value = false
+                        onDone()
                     }
                 }
             }
@@ -228,10 +258,6 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     DisposableEffect(Unit) {
-        val serviceListener: (io.github.libxposed.service.XposedService?) -> Unit = { service ->
-            xposedService.value = service
-        }
-        HuaweiPodsApp.addServiceListener(serviceListener)
         context.registerReceiver(broadcastReceiver, IntentFilter().apply {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED)
@@ -241,34 +267,32 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
         }, Context.RECEIVER_EXPORTED)
 
         context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_PODS_UI_INIT).apply {
+            putPopupTarget(target)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
         context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_REFRESH_STATUS).apply {
+            putPopupTarget(target)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
 
         onDispose {
             try { context.unregisterReceiver(broadcastReceiver) } catch (_: Exception) {}
-            HuaweiPodsApp.removeServiceListener(serviceListener)
         }
-    }
-
-    LaunchedEffect(xposedService.value) {
-        DeviceRoutePrefs.syncWithRemote(prefs, xposedService.value)
-        routeSyncVersion.value++
     }
 
     // Timeout fallback: show dialog even if no response within 500ms
     // Periodic refresh: poll earbuds every 15s while popup is open
     LaunchedEffect(Unit) {
         delay(500)
-        if (!showDialog.value) showDialog.value = true
+        if (!terminalClosed.value && !showDialog.value) showDialog.value = true
 
-        while (true) {
+        while (!terminalClosed.value) {
             delay(15_000)
+            if (terminalClosed.value) break
             context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_REFRESH_STATUS).apply {
+                putPopupTarget(target)
                 setPackage("com.android.bluetooth")
                 addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             })
@@ -277,7 +301,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
 
     fun setAncMode(mode: NoiseControlMode) {
         if (!mode.isKnown()) return
-        val route = DeviceRoutePrefs.resolve(prefs, deviceAddress.value, deviceName.value)
+        val route = target.route
         if (!route.supportsAnc) return
         val targetMode = if (mode == NoiseControlMode.TRANSPARENCY && !route.supportsTransparency) {
             NoiseControlMode.OFF
@@ -286,6 +310,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
         }
         ancMode.value = targetMode
         Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
+            putPopupTarget(target)
             putExtra("status", targetMode.broadcastStatus)
             if (route.supportsDiscreteAncLevels || targetMode == NoiseControlMode.TRANSPARENCY && route.supportsTransparency) {
                 val subMode = when (targetMode) {
@@ -309,7 +334,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     fun setAncLevel(level: Int) {
-        val route = DeviceRoutePrefs.resolve(prefs, deviceAddress.value, deviceName.value)
+        val route = target.route
         if (!route.supportsAnc) return
         val safeLevel = when {
             route.supportsAncDirectionDial -> level.coerceIn(0, 8)
@@ -326,6 +351,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
             hasAncLevel.value = true
         }
         Intent(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_SET).apply {
+            putPopupTarget(target)
             putExtra("level", safeLevel)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
@@ -333,17 +359,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
         }
     }
 
-    val deviceRoute = remember(
-        deviceAddress.value,
-        deviceName.value,
-        routeSyncVersion.value,
-    ) {
-        DeviceRoutePrefs.resolve(
-            prefs = prefs,
-            address = deviceAddress.value,
-            deviceName = deviceName.value,
-        )
-    }
+    val deviceRoute = target.route
     LaunchedEffect(deviceRoute) {
         if (ancMode.value == NoiseControlMode.UNKNOWN && !deviceRoute.supportsAncStateReadback) {
             ancMode.value = NoiseControlMode.OFF
@@ -366,7 +382,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
 
     Scaffold(containerColor = Color.Transparent) { _ ->
         OverlayDialog(
-            title = deviceName.value.ifEmpty { stringResource(R.string.app_name) },
+            title = target.deviceName.ifEmpty { stringResource(R.string.app_name) },
             show = showDialog.value,
             backgroundColor = dialogBgColor,
             onDismissRequest = {
@@ -436,8 +452,9 @@ private fun PortraitPopupBody(
     ) {
         Card(modifier = Modifier.fillMaxWidth()) {
             PodStatus(
-                batteryParams,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)
+                batteryParams = batteryParams,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+                showCase = !deviceRoute.isSupported || deviceRoute.hasChargingCase
             )
         }
         if (showAnc) {
@@ -499,9 +516,10 @@ private fun LandscapePopupBody(
         ) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 PodStatus(
-                    batteryParams,
+                    batteryParams = batteryParams,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
-                    compact = true
+                    compact = true,
+                    showCase = !deviceRoute.isSupported || deviceRoute.hasChargingCase
                 )
             }
             if (showAnc) {
@@ -544,3 +562,46 @@ private fun popupTransparencySubModes(route: HuaweiDeviceRoute): Set<Int> =
 
 private fun popupDefaultTransparencySubMode(route: HuaweiDeviceRoute): Int =
     if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) 0x02 else 0xFF
+
+internal data class PopupDeviceTarget(
+    val address: String,
+    val deviceName: String,
+    val route: HuaweiDeviceRoute,
+)
+
+internal data class PopupBroadcastIdentity(
+    val address: String?,
+    val deviceName: String?,
+    val route: HuaweiDeviceRoute?,
+)
+
+internal fun popupDeviceTargetOrNull(
+    address: String?,
+    deviceName: String?,
+    route: HuaweiDeviceRoute,
+): PopupDeviceTarget? {
+    val normalizedAddress = address?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    if (!route.isSupported) return null
+    return PopupDeviceTarget(
+        address = normalizedAddress,
+        deviceName = deviceName?.trim().orEmpty(),
+        route = route,
+    )
+}
+
+internal fun popupBroadcastMatchesTarget(
+    target: PopupDeviceTarget,
+    received: PopupBroadcastIdentity,
+): Boolean {
+    val receivedAddress = received.address?.trim()?.takeIf(String::isNotEmpty) ?: return false
+    return receivedAddress.equals(target.address, ignoreCase = true) &&
+        received.route == target.route
+}
+
+private fun Intent.putPopupTarget(target: PopupDeviceTarget) {
+    putExtra("address", target.address)
+    putExtra("device_name", target.deviceName)
+    encodeHuaweiDeviceRouteForBroadcast(target.route)?.let {
+        putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+    }
+}

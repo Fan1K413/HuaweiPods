@@ -20,7 +20,7 @@ HuaweiPods 需要正常工作的 LSPosed 环境，并会修改系统蓝牙相关
 
 ## 1. 安装 HuaweiPods
 
-从 [GitHub Releases](https://github.com/Nshpiter/HuaweiPods/releases) 下载正式 APK，正常安装后打开 HuaweiPods。1.2.0 及以上版本无需寻找机型专用包。
+从 [GitHub Releases](https://github.com/Nshpiter/HuaweiPods/releases) 下载正式 APK，正常安装后打开 HuaweiPods。1.2.0 及以上版本无需寻找机型专用包。首次安装会显示简短引导，用于检查 LSPosed 服务和两个核心蓝牙作用域；缺少项目时仍可继续，之后再到 LSPosed 补齐。
 
 ## 2. 启用 LSPosed 作用域
 
@@ -65,5 +65,7 @@ FreeClip、FreeClip 2 和两代 Eyewear 不提供传统主动降噪，看不到�
 ## 更新或卸载
 
 - 同签名的新版本可以直接覆盖安装；
+- 可在“设置 → 关于 HuaweiPods”中手动检查 GitHub 更新，也可关闭启动时自动检查；
+- 覆盖安装完成后，HuaweiPods 会提示选择并重启作用域，使新版 Hook 生效；
 - 如果系统提示签名不一致，请改用同一发布渠道提供的版本；
 - 停用或卸载前，先在 LSPosed 中取消 HuaweiPods 作用域，再重启相关进程或手机。

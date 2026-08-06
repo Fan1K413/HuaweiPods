@@ -5,6 +5,8 @@ import android.content.IntentFilter
 object HuaweiPodsAction {
     private const val PREFIX = "chen.action.huaweipods"
 
+    const val EXTRA_DEVICE_ROUTE = "device_route"
+
     const val ACTION_SHOW_PODS_UI = PREFIX + ".show_pods_ui"
     const val ACTION_SEND_STRONG_TOAST = PREFIX + ".sendstrongtoast"
     const val ACTION_UPDATE_PODS_NOTIFICATION = PREFIX + ".updatepodsnotification"

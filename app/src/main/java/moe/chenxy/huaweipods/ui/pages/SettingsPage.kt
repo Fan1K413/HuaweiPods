@@ -25,6 +25,8 @@ fun SettingsPage(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     desktopIconHidden: MutableState<Boolean> = mutableStateOf(false),
     onDesktopIconHiddenChange: (Boolean) -> Unit = {},
+    checkUpdatesOnLaunch: MutableState<Boolean> = mutableStateOf(true),
+    onCheckUpdatesOnLaunchChange: (Boolean) -> Unit = {},
     logLevel: MutableState<Int> = mutableStateOf(ConfigManager.LOG_LEVEL_BASIC),
     onLogLevelChange: (Int) -> Unit = {},
     islandMode: MutableState<Int> = mutableStateOf(ConfigManager.ISLAND_MODE_OFFICIAL),
@@ -113,6 +115,12 @@ fun SettingsPage(
                     summary = stringResource(R.string.hide_desktop_icon_summary),
                     checked = desktopIconHidden.value,
                     onCheckedChange = { onDesktopIconHiddenChange(it) }
+                )
+                SwitchPreference(
+                    title = stringResource(R.string.check_updates_on_launch),
+                    summary = stringResource(R.string.check_updates_on_launch_summary),
+                    checked = checkUpdatesOnLaunch.value,
+                    onCheckedChange = { onCheckUpdatesOnLaunchChange(it) },
                 )
             }
         }
