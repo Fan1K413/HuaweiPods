@@ -40,9 +40,6 @@ object HuaweiDeviceRouteResolver {
         val route = resolveBoundOrNamedRoute(sessionRoute, deviceName)
         if (route.isSupported && normalizedAddress != null) {
             sessionBindings[normalizedAddress] = route
-            if (sessionRoute == null) {
-                prefs?.let { DeviceRoutePrefs.bind(it, normalizedAddress, route) }
-            }
         } else if (normalizedAddress != null) {
             sessionBindings.remove(normalizedAddress)
         }

@@ -1,0 +1,109 @@
+package moe.chenxy.huaweipods.ui.components
+
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.HuaweiGestureKind
+import moe.chenxy.huaweipods.pods.HuaweiGestureSide
+import moe.chenxy.huaweipods.pods.HuaweiSwipeAction
+import moe.chenxy.huaweipods.pods.HuaweiTapAction
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class HuaweiGestureControlsTest {
+    @Test
+    fun `layout exposes only verified controls for each route`() {
+        assertEquals(
+            listOf(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureKind.TRIPLE_TAP),
+            huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I).tapKinds,
+        )
+
+        val freeClip2 = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREECLIP2)
+        assertEquals(
+            listOf(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureKind.TRIPLE_TAP),
+            freeClip2.tapKinds,
+        )
+        assertTrue(freeClip2.hasSwipe)
+
+        val eyewear2 = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_EYEWEAR2)
+        assertEquals(listOf(HuaweiGestureKind.DOUBLE_TAP), eyewear2.tapKinds)
+        assertTrue(eyewear2.hasSwipe)
+
+        val pro3 = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3)
+        assertTrue(pro3.hasFreeBudsPro3Controls)
+    }
+
+    @Test
+    fun `FreeBuds 3 and unsupported gesture routes stay hidden`() {
+        val layout = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS3)
+        assertFalse(layout.isVisible)
+        assertFalse(huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS5).isVisible)
+    }
+
+    @Test
+    fun `preference namespace separates address and route`() {
+        val firstAddress = gesturePreferencePrefix(
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            "aa:bb:cc:dd:ee:ff",
+        )
+        val secondAddress = gesturePreferencePrefix(
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            "11:22:33:44:55:66",
+        )
+        val otherRoute = gesturePreferencePrefix(
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+            "aa:bb:cc:dd:ee:ff",
+        )
+
+        assertNotEquals(firstAddress, secondAddress)
+        assertNotEquals(firstAddress, otherRoute)
+        assertTrue(firstAddress.contains("AA:BB:CC:DD:EE:FF"))
+    }
+
+    @Test
+    fun `FreeClip 2 readback maps only route-verified actions`() {
+        val state = freeClip2GestureReadback(
+            doubleLeft = "play_pause",
+            doubleRight = "spatial_audio",
+            tripleLeft = "voice_assistant",
+            tripleRight = "play_next",
+            swipeLeft = "volume_control",
+            swipeRight = "track_control",
+        )
+
+        assertEquals(
+            HuaweiTapAction.PLAY_PAUSE,
+            state.tapActions[HuaweiTapSlot(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureSide.LEFT)],
+        )
+        assertEquals(
+            HuaweiTapAction.SPATIAL_AUDIO,
+            state.tapActions[HuaweiTapSlot(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureSide.RIGHT)],
+        )
+        assertFalse(
+            state.tapActions.containsKey(
+                HuaweiTapSlot(HuaweiGestureKind.TRIPLE_TAP, HuaweiGestureSide.LEFT),
+            ),
+        )
+        assertEquals(
+            HuaweiTapAction.PLAY_NEXT,
+            state.tapActions[HuaweiTapSlot(HuaweiGestureKind.TRIPLE_TAP, HuaweiGestureSide.RIGHT)],
+        )
+        assertEquals(HuaweiSwipeAction.VOLUME_CONTROL, state.swipeActions[HuaweiGestureSide.LEFT])
+        assertFalse(state.swipeActions.containsKey(HuaweiGestureSide.RIGHT))
+    }
+
+    @Test
+    fun `partial FreeClip 2 confirmations merge without clearing previous state`() {
+        val doubleTap = freeClip2GestureReadback(doubleLeft = "play_pause")
+        val swipe = freeClip2GestureReadback(swipeRight = "none")
+
+        val merged = doubleTap.mergedWith(swipe)
+
+        assertEquals(
+            HuaweiTapAction.PLAY_PAUSE,
+            merged.tapActions[HuaweiTapSlot(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureSide.LEFT)],
+        )
+        assertEquals(HuaweiSwipeAction.NONE, merged.swipeActions[HuaweiGestureSide.RIGHT])
+    }
+}

@@ -1,19 +1,35 @@
 package moe.chenxy.huaweipods.pods
 
-/** 已验证的协议指令；实验路由可能包含注明待实机复核的同协议族指令。 */
+/** 仅包含已经从实机抓包中确认过的 Huawei RFCOMM 指令。 */
 internal object HuaweiAncPackets {
     private val huaweiBatteryQuery =
         packet(0x5A, 0x00, 0x09, 0x00, 0x01, 0x08, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0xFB, 0xB9)
-    private val freeBudsPro3CurrentStateQuery =
+    private val modernFreeBudsCurrentStateQuery =
         packet(0x5A, 0x00, 0x05, 0x00, 0x2B, 0x2A, 0x01, 0x00, 0x42, 0x7E)
+
     private val freeBuds3Enabled = mapOf(
         false to packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x00, 0x68, 0x21),
         true to packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x04, 0x01, 0x01, 0x01, 0x78, 0x00),
     )
-    // FreeBuds Pro 3 的降噪开启、关闭与状态回读已完成实机验证。
     private val modernFreeBudsEnabled = mapOf(
         false to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x00, 0x00, 0xD2, 0x2D),
         true to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0xFF, 0xFF, 0xEC),
+    )
+    private val modernAncLevels = mapOf(
+        0xFF to modernFreeBudsEnabled.getValue(true),
+        HuaweiAncLevel.ADAPTIVE.protocolValue to
+            packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x01, 0xF1, 0x3D),
+        HuaweiAncLevel.LIGHT.protocolValue to
+            packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x00, 0xE1, 0x1C),
+        HuaweiAncLevel.BALANCED.protocolValue to
+            packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x02, 0xC1, 0x5E),
+        HuaweiAncLevel.DEEP.protocolValue to
+            packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x03, 0xD1, 0x7F),
+    )
+    private val transparencyModes = mapOf(
+        0xFF to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x02, 0xFF, 0xAA, 0xBF),
+        0x01 to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x02, 0x01, 0xA4, 0x6E),
+        0x02 to packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x02, 0x02, 0x94, 0x0D),
     )
     private val freeBuds3Levels = listOf(
         packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x00, 0x27, 0x13),
@@ -27,57 +43,49 @@ internal object HuaweiAncPackets {
         packet(0x5A, 0x00, 0x06, 0x00, 0x2B, 0x08, 0x01, 0x01, 0x08, 0xA6, 0x1B),
     )
 
-    fun enabled(route: HuaweiDeviceRoute, enabled: Boolean): ByteArray? = when (route) {
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Enabled[enabled]
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> modernFreeBudsEnabled[enabled]
-        HuaweiDeviceRoute.HUAWEI_FREECLIP,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP2,
-        HuaweiDeviceRoute.HUAWEI_EYEWEAR,
-        HuaweiDeviceRoute.UNSUPPORTED -> null
+    fun enabled(route: HuaweiDeviceRoute, enabled: Boolean): ByteArray? = when {
+        route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Enabled[enabled]
+        route.supportsAnc -> modernFreeBudsEnabled[enabled]
+        else -> null
     }?.copyOf()
 
-    fun level(route: HuaweiDeviceRoute, level: Int): ByteArray? = when (route) {
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> freeBuds3Levels[level.coerceIn(0, freeBuds3Levels.lastIndex)]
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP2,
-        HuaweiDeviceRoute.HUAWEI_EYEWEAR,
-        HuaweiDeviceRoute.UNSUPPORTED -> null
+    fun mode(
+        route: HuaweiDeviceRoute,
+        mode: NoiseControlMode,
+        subMode: Int? = null,
+    ): ByteArray? = when {
+        !route.supportsAnc || mode == NoiseControlMode.UNKNOWN -> null
+        route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> when (mode) {
+            NoiseControlMode.OFF -> freeBuds3Enabled[false]
+            NoiseControlMode.NOISE_CANCELLATION -> freeBuds3Enabled[true]
+            NoiseControlMode.TRANSPARENCY,
+            NoiseControlMode.UNKNOWN -> null
+        }
+        mode == NoiseControlMode.OFF -> modernFreeBudsEnabled[false]
+        mode == NoiseControlMode.NOISE_CANCELLATION && route.supportsDiscreteAncLevels ->
+            modernAncLevels[subMode ?: HuaweiAncLevel.ADAPTIVE.protocolValue]
+        mode == NoiseControlMode.NOISE_CANCELLATION -> modernFreeBudsEnabled[true]
+        mode == NoiseControlMode.TRANSPARENCY && route.supportsTransparency -> {
+            val defaultSubMode = when (route) {
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> 0x02
+                else -> 0xFF
+            }
+            transparencyModes[subMode ?: defaultSubMode]
+        }
+        else -> null
     }?.copyOf()
 
-    fun batteryQuery(route: HuaweiDeviceRoute): ByteArray? = when (route) {
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP2,
-        HuaweiDeviceRoute.HUAWEI_EYEWEAR -> huaweiBatteryQuery
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-        HuaweiDeviceRoute.UNSUPPORTED -> null
-    }?.copyOf()
+    fun level(route: HuaweiDeviceRoute, level: Int): ByteArray? =
+        freeBuds3Levels
+            .takeIf { route.supportsAncDirectionDial }
+            ?.get(level.coerceIn(0, freeBuds3Levels.lastIndex))
+            ?.copyOf()
 
-    fun currentStateQuery(route: HuaweiDeviceRoute): ByteArray? = when (route) {
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 -> freeBudsPro3CurrentStateQuery
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP,
-        HuaweiDeviceRoute.HUAWEI_FREECLIP2,
-        HuaweiDeviceRoute.HUAWEI_EYEWEAR,
-        HuaweiDeviceRoute.UNSUPPORTED -> null
-    }?.copyOf()
+    fun batteryQuery(route: HuaweiDeviceRoute): ByteArray? =
+        huaweiBatteryQuery.takeIf { route.supportsRfcommBattery }?.copyOf()
+
+    fun currentStateQuery(route: HuaweiDeviceRoute): ByteArray? =
+        modernFreeBudsCurrentStateQuery.takeIf { route.supportsAncStateReadback }?.copyOf()
 
     private fun packet(vararg values: Int): ByteArray =
         values.map(Int::toByte).toByteArray()

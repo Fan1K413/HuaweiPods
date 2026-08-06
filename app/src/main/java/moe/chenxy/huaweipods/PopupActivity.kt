@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,7 +36,13 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.HuaweiAncLevel
+import moe.chenxy.huaweipods.pods.isKnown
 import moe.chenxy.huaweipods.pods.supportsAnc
+import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
+import moe.chenxy.huaweipods.pods.supportsAncStateReadback
+import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
+import moe.chenxy.huaweipods.pods.supportsTransparency
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.ui.AppLocale
@@ -143,8 +151,10 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     val batteryParams = remember { mutableStateOf(BatteryParams()) }
-    val ancMode = remember { mutableStateOf(NoiseControlMode.OFF) }
-    val ancLevel = remember { mutableStateOf(0) }
+    val ancMode = remember { mutableStateOf(NoiseControlMode.UNKNOWN) }
+    val ancLevel = remember { mutableStateOf(HuaweiAncLevel.ADAPTIVE.protocolValue) }
+    val hasAncLevel = remember { mutableStateOf(false) }
+    val transparencySubMode = remember { mutableStateOf(-1) }
     val deviceName = remember { mutableStateOf("") }
     val deviceAddress = remember { mutableStateOf("") }
     val xposedService = remember { mutableStateOf(HuaweiPodsApp.xposedService) }
@@ -158,15 +168,48 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                 intent.getStringExtra("device_name")?.let { deviceName.value = it }
                 when (HuaweiPodsAction.canonical(intent.action)) {
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
-                        val status = intent.getIntExtra("status", 1)
-                        ancMode.value = if (status == 2) {
-                            NoiseControlMode.NOISE_CANCELLATION
-                        } else {
-                            NoiseControlMode.OFF
-                        }
+                        val reportedMode = NoiseControlMode.fromBroadcastStatus(
+                            intent.getIntExtra("status", NoiseControlMode.UNKNOWN.broadcastStatus),
+                        )
+                        ancMode.value = reportedMode
+                        val route = DeviceRoutePrefs.resolve(
+                            prefs = prefs,
+                            address = deviceAddress.value,
+                            deviceName = deviceName.value,
+                        )
+                        intent.getIntExtra("submode", -1)
+                            .takeIf { intent.hasExtra("submode") && it >= 0 }
+                            ?.let { subMode ->
+                                when (reportedMode) {
+                                    NoiseControlMode.NOISE_CANCELLATION ->
+                                        if (HuaweiAncLevel.fromProtocolValue(subMode) != null) {
+                                            ancLevel.value = subMode
+                                            hasAncLevel.value = true
+                                        }
+                                    NoiseControlMode.TRANSPARENCY ->
+                                        if (subMode in popupTransparencySubModes(route)) {
+                                            transparencySubMode.value = subMode
+                                        }
+                                    NoiseControlMode.UNKNOWN,
+                                    NoiseControlMode.OFF -> Unit
+                                }
+                            }
                     }
                     HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED -> {
-                        ancLevel.value = intent.getIntExtra("level", ancLevel.value).coerceIn(0, 8)
+                        val route = DeviceRoutePrefs.resolve(
+                            prefs = prefs,
+                            address = deviceAddress.value,
+                            deviceName = deviceName.value,
+                        )
+                        val level = intent.getIntExtra("level", ancLevel.value)
+                        when {
+                            route.supportsAncDirectionDial -> ancLevel.value = level.coerceIn(0, 8)
+                            route.supportsDiscreteAncLevels ->
+                                HuaweiAncLevel.fromProtocolValue(level)?.let {
+                                    ancLevel.value = it.protocolValue
+                                    hasAncLevel.value = true
+                                }
+                        }
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
                         intent.getParcelableExtra("status", BatteryParams::class.java)?.let {
@@ -218,13 +261,13 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     // Timeout fallback: show dialog even if no response within 500ms
-    // Periodic refresh: poll earbuds every 10s while popup is open
+    // Periodic refresh: poll earbuds every 15s while popup is open
     LaunchedEffect(Unit) {
         delay(500)
         if (!showDialog.value) showDialog.value = true
 
         while (true) {
-            delay(10_000)
+            delay(15_000)
             context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_REFRESH_STATUS).apply {
                 setPackage("com.android.bluetooth")
                 addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
@@ -233,13 +276,32 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     fun setAncMode(mode: NoiseControlMode) {
-        ancMode.value = mode
-        val status = when (mode) {
-            NoiseControlMode.OFF -> 1
-            NoiseControlMode.NOISE_CANCELLATION -> 2
+        if (!mode.isKnown()) return
+        val route = DeviceRoutePrefs.resolve(prefs, deviceAddress.value, deviceName.value)
+        if (!route.supportsAnc) return
+        val targetMode = if (mode == NoiseControlMode.TRANSPARENCY && !route.supportsTransparency) {
+            NoiseControlMode.OFF
+        } else {
+            mode
         }
+        ancMode.value = targetMode
         Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
-            putExtra("status", status)
+            putExtra("status", targetMode.broadcastStatus)
+            if (route.supportsDiscreteAncLevels || targetMode == NoiseControlMode.TRANSPARENCY && route.supportsTransparency) {
+                val subMode = when (targetMode) {
+                    NoiseControlMode.NOISE_CANCELLATION ->
+                        ancLevel.value.takeIf {
+                            hasAncLevel.value && HuaweiAncLevel.fromProtocolValue(it) != null
+                        }
+                    NoiseControlMode.TRANSPARENCY -> {
+                        transparencySubMode.value
+                            .takeIf { it in popupTransparencySubModes(route) }
+                    }
+                    NoiseControlMode.UNKNOWN,
+                    NoiseControlMode.OFF -> null
+                }
+                subMode?.let { putExtra("submode", it) }
+            }
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             context.sendBroadcast(this)
@@ -247,8 +309,22 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
 
     fun setAncLevel(level: Int) {
-        val safeLevel = level.coerceIn(0, 8)
-        ancLevel.value = safeLevel
+        val route = DeviceRoutePrefs.resolve(prefs, deviceAddress.value, deviceName.value)
+        if (!route.supportsAnc) return
+        val safeLevel = when {
+            route.supportsAncDirectionDial -> level.coerceIn(0, 8)
+            route.supportsDiscreteAncLevels && ancMode.value == NoiseControlMode.NOISE_CANCELLATION ->
+                level.takeIf { HuaweiAncLevel.fromProtocolValue(it) != null } ?: return
+            route.supportsTransparency && ancMode.value == NoiseControlMode.TRANSPARENCY ->
+                level.takeIf { it in popupTransparencySubModes(route) } ?: return
+            else -> return
+        }
+        if (ancMode.value == NoiseControlMode.TRANSPARENCY) {
+            transparencySubMode.value = safeLevel
+        } else {
+            ancLevel.value = safeLevel
+            hasAncLevel.value = true
+        }
         Intent(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_SET).apply {
             putExtra("level", safeLevel)
             setPackage("com.android.bluetooth")
@@ -268,7 +344,16 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
             deviceName = deviceName.value,
         )
     }
-    val ancLevelChange = if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+    LaunchedEffect(deviceRoute) {
+        if (ancMode.value == NoiseControlMode.UNKNOWN && !deviceRoute.supportsAncStateReadback) {
+            ancMode.value = NoiseControlMode.OFF
+        }
+    }
+    val ancLevelChange = if (
+        deviceRoute.supportsAncDirectionDial ||
+            deviceRoute.supportsDiscreteAncLevels ||
+            deviceRoute.supportsTransparency
+    ) {
         ::setAncLevel
     } else {
         null
@@ -295,9 +380,16 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                 LandscapePopupBody(
                     batteryParams = batteryParams.value,
                     ancMode = ancMode.value,
-                    ancLevel = ancLevel.value,
+                    ancLevel = if (ancMode.value == NoiseControlMode.TRANSPARENCY) {
+                        transparencySubMode.value
+                            .takeIf { it in popupTransparencySubModes(deviceRoute) }
+                            ?: popupDefaultTransparencySubMode(deviceRoute)
+                    } else {
+                        ancLevel.value
+                    },
                     onAncModeChange = ::setAncMode,
                     onAncLevelChange = ancLevelChange,
+                    deviceRoute = deviceRoute,
                     showAnc = showAnc,
                     onMore = onMore,
                     onDone = { showDialog.value = false },
@@ -306,9 +398,16 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                 PortraitPopupBody(
                     batteryParams = batteryParams.value,
                     ancMode = ancMode.value,
-                    ancLevel = ancLevel.value,
+                    ancLevel = if (ancMode.value == NoiseControlMode.TRANSPARENCY) {
+                        transparencySubMode.value
+                            .takeIf { it in popupTransparencySubModes(deviceRoute) }
+                            ?: popupDefaultTransparencySubMode(deviceRoute)
+                    } else {
+                        ancLevel.value
+                    },
                     onAncModeChange = ::setAncMode,
                     onAncLevelChange = ancLevelChange,
+                    deviceRoute = deviceRoute,
                     showAnc = showAnc,
                     onMore = onMore,
                     onDone = { showDialog.value = false },
@@ -325,11 +424,16 @@ private fun PortraitPopupBody(
     ancLevel: Int,
     onAncModeChange: (NoiseControlMode) -> Unit,
     onAncLevelChange: ((Int) -> Unit)?,
+    deviceRoute: HuaweiDeviceRoute,
     showAnc: Boolean,
     onMore: () -> Unit,
     onDone: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+    ) {
         Card(modifier = Modifier.fillMaxWidth()) {
             PodStatus(
                 batteryParams,
@@ -342,6 +446,7 @@ private fun PortraitPopupBody(
                 AncSwitch(
                     ancStatus = ancMode,
                     onAncModeChange = onAncModeChange,
+                    deviceRoute = deviceRoute,
                     huaweiAncLevel = ancLevel,
                     onHuaweiAncLevelChange = onAncLevelChange,
                 )
@@ -373,6 +478,7 @@ private fun LandscapePopupBody(
     ancLevel: Int,
     onAncModeChange: (NoiseControlMode) -> Unit,
     onAncLevelChange: ((Int) -> Unit)?,
+    deviceRoute: HuaweiDeviceRoute,
     showAnc: Boolean,
     onMore: () -> Unit,
     onDone: () -> Unit,
@@ -387,7 +493,8 @@ private fun LandscapePopupBody(
         Column(
             modifier = Modifier
                 .weight(0.60f)
-                .fillMaxHeight(),
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Center
         ) {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -403,6 +510,7 @@ private fun LandscapePopupBody(
                     AncSwitch(
                         ancStatus = ancMode,
                         onAncModeChange = onAncModeChange,
+                        deviceRoute = deviceRoute,
                         huaweiAncLevel = ancLevel,
                         onHuaweiAncLevelChange = onAncLevelChange,
                         compact = true,
@@ -430,3 +538,9 @@ private fun LandscapePopupBody(
         }
     }
 }
+
+private fun popupTransparencySubModes(route: HuaweiDeviceRoute): Set<Int> =
+    if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) setOf(0x01, 0x02) else setOf(0x01, 0xFF)
+
+private fun popupDefaultTransparencySubMode(route: HuaweiDeviceRoute): Int =
+    if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) 0x02 else 0xFF

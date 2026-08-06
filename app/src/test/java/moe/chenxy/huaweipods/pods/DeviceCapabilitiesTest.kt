@@ -7,107 +7,99 @@ import org.junit.Test
 
 class DeviceCapabilitiesTest {
     @Test
-    fun `FreeBuds Pro 3 test route only enables target model and FreeBuds 3`() {
+    fun `unified build recognizes every integrated model by exact official alias`() {
         val cases = listOf(
             "HUAWEI FreeBuds 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-            "FreeBuds 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-            "HUAWEI FreeBuds 5" to HuaweiDeviceRoute.UNSUPPORTED,
-            "FreeBuds 5" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI FreeBuds 6i" to HuaweiDeviceRoute.UNSUPPORTED,
-            "FreeBuds 6i" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI FreeBuds Pro 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            "FreeBuds 5" to HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+            "HUAWEI FreeBuds 6i" to HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             "FreeBuds Pro 3" to HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
-            "HUAWEI FreeBuds Pro 4" to HuaweiDeviceRoute.UNSUPPORTED,
-            "FreeBuds Pro 4" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI FreeBuds 7i" to HuaweiDeviceRoute.UNSUPPORTED,
-            "FreeBuds 7i" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI FreeClip" to HuaweiDeviceRoute.UNSUPPORTED,
-            "FreeClip" to HuaweiDeviceRoute.UNSUPPORTED,
-            "FreeClip 2" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI FreeClip 2" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI Eyewear" to HuaweiDeviceRoute.UNSUPPORTED,
-            "OPPO Enco" to HuaweiDeviceRoute.UNSUPPORTED,
-            "OPPO Enco X3" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI WATCH" to HuaweiDeviceRoute.UNSUPPORTED,
-            "HUAWEI WATCH GT" to HuaweiDeviceRoute.UNSUPPORTED,
-            "" to HuaweiDeviceRoute.UNSUPPORTED,
-            "   " to HuaweiDeviceRoute.UNSUPPORTED,
-            "My custom freebuds3 headset" to HuaweiDeviceRoute.UNSUPPORTED,
+            "HUAWEI FreeBuds Pro 4" to HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
+            "FreeBuds Pro 5" to HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
+            "HUAWEI FreeBuds 7i" to HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+            "FreeClip" to HuaweiDeviceRoute.HUAWEI_FREECLIP,
+            "HUAWEI FreeClip 2" to HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            "HUAWEI Eyewear" to HuaweiDeviceRoute.HUAWEI_EYEWEAR,
+            "Eyewear 2" to HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
         )
 
         cases.forEach { (deviceName, expectedRoute) ->
             assertEquals(deviceName, expectedRoute, detectHuaweiDeviceRoute(deviceName))
         }
-        assertEquals("null", HuaweiDeviceRoute.UNSUPPORTED, detectHuaweiDeviceRoute(null))
-        assertEquals(
-            listOf(
-                HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-                HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
-            ),
-            enabledHuaweiDeviceRoutes(),
-        )
+        assertEquals(HuaweiDeviceRoute.entries.size - 1, enabledHuaweiDeviceRoutes().size)
     }
 
     @Test
-    fun `known route detection is independent from the current model branch`() {
-        assertEquals(
+    fun `near matches and unrelated bluetooth devices remain unsupported`() {
+        listOf(
+            "HUAWEI FreeBuds Pro 5i",
+            "HUAWEI Eyewear 2 Pro",
+            "My custom freebuds3 headset",
+            "OPPO Enco X3",
+            "HUAWEI WATCH GT",
+            "",
+            "   ",
+        ).forEach { deviceName ->
+            assertEquals(deviceName, HuaweiDeviceRoute.UNSUPPORTED, detectHuaweiDeviceRoute(deviceName))
+        }
+        assertEquals(HuaweiDeviceRoute.UNSUPPORTED, detectHuaweiDeviceRoute(null))
+    }
+
+    @Test
+    fun `noise control capabilities follow verified model protocols`() {
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS3.supportsAnc)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS3.supportsAncDirectionDial)
+        assertFalse(HuaweiDeviceRoute.HUAWEI_FREEBUDS3.supportsTransparency)
+
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        ).forEach { route ->
+            assertTrue(route.displayName, route.supportsTransparency)
+            assertTrue(route.displayName, route.supportsAncStateReadback)
+            assertTrue(route.displayName, route.supportsDiscreteAncLevels)
+        }
+
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5.supportsTransparency)
+        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5.supportsAncStateReadback)
+        assertFalse(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5.supportsDiscreteAncLevels)
+    }
+
+    @Test
+    fun `clip and eyewear families never expose traditional ANC`() {
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREECLIP,
             HuaweiDeviceRoute.HUAWEI_FREECLIP2,
-            detectKnownHuaweiDeviceRoute("HUAWEI FreeClip 2"),
-        )
-        assertEquals(
-            HuaweiDeviceRoute.UNSUPPORTED,
-            detectHuaweiDeviceRoute("HUAWEI FreeClip 2"),
-        )
-    }
-
-    @Test
-    fun `FreeClip exposes battery integration without ANC`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREECLIP.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREECLIP.supportsRfcommBattery)
-        assertFalse(HuaweiDeviceRoute.HUAWEI_FREECLIP.supportsAnc)
-    }
-
-    @Test
-    fun `FreeClip 2 exposes battery integration without ANC`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREECLIP2.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREECLIP2.supportsRfcommBattery)
-        assertFalse(HuaweiDeviceRoute.HUAWEI_FREECLIP2.supportsAnc)
-    }
-
-    @Test
-    fun `FreeBuds 6i exposes battery and basic ANC integration`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.supportsRfcommBattery)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.supportsAnc)
-    }
-
-    @Test
-    fun `FreeBuds Pro 3 exposes battery case and basic ANC integration`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.supportsRfcommBattery)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.supportsAnc)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3.hasChargingCase)
-    }
-
-    @Test
-    fun `FreeBuds Pro 4 exposes battery and basic ANC integration`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4.supportsRfcommBattery)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4.supportsAnc)
-    }
-
-    @Test
-    fun `FreeBuds 7i exposes battery and basic ANC integration`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.supportsRfcommBattery)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I.supportsAnc)
-    }
-
-    @Test
-    fun `Eyewear exposes two-sided battery integration without case or ANC`() {
-        assertTrue(HuaweiDeviceRoute.HUAWEI_EYEWEAR.isSupported)
-        assertTrue(HuaweiDeviceRoute.HUAWEI_EYEWEAR.supportsRfcommBattery)
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR,
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+        ).forEach { route ->
+            assertTrue(route.displayName, route.supportsRfcommBattery)
+            assertFalse(route.displayName, route.supportsAnc)
+        }
         assertFalse(HuaweiDeviceRoute.HUAWEI_EYEWEAR.hasChargingCase)
-        assertFalse(HuaweiDeviceRoute.HUAWEI_EYEWEAR.supportsAnc)
+        assertFalse(HuaweiDeviceRoute.HUAWEI_EYEWEAR2.hasChargingCase)
+    }
+
+    @Test
+    fun `gesture configuration is only exposed for implemented routes`() {
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+        ).forEach { route -> assertTrue(route.displayName, route.supportsGestureConfiguration) }
+        assertFalse(HuaweiDeviceRoute.HUAWEI_FREEBUDS5.supportsGestureConfiguration)
+        assertFalse(HuaweiDeviceRoute.HUAWEI_FREECLIP.supportsGestureConfiguration)
+    }
+
+    @Test
+    fun `reported earbud availability is restricted to FreeBuds Pro 5`() {
+        HuaweiDeviceRoute.entries.forEach { route ->
+            assertEquals(
+                route.name,
+                route == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
+                route.usesReportedEarbudAvailability,
+            )
+        }
     }
 }

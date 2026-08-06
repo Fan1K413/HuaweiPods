@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="huawei_gesture_controls_title">Gesture controls</string>
+    <string name="huawei_gesture_tap_section">Tap gestures</string>
+    <string name="huawei_gesture_swipe_section">Swipe gestures</string>
+    <string name="huawei_gesture_pro3_long_press_section">Long press</string>
+    <string name="huawei_gesture_pro3_pinch_section">Pinch gestures</string>
+    <string name="huawei_gesture_left_double_tap">Left earbud double tap</string>
+    <string name="huawei_gesture_right_double_tap">Right earbud double tap</string>
+    <string name="huawei_gesture_left_triple_tap">Left earbud triple tap</string>
+    <string name="huawei_gesture_right_triple_tap">Right earbud triple tap</string>
+    <string name="huawei_gesture_left_swipe">Left side swipe</string>
+    <string name="huawei_gesture_right_swipe">Right side swipe</string>
+    <string name="huawei_gesture_left_long_press">Left earbud long press</string>
+    <string name="huawei_gesture_right_long_press">Right earbud long press</string>
+    <string name="huawei_gesture_action_next">Next track</string>
+    <string name="huawei_gesture_action_previous">Previous track</string>
+    <string name="huawei_gesture_action_play_pause">Play/Pause</string>
+    <string name="huawei_gesture_action_noise_control">Noise control</string>
+    <string name="huawei_gesture_action_spatial_audio">Spatial audio toggle</string>
+    <string name="huawei_gesture_action_voice_assistant">Voice assistant</string>
+    <string name="huawei_gesture_action_none">None</string>
+    <string name="huawei_gesture_action_volume_control">Volume control</string>
+    <string name="huawei_gesture_action_track_control">Track control</string>
+    <string name="huawei_gesture_pro3_call_answer_end">Pinch: answer/end calls</string>
+    <string name="huawei_gesture_pro3_call_reject">Double pinch: reject calls</string>
+    <string name="huawei_gesture_pro3_media_play_pause">Pinch: play/pause</string>
+    <string name="huawei_gesture_pro3_media_next">Double pinch: next track</string>
+    <string name="huawei_gesture_pro3_media_previous">Triple pinch: previous track</string>
+    <string name="huawei_gesture_pro3_swipe_volume">Swipe to adjust volume</string>
+    <string name="huawei_gesture_send_failed">Could not send the gesture setting. Check the connection and try again.</string>
+    <string name="huawei_gesture_local_state_hint">The displayed state is the last setting successfully sent from HuaweiPods.</string>
+    <string name="huawei_gesture_readback_hint">The displayed state is synchronized with the settings confirmed by the earbuds.</string>
+</resources>

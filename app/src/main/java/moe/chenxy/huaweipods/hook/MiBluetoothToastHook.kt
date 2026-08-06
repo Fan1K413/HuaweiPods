@@ -20,17 +20,24 @@ import moe.chenxy.huaweipods.utils.SystemApisUtils
 import moe.chenxy.huaweipods.utils.SystemApisUtils.cancelAsUser
 import moe.chenxy.huaweipods.utils.SystemApisUtils.notifyAsUser
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.DeviceRoutePrefs
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
 
+internal fun shouldOfferNotificationAncAction(route: HuaweiDeviceRoute): Boolean = route.supportsAnc
+
 @SuppressLint("MissingPermission")
 object MiBluetoothToastHook : HookContext() {
 
     // ANC 模式本地缓存，用于在 FreeBuds 3 已验证的关/开状态之间切换。
-    private var localAncMode = 1
+    private val receiverRegistrationLock = Any()
+    @Volatile
+    private var receiverRegistered = false
 
     override fun onHook() {
 
@@ -62,6 +69,9 @@ object MiBluetoothToastHook : HookContext() {
                 if (alias?.isEmpty() == true) {
                     alias = bluetoothDevice.name
                 }
+                val deviceName = alias ?: bluetoothDevice.name.orEmpty()
+                val deviceRoute = DeviceRoutePrefs.resolve(prefs, address, deviceName)
+                val offerAncAction = shouldOfferNotificationAncAction(deviceRoute)
 
                 val caseBattStr = if (batteryParams.case != null && batteryParams.case!!.isConnected)
                     "${context.resources.getString(miheadset_notification_Box)}${batteryParams.case!!.battery}%" +
@@ -105,27 +115,32 @@ object MiBluetoothToastHook : HookContext() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                     )
                 )
-                val ancCycleIntent = Intent(HuaweiPodsAction.ACTION_CYCLE_ANC).apply {
-                    setPackage("com.android.bluetooth")
-                    setIdentifier("BTHeadset$address")
-                    putExtra("device_name", alias ?: bluetoothDevice.name ?: "")
-                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-                }
-                val ancCyclePendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    1,
-                    ancCycleIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                )
                 val moduleContext = context.createPackageContext(
                     BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY
                 )
                 val ancLabel = moduleContext.getString(R.string.cycle_anc)
-                val ancAction = Notification.Action.Builder(
-                    Icon.createWithResource(context, android.R.drawable.ic_lock_silent_mode),
-                    ancLabel,
-                    ancCyclePendingIntent,
-                ).build()
+                val ancAction = if (offerAncAction) {
+                    val ancCycleIntent = Intent(HuaweiPodsAction.ACTION_CYCLE_ANC).apply {
+                        setPackage("com.android.bluetooth")
+                        setIdentifier("BTHeadset$address")
+                        putExtra("address", address)
+                        putExtra("device_name", deviceName)
+                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                    }
+                    val ancCyclePendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        1,
+                        ancCycleIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    )
+                    Notification.Action.Builder(
+                        Icon.createWithResource(context, android.R.drawable.ic_lock_silent_mode),
+                        ancLabel,
+                        ancCyclePendingIntent,
+                    ).build()
+                } else {
+                    null
+                }
                 val headsetBitmap = PodImageLoader.loadBoxBitmap(context, prefs, address)
                     ?: BitmapFactory.decodeResource(moduleContext.resources, R.drawable.img_box)
                 if (headsetBitmap == null) {
@@ -182,9 +197,11 @@ object MiBluetoothToastHook : HookContext() {
 
 
                     textButton {
-                        addActionInfo {
-                            action = createAction("key_anc_cycle", ancAction)
-                            actionTitle = ancLabel
+                        ancAction?.let { notificationAction: Notification.Action ->
+                            addActionInfo {
+                                action = createAction("key_anc_cycle", notificationAction)
+                                actionTitle = ancLabel
+                            }
                         }
                         addActionInfo {
                             val disconnectLabel = moduleContext.getString(R.string.notification_btn_disconnect)
@@ -208,24 +225,25 @@ object MiBluetoothToastHook : HookContext() {
                     json.put("param_v2", pv2)
                     focusExtras.putString("miui.focus.param", json.toString())
                 } catch (_: Exception) {}
+                val notification = Notification.Builder(context, "BTHeadset$address")
+                    .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+                    .setWhen(0L)
+                    .setTicker(alias)
+                    .setDefaults(-1)
+                    .setContentTitle(alias)
+                    .setContentText(contentText)
+                    .setContentIntent(pendingIntent)
+                    .setDeleteIntent(deleteIntent(context, bluetoothDevice))
+                    .setColor(context.getColor(system_notification_accent_color))
+                    .apply { ancAction?.let { addAction(it) } }
+                    .addAction(disconnectAction)
+                    .addExtras(focusExtras)
+                    .setVisibility(Notification.VISIBILITY_PUBLIC)
+                    .build()
                 notificationManager.notifyAsUser(
                     "BTHeadset$address",
                     10003,
-                    Notification.Builder(context, "BTHeadset$address")
-                        .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-                        .setWhen(0L)
-                        .setTicker(alias)
-                        .setDefaults(-1)
-                        .setContentTitle(alias)
-                        .setContentText(contentText)
-                        .setContentIntent(pendingIntent)
-                        .setDeleteIntent(deleteIntent(context, bluetoothDevice))
-                        .setColor(context.getColor(system_notification_accent_color))
-                        .addAction(ancAction)
-                        .addAction(disconnectAction)
-                        .addExtras(focusExtras)
-                        .setVisibility(Notification.VISIBILITY_PUBLIC)
-                        .build(),
+                    notification,
                     SystemApisUtils.getUserAllUserHandle()
                 )
             } catch (e: Exception) {
@@ -247,51 +265,60 @@ object MiBluetoothToastHook : HookContext() {
 
 
         hookConstructorAfter(findConstructorByParamCount("com.android.bluetooth.ble.app.MiuiBluetoothNotification", 2)) {
-            val context = getObjectField(instance, "mContext") as Context
+            val context = (getObjectField(instance, "mContext") as? Context)?.applicationContext
+                ?: return@hookConstructorAfter
+            synchronized(receiverRegistrationLock) {
+                if (receiverRegistered) return@synchronized
 
-                    val broadcastReceiver = object : BroadcastReceiver() {
-                        override fun onReceive(p0: Context?, p1: Intent?) {
-                val intent = p1 ?: return
-                            val action = HuaweiPodsAction.canonical(intent.action)
-                            if (action == HuaweiPodsAction.ACTION_SEND_STRONG_TOAST) {
-                                if (ConfigManager.islandMode() != ConfigManager.ISLAND_MODE_MODULE) {
-                                    Log.d("HuaweiPods", "skip module island mode=${ConfigManager.islandMode()}")
-                                    return
+                val broadcastReceiver = object : BroadcastReceiver() {
+                    override fun onReceive(receiverContext: Context?, receivedIntent: Intent?) {
+                        runCatching {
+                            val intent = receivedIntent ?: return@runCatching
+                            when (HuaweiPodsAction.canonical(intent.action)) {
+                                HuaweiPodsAction.ACTION_SEND_STRONG_TOAST -> {
+                                    if (ConfigManager.islandMode() != ConfigManager.ISLAND_MODE_MODULE) {
+                                        Log.d("HuaweiPods", "skip module island mode=${ConfigManager.islandMode()}")
+                                        return@runCatching
+                                    }
+                                    val batteryParams = intent.getParcelableExtra(
+                                        "batteryParams",
+                                        BatteryParams::class.java,
+                                    ) ?: return@runCatching
+                                    val address = intent.getStringExtra("address").orEmpty()
+                                    FocusIslandUtil.showBatteryIsland(context, prefs, batteryParams, address)
                                 }
-                                val batteryParams = intent.getParcelableExtra("batteryParams", BatteryParams::class.java)!!
-                                // Use Focus Island (HyperOS 3+) for battery display
-                                val address = intent.getStringExtra("address").orEmpty()
-                                FocusIslandUtil.showBatteryIsland(context, prefs, batteryParams, address)
-                            } else if (action == HuaweiPodsAction.ACTION_UPDATE_PODS_NOTIFICATION) {
-                                val batteryParams = intent.getParcelableExtra<BatteryParams>("batteryParams", BatteryParams::class.java)
-                                val device = intent.getParcelableExtra("device", BluetoothDevice::class.java)
-                                createPodsNotification(device, context, batteryParams!!)
-                            } else if (action == HuaweiPodsAction.ACTION_CANCEL_PODS_NOTIFICATION) {
-                                val device = intent.getParcelableExtra("device", BluetoothDevice::class.java) as BluetoothDevice
-                                cancelNotification(device, context)
-                            } else if (action == HuaweiPodsAction.ACTION_PODS_ANC_CHANGED) {
-                                // 同步耳机实际 ANC 状态到本地缓存，确保下次循环切换时状态准确
-                                localAncMode = intent.getIntExtra("status", 1)
-                            } else if (action == HuaweiPodsAction.ACTION_CYCLE_ANC) {
-                                localAncMode = if (localAncMode == 2) 1 else 2
-                                Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
-                                    putExtra("status", localAncMode)
-                                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-                                    p0?.sendBroadcast(this)
+                                HuaweiPodsAction.ACTION_UPDATE_PODS_NOTIFICATION -> {
+                                    val batteryParams = intent.getParcelableExtra(
+                                        "batteryParams",
+                                        BatteryParams::class.java,
+                                    ) ?: return@runCatching
+                                    val device = intent.getParcelableExtra("device", BluetoothDevice::class.java)
+                                    createPodsNotification(device, context, batteryParams)
+                                }
+                                HuaweiPodsAction.ACTION_CANCEL_PODS_NOTIFICATION -> {
+                                    intent.getParcelableExtra("device", BluetoothDevice::class.java)
+                                        ?.let { cancelNotification(it, context) }
                                 }
                             }
+                        }.onFailure {
+                            Log.e("HuaweiPods", "Bluetooth notification receiver failed safely", it)
                         }
                     }
+                }
 
-                    val intentFilter = IntentFilter()
-                    intentFilter.addHuaweiPodsAction(HuaweiPodsAction.ACTION_SEND_STRONG_TOAST)
-                    intentFilter.addHuaweiPodsAction(HuaweiPodsAction.ACTION_UPDATE_PODS_NOTIFICATION)
-                    intentFilter.addHuaweiPodsAction(HuaweiPodsAction.ACTION_CANCEL_PODS_NOTIFICATION)
-                    intentFilter.addHuaweiPodsAction(HuaweiPodsAction.ACTION_CYCLE_ANC)
-                    // 监听耳机实际 ANC 状态变更广播，保持本地开关状态同步。
-                    intentFilter.addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED)
-                    context.registerReceiver(broadcastReceiver, intentFilter,
-                        Context.RECEIVER_EXPORTED)
+                val intentFilter = IntentFilter().apply {
+                    addHuaweiPodsAction(HuaweiPodsAction.ACTION_SEND_STRONG_TOAST)
+                    addHuaweiPodsAction(HuaweiPodsAction.ACTION_UPDATE_PODS_NOTIFICATION)
+                    addHuaweiPodsAction(HuaweiPodsAction.ACTION_CANCEL_PODS_NOTIFICATION)
+                }
+                runCatching {
+                    context.registerReceiver(broadcastReceiver, intentFilter, Context.RECEIVER_EXPORTED)
+                }.onSuccess {
+                    receiverRegistered = true
+                }.onFailure {
+                    Log.e("HuaweiPods", "Failed to register Bluetooth notification receiver", it)
+                }
+            }
         }
     }
 

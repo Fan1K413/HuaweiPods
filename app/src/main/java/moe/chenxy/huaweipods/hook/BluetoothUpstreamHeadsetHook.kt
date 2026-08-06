@@ -12,12 +12,17 @@ import android.os.Looper
 import android.os.Bundle
 import android.os.Parcel
 import java.lang.reflect.Method
-import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.pods.HuaweiAncState
 import moe.chenxy.huaweipods.pods.HuaweiHfpController
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.supportsAnc
+import moe.chenxy.huaweipods.pods.supportsTransparency
+import moe.chenxy.huaweipods.pods.usesReportedEarbudAvailability
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
@@ -38,6 +43,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private var receiverRegistered = false
     private var currentBattery: BatteryParams? = null
     private var currentAnc = 1
+    private var currentAncSubMode: Int? = null
     private var currentAddress: String? = null
     private var currentName: String? = null
 
@@ -275,11 +281,22 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                             receivedIntent.batteryStatusFromExtras()
                                 ?: receivedIntent.parcelableStatus()
                                 ?: currentBattery
-                            )?.normalizedEarbudAvailability()
+                            )?.let(::normalizeBatteryAvailabilityForCurrentRoute)
                     }
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentAnc = receivedIntent.getIntExtra("status", currentAnc)
+                        val route = currentHuaweiRoute()
+                        val mode = NoiseControlMode.fromBroadcastStatus(
+                            receivedIntent.getIntExtra("status", currentAnc),
+                        )
+                        if (route.supportsAnc && (mode != NoiseControlMode.TRANSPARENCY || route.supportsTransparency)) {
+                            currentAnc = mode.broadcastStatus
+                            currentAncSubMode = receivedIntent.getIntExtra("submode", -1)
+                                .takeIf { receivedIntent.hasExtra("submode") && it >= 0 }
+                        } else {
+                            currentAnc = NoiseControlMode.OFF.broadcastStatus
+                            currentAncSubMode = null
+                        }
                     }
                 }
                 Log.d(TAG, "state action=${receivedIntent.action} address=$currentAddress name=$currentName anc=$currentAnc battery=${currentBattery.debugString()}")
@@ -452,8 +469,10 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                 if (!isHuaweiPod(device)) return@hookBefore
                 lastHuaweiDevice = device
                 result = null
-                Log.d(TAG, "BinderC6776v.changeAncMode swallowed mode=$mode device=${device.describe()}")
-                mode?.let { sendHuaweiAnc(huaweiAncFromMiuiMode(it)) }
+                val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+                val selection = mode?.let { upstreamHuaweiAncStateForMode(route, it, currentHuaweiAncState()) }
+                Log.d(TAG, "BinderC6776v.changeAncMode swallowed mode=$mode route=$route selection=$selection device=${device.describe()}")
+                selection?.let { sendHuaweiAnc(route, it, device) }
                 sendRealStatus(device, "changeAncMode:$mode")
             }
         }.onFailure { Log.w(TAG, "hook BinderC6776v.changeAncMode skipped", it) }
@@ -467,8 +486,10 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                 if (!isHuaweiPod(device)) return@hookBefore
                 lastHuaweiDevice = device
                 result = null
-                Log.d(TAG, "BinderC6776v.changeAncLevel swallowed level=$level device=${device.describe()}")
-                level?.let { sendHuaweiAncLevel(it) }
+                val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+                val selection = level?.let { upstreamHuaweiAncStateForLevel(route, it, currentHuaweiAncState()) }
+                Log.d(TAG, "BinderC6776v.changeAncLevel swallowed level=$level route=$route selection=$selection device=${device.describe()}")
+                selection?.let { sendHuaweiAnc(route, it, device) }
                 sendRealStatus(device, "changeAncLevel:$level")
             }
         }.onFailure { Log.w(TAG, "hook BinderC6776v.changeAncLevel skipped", it) }
@@ -588,7 +609,9 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         Log.d(TAG, "changeAncMode upstream mode=$mode device=${device.describe()} isHuawei=$isHuawei")
         if (!isHuawei) return null
         lastHuaweiDevice = device
-        sendHuaweiAnc(huaweiAncFromMiuiMode(mode))
+        val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+        val selection = upstreamHuaweiAncStateForMode(route, mode, currentHuaweiAncState())
+        selection?.let { sendHuaweiAnc(route, it, device) }
         reply.writeNoException()
         sendRealStatus(device, "changeAncMode:$mode")
         return true
@@ -601,7 +624,9 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         Log.d(TAG, "changeAncLevel upstream level=$level device=${device.describe()} isHuawei=$isHuawei")
         if (!isHuawei) return null
         lastHuaweiDevice = device
-        level?.let { sendHuaweiAncLevel(it) }
+        val route = device?.huaweiDeviceRoute() ?: HuaweiDeviceRoute.UNSUPPORTED
+        val selection = level?.let { upstreamHuaweiAncStateForLevel(route, it, currentHuaweiAncState()) }
+        selection?.let { sendHuaweiAnc(route, it, device) }
         reply.writeNoException()
         sendRealStatus(device, "changeAncLevel:$level")
         return true
@@ -737,7 +762,7 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     }
 
     private fun realRefreshPayload(): String {
-        return miuiRefreshPayload(currentBattery, currentAnc)
+        return miuiRefreshPayload(currentBattery, currentHuaweiRoute(), currentHuaweiAncState())
     }
 
     private fun effectiveBattery(): BatteryParams? {
@@ -746,13 +771,14 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
 
     private fun miuiRefreshPayload(
         battery: BatteryParams?,
-        anc: Int,
+        route: HuaweiDeviceRoute,
+        anc: HuaweiAncState,
     ): String {
         val values = MutableList(16) { "" }
         values[0] = miuiBatteryValue(battery?.left)
         values[1] = miuiBatteryValue(battery?.right)
         values[2] = miuiBatteryValue(battery?.case)
-        values[7] = miuiAncLevel(anc)
+        values[7] = upstreamMiuiAncLevel(route, anc)
         values[8] = "true"
         values[11] = "00"
         values[13] = "00"
@@ -765,8 +791,6 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         val value = params.battery.coerceIn(0, 100)
         return (if (params.isCharging) value or 128 else value).toString()
     }
-
-    private fun miuiAncLevel(anc: Int): String = if (anc == 2) "0100" else "0000"
 
     private fun displayBattery(params: PodParams?): Int? {
         if (params?.isConnected != true) return null
@@ -847,39 +871,30 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         }
     }
 
-    private fun huaweiAncFromMiuiMode(mode: Int): Int {
-        return if (mode == 1) 2 else 1
-    }
-
-    private fun huaweiAncFromMiuiLevel(level: String): Int {
-        return if (level.startsWith("01")) 2 else 1
-    }
-
-    private fun sendHuaweiAncLevel(level: String) {
-        sendHuaweiAnc(huaweiAncFromMiuiLevel(level))
-    }
-
-    private fun sendHuaweiAnc(mode: Int) {
-        currentAnc = mode
+    private fun sendHuaweiAnc(route: HuaweiDeviceRoute, state: HuaweiAncState, device: BluetoothDevice?) {
+        if (!route.supportsAnc || state.mode == NoiseControlMode.TRANSPARENCY && !route.supportsTransparency) {
+            Log.w(TAG, "sendHuaweiAnc skipped: unsupported route=$route state=$state")
+            return
+        }
         val ctx = context ?: run {
-            Log.w(TAG, "sendHuaweiAnc skipped: context is null mode=$mode")
+            Log.w(TAG, "sendHuaweiAnc skipped: context is null route=$route state=$state")
             return
         }
         ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
-            putExtra("status", mode)
+            putExtra("status", state.mode.broadcastStatus)
+            state.subMode?.let { putExtra("submode", it) }
+            device?.let {
+                putExtra("address", it.address)
+                putExtra("device_name", it.name ?: it.alias ?: "")
+            }
             setPackage("com.android.bluetooth")
-            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-        })
-        ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED).apply {
-            putExtra("status", mode)
-            setPackage(BuildConfig.APPLICATION_ID)
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
         ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_REFRESH_STATUS).apply {
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
-        Log.d(TAG, "sendHuaweiAnc broadcast sent mode=$mode")
+        Log.d(TAG, "sendHuaweiAnc command sent route=$route state=$state")
     }
 
     @Suppress("DEPRECATION")
@@ -939,6 +954,22 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         rememberKnownAddress(address)
         return true
     }
+
+    private fun normalizeBatteryAvailabilityForCurrentRoute(status: BatteryParams): BatteryParams =
+        if (resolveHuaweiDeviceRoute(currentAddress, currentName).usesReportedEarbudAvailability) {
+            status
+        } else {
+            status.normalizedEarbudAvailability()
+        }
+
+    private fun currentHuaweiRoute(): HuaweiDeviceRoute =
+        lastHuaweiDevice?.huaweiDeviceRoute()?.takeIf { it.isSupported }
+            ?: resolveHuaweiDeviceRoute(currentAddress, currentName)
+
+    private fun currentHuaweiAncState(): HuaweiAncState = HuaweiAncState(
+        mode = NoiseControlMode.fromBroadcastStatus(currentAnc),
+        subMode = currentAncSubMode,
+    )
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> objectField(instance: Any?, fieldName: String): T? {

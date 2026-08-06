@@ -24,17 +24,25 @@ import android.widget.TextView
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
-import moe.chenxy.huaweipods.pods.HuaweiGestureAction
+import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.HuaweiGestureController
+import moe.chenxy.huaweipods.pods.HuaweiGestureKind
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
+import moe.chenxy.huaweipods.pods.HuaweiSwipeAction
+import moe.chenxy.huaweipods.pods.HuaweiTapAction
 import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.isSupported
 import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.supportsAnc
+import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
+import moe.chenxy.huaweipods.pods.supportsAncStateReadback
+import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
+import moe.chenxy.huaweipods.pods.supportsGestureConfiguration
+import moe.chenxy.huaweipods.pods.supportsTransparency
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
-import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -46,6 +54,11 @@ import java.util.WeakHashMap
 
 @SuppressLint("MissingPermission")
 object SettingsHeadsetHook : HookContext() {
+    private data class AncSelection(
+        val status: Int,
+        val subMode: Int? = null,
+    )
+
     private const val TAG = "HuaweiPods-Settings"
     private const val PREFS_NAME = "huaweipods_milink_state"
     private const val SETTINGS_REFRESH_INTERVAL_MS = 3_000L
@@ -57,47 +70,9 @@ object SettingsHeadsetHook : HookContext() {
     private const val HUAWEI_ANC_DIAL_TICK_DEGREES = 5f
     private const val HUAWEI_ANC_DIAL_START_DEGREES = 70f
     private const val SETTINGS_HUAWEI_DIAL_TAG = "huaweipods_settings_anc_level_dial"
-    private val transparencyKeywords = listOf("通透", "透明", "Transparency", "Transparent")
-    private val earFitKeywords = listOf("耳塞贴合度检测", "贴合度检测", "耳塞贴合", "耳机贴合", "贴合度", "Ear tip fit", "Fit test", "Fit detection")
-    private val notificationEntryKeywords = listOf(
-        "通知栏显示",
-        "耳机连接后在通知栏显示状态信息",
-        "Notification display",
-        "Show notification",
-        "Show in notification",
-        "Show in notification shade",
-        "Display status information in the notification"
-    )
-    private val xiaomiOnlyEntryKeywords = listOf(
-        "更多设置",
-        "更多设定",
-        "高级设置",
-        "检查更新",
-        "固件更新",
-        "连接耳机获取版本号",
-        "获取版本号",
-        "耳机版本",
-        "软件版本",
-        "版本号",
-        "查找耳机",
-        "寻找耳机",
-        "小爱同学",
-        "More settings",
-        "Additional settings",
-        "Advanced settings",
-        "Check for updates",
-        "Firmware update",
-        "Update firmware",
-        "Firmware version",
-        "Software version",
-        "Find earphones",
-        "Find earbuds",
-        "Xiao Ai"
-    )
     private val ancLevelKeywords = listOf("自适应", "智能", "轻度", "均衡", "深度", "Smart", "Adaptive", "Light", "Medium", "Deep")
     private val ancLevelAnchorKeywords = listOf("轻度", "均衡", "深度", "Light", "Medium", "Deep")
-    private val ancModeKeywords = listOf("降噪", "关闭", "Noise", "Off")
-    private val gestureEntryKeywords = listOf("手势操作", "手势控制", "按键设置", "Gesture controls", "Gestures", "Button settings")
+    private val ancModeKeywords = listOf("降噪", "通透", "关闭", "Noise", "Transparency", "Off")
     private val nativeGesturePreferenceKeys = listOf(
         "left_double",
         "right_double",
@@ -109,7 +84,9 @@ object SettingsHeadsetHook : HookContext() {
     private val knownHuaweiAddresses = linkedSetOf<String>()
     private val batteryViews = WeakHashMap<Any, BluetoothDevice>()
     private val headsetFragments = WeakHashMap<Any, Boolean>()
-    private val pruneRoots = WeakHashMap<View, Boolean>()
+    private val keyConfigFragments = WeakHashMap<Any, Boolean>()
+    private val gestureActionCache = linkedMapOf<String, HuaweiTapAction>()
+    private val swipeActionCache = linkedMapOf<String, HuaweiSwipeAction>()
     private var context: Context? = null
     private var receiverRegistered = false
     private var currentAddress: String? = null
@@ -117,12 +94,13 @@ object SettingsHeadsetHook : HookContext() {
     private var currentBattery: BatteryParams = BatteryParams()
     private var currentAnc = 1
     private var currentAncConfirmed = false
-    private var currentHuaweiAncLevel = 0
+    private var currentHuaweiAncLevel = HuaweiAncLevel.ADAPTIVE.protocolValue
+    private var currentTransparencySubMode = 0x02
     private var proxyCheckSupportCalls = 0
     private var proxySetCommonCommandCalls = 0
     private var proxyGetDeviceConfigCalls = 0
     private var proxyGetCommonConfigCalls = 0
-    private var settingsHeaderBitmap: Bitmap? = null
+    private val settingsHeaderBitmaps = mutableMapOf<HuaweiDeviceRoute, Bitmap>()
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var refreshLoopStarted = false
     private val refreshRunnable = object : Runnable {
@@ -309,19 +287,22 @@ object SettingsHeadsetHook : HookContext() {
         }.onFailure { Log.w(TAG, "hook proxy $methodName skipped", it) }
     }
 
-    private fun hookProxyVoidDeviceCommand(className: String, methodName: String, vararg parameterTypes: Class<*>, mode: (List<Any?>) -> Int?) {
+    private fun hookProxyVoidDeviceCommand(
+        className: String,
+        methodName: String,
+        vararg parameterTypes: Class<*>,
+        mode: (List<Any?>) -> AncSelection?,
+    ) {
         runCatching {
             hookBefore(findMethod(className, methodName, *parameterTypes)) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 Log.d(TAG, "$methodName proxy command args=${args.describeArgs()} device=${device.describe()} isHuawei=${isHuaweiPod(device)}")
                 if (!isHuaweiPod(device)) return@hookBefore
-                val huaweiMode = mode(args) ?: return@hookBefore
-                currentAnc = huaweiMode
-                currentAncConfirmed = true
-                sendHuaweiAnc(huaweiMode)
-                sendAncChanged(huaweiMode)
+                val selection = mode(args) ?: return@hookBefore
+                applyAncSelection(selection)
+                dispatchAncSelection(selection)
                 this.result = null
-                Log.d(TAG, "$methodName proxy command handled address=${device?.address} huaweiMode=$huaweiMode")
+                Log.d(TAG, "$methodName proxy command handled address=${device?.address} selection=$selection")
             }
         }.onFailure { Log.w(TAG, "hook proxy $methodName skipped", it) }
     }
@@ -457,6 +438,7 @@ object SettingsHeadsetHook : HookContext() {
                 Log.d(TAG, "MiuiHeadsetKeyConfigFragment.onCreateView after isHuawei=${isHuaweiKeyConfigFragment(instance)}")
                 if (!isHuaweiKeyConfigFragment(instance)) return@hookAfter
                 configureFreeBudsNativeGesturePage(instance)
+                requestHuaweiGestureState(instance, "onCreateView")
             }
         }.onFailure { Log.w(TAG, "hook MiuiHeadsetKeyConfigFragment.onCreateView skipped", it) }
 
@@ -465,51 +447,81 @@ object SettingsHeadsetHook : HookContext() {
                 Log.d(TAG, "MiuiHeadsetKeyConfigFragment.onResume after isHuawei=${isHuaweiKeyConfigFragment(instance)}")
                 if (!isHuaweiKeyConfigFragment(instance)) return@hookAfter
                 configureFreeBudsNativeGesturePage(instance)
+                requestHuaweiGestureState(instance, "onResume")
             }
         }.onFailure { Log.w(TAG, "hook MiuiHeadsetKeyConfigFragment.onResume skipped", it) }
     }
 
     private fun hookNativeKeyConfigPreferenceChange() {
-        runCatching {
-            hookBefore(
-                findMethod(
-                    "com.android.settings.bluetooth.MiuiHeadsetKeyConfigFragment\$2",
-                    "onPreferenceChange",
-                    findClass("androidx.preference.Preference"),
-                    Any::class.java
-                )
-            ) {
-                if (handleNativeGesturePreferenceChange(instance, args.getOrNull(0), args.getOrNull(1))) {
-                    result = true
+        var hookedListeners = 0
+        (1..8).forEach { suffix ->
+            runCatching {
+                hookBefore(
+                    findMethod(
+                        "com.android.settings.bluetooth.MiuiHeadsetKeyConfigFragment\$$suffix",
+                        "onPreferenceChange",
+                        findClass("androidx.preference.Preference"),
+                        Any::class.java,
+                    ),
+                ) {
+                    if (handleNativeGesturePreferenceChange(instance, args.getOrNull(0), args.getOrNull(1))) {
+                        result = true
+                    }
                 }
+                hookedListeners++
             }
-        }.onFailure { Log.w(TAG, "hook MiuiHeadsetKeyConfigFragment.onPreferenceChange skipped", it) }
+        }
+        if (hookedListeners == 0) {
+            Log.w(TAG, "hook MiuiHeadsetKeyConfigFragment.onPreferenceChange skipped: no listener found")
+        } else {
+            Log.d(TAG, "hooked MiuiHeadsetKeyConfigFragment preference listeners=$hookedListeners")
+        }
     }
 
     private fun handleNativeGesturePreferenceChange(listener: Any?, preference: Any?, newValue: Any?): Boolean {
         val fragment = runCatching { getObjectField(listener, "this$0") }.getOrNull()
         if (!isHuaweiKeyConfigFragment(fragment)) return false
+        val route = gestureDeviceRoute(fragment)
+        if (!route.supportsGestureConfiguration) return false
         val key = runCatching { callCompatibleMethod(preference, "getKey") as? String }.getOrNull()
-        val side = when (key) {
-            "left_double" -> HuaweiGestureSide.LEFT
-            "right_double" -> HuaweiGestureSide.RIGHT
+        val (kind, side) = when (key) {
+            "left_double" -> HuaweiGestureKind.DOUBLE_TAP to HuaweiGestureSide.LEFT
+            "right_double" -> HuaweiGestureKind.DOUBLE_TAP to HuaweiGestureSide.RIGHT
+            "left_triple" -> HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.LEFT
+            "right_triple" -> HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.RIGHT
+            "long_press_left_headset" -> HuaweiGestureKind.SWIPE to HuaweiGestureSide.LEFT
+            "long_press_right_headset" -> HuaweiGestureKind.SWIPE to HuaweiGestureSide.RIGHT
             else -> return false
         }
         val targetAddress = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
-        if (resolveHuaweiDeviceRoute(targetAddress, currentName) != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
-            Log.i(TAG, "native key config gesture ignored for unsupported route address=$targetAddress")
-            return true
-        }
-        val action = HuaweiGestureAction.fromExtra(newValue?.toString())
-            ?: newValue?.toString()?.toIntOrNull()?.let { HuaweiGestureAction.fromProtocolValue(it) }
-            ?: return false
         val targetContext = runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull()
             ?: context
             ?: return false
-
-        writeGesturePreference(targetAddress, side, action)
-        sendHuaweiGestureFromSettings(targetContext, targetAddress, side, action)
-        Log.i(TAG, "native key config gesture handled side=${side.extraValue} action=${action.extraValue} address=$targetAddress")
+        if (kind == HuaweiGestureKind.SWIPE) {
+            val action = HuaweiSwipeAction.fromExtra(newValue?.toString())
+                ?: newValue?.toString()?.toIntOrNull()?.let { HuaweiSwipeAction.fromProtocolValue(route, it) }
+                ?: return false
+            if (action !in HuaweiSwipeAction.availableFor(route)) return false
+            cacheSwipeAction(targetAddress, side, action)
+            runCatching { callCompatibleMethod(preference, "setValue", action.extraValue) }
+            sendHuaweiGestureFromSettings(targetContext, targetAddress, kind, side, action.extraValue)
+            Log.i(
+                TAG,
+                "native key config gesture handled kind=${kind.extraValue} side=${side.extraValue} action=${action.extraValue} address=$targetAddress",
+            )
+            return true
+        }
+        val action = HuaweiTapAction.fromExtra(newValue?.toString())
+            ?: newValue?.toString()?.toIntOrNull()?.let { HuaweiTapAction.fromProtocolValue(route, kind, it) }
+            ?: return false
+        if (action !in HuaweiTapAction.availableFor(route, kind)) return false
+        cacheGestureAction(targetAddress, kind, side, route, action)
+        runCatching { callCompatibleMethod(preference, "setValue", action.extraValue) }
+        sendHuaweiGestureFromSettings(targetContext, targetAddress, kind, side, action.extraValue)
+        Log.i(
+            TAG,
+            "native key config gesture handled kind=${kind.extraValue} side=${side.extraValue} action=${action.extraValue} address=$targetAddress",
+        )
         return true
     }
 
@@ -526,22 +538,24 @@ object SettingsHeadsetHook : HookContext() {
         }.onFailure { Log.w(TAG, "hook MiuiHeadsetFragment.updateAncUi skipped", it) }
     }
 
-    private fun hookFragmentAncCommand(methodName: String, vararg parameterTypes: Class<*>, mode: (List<Any?>) -> Int?) {
+    private fun hookFragmentAncCommand(
+        methodName: String,
+        vararg parameterTypes: Class<*>,
+        mode: (List<Any?>) -> AncSelection?,
+    ) {
         runCatching {
             hookBefore(findMethod("com.android.settings.bluetooth.MiuiHeadsetFragment", methodName, *parameterTypes)) {
                 Log.d(TAG, "MiuiHeadsetFragment.$methodName before args=${args.describeArgs()} ${fragmentDebug(instance)} isHuawei=${isHuaweiFragment(instance)}")
                 if (!isHuaweiFragment(instance)) return@hookBefore
                 val updateDevice = args.getOrNull(1) as? Boolean ?: true
                 if (!updateDevice) return@hookBefore
-            val huaweiMode = mode(args) ?: return@hookBefore
-            currentAnc = huaweiMode
-            currentAncConfirmed = true
-            sendHuaweiAnc(huaweiMode)
-                sendAncChanged(huaweiMode)
+                val selection = mode(args) ?: return@hookBefore
+                applyAncSelection(selection)
+                dispatchAncSelection(selection)
                 runCatching { callMethod(instance, "updateAncUi", settingsAncLevel(), false) }
                 injectFragmentStatus(instance)
                 result = null
-                Log.d(TAG, "MiuiHeadsetFragment.$methodName handled huaweiMode=$huaweiMode")
+                Log.d(TAG, "MiuiHeadsetFragment.$methodName handled selection=$selection")
             }
         }.onFailure { Log.w(TAG, "hook MiuiHeadsetFragment.$methodName skipped", it) }
     }
@@ -556,6 +570,7 @@ object SettingsHeadsetHook : HookContext() {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONFIG_CHANGED)
         }
         context?.registerReceiver(object : BroadcastReceiver() {
@@ -575,27 +590,51 @@ object SettingsHeadsetHook : HookContext() {
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentBattery = (
-                            receivedIntent.batteryStatusFromExtras()
-                                ?: receivedIntent.parcelableStatus()
-                                ?: currentBattery
-                            ).normalizedEarbudAvailability()
+                        currentBattery = receivedIntent.batteryStatusFromExtras()
+                            ?: receivedIntent.parcelableStatus()
+                            ?: currentBattery
                         saveState(context)
                         updateBatteryViews()
                         updateFragments()
                     }
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentAnc = receivedIntent.getIntExtra("status", currentAnc)
-                        currentAncConfirmed = true
+                        val status = receivedIntent.getIntExtra("status", currentAnc)
+                        if (status in 1..3) {
+                            applyAncSelection(
+                                AncSelection(
+                                    status = status,
+                                    subMode = receivedIntent.getIntExtra("submode", -1).takeIf { it >= 0 },
+                                ),
+                            )
+                            currentAncConfirmed = true
+                        }
                         saveState(context)
                         updateFragments()
                     }
                     HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentHuaweiAncLevel = receivedIntent.getIntExtra("level", currentHuaweiAncLevel).coerceIn(0, HUAWEI_ANC_LEVEL_LAST)
+                        val level = receivedIntent.getIntExtra("level", currentHuaweiAncLevel)
+                        currentHuaweiAncLevel = if (currentHuaweiRoute().supportsDiscreteAncLevels) {
+                            HuaweiAncLevel.fromProtocolValue(level)?.protocolValue ?: currentHuaweiAncLevel
+                        } else {
+                            level.coerceIn(0, HUAWEI_ANC_LEVEL_LAST)
+                        }
                         saveState(context)
                         updateFragments()
+                    }
+                    HuaweiPodsAction.ACTION_HUAWEI_GESTURE_CHANGED -> {
+                        if (!rememberSupportedDevice(receivedIntent)) return
+                        runCatching {
+                            cacheGestureState(
+                                intent = receivedIntent,
+                                route = currentHuaweiRoute(),
+                                address = currentAddress.orEmpty(),
+                            )
+                            updateGestureFragments()
+                        }.onFailure {
+                            Log.w(TAG, "Huawei gesture state update failed without affecting Settings", it)
+                        }
                     }
                 }
                 Log.d(TAG, "state action=${receivedIntent.action} address=$currentAddress anc=$currentAnc battery=${settingsBatteryString()}")
@@ -648,12 +687,9 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun injectFragmentStatus(fragment: Any?) {
         runCatching {
-            if (
-                currentHuaweiRoute() == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 &&
-                !currentAncConfirmed
-            ) {
+            if (currentHuaweiRoute().supportsAncStateReadback && !currentAncConfirmed) {
                 schedulePruneFreeBudsUnsupportedViews(fragmentRootView(fragment))
-                Log.d(TAG, "fragment status deferred until FreeBuds Pro 3 ANC state is confirmed")
+                Log.d(TAG, "fragment status deferred until Huawei ANC state is confirmed route=${currentHuaweiRoute()}")
                 return@runCatching
             }
             val payload = "${settingsAncMode()}|$SETTINGS_FREEBUDS_ANC_OPTIONS|${settingsBatteryString()}|00"
@@ -785,12 +821,39 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun settingsAncMode(): String {
         loadState()
-        return if (currentAnc == 2) "1" else "0"
+        if (!currentHuaweiRoute().supportsAnc) return "0"
+        return when (currentAnc) {
+            2 -> "1"
+            3 -> "2"
+            else -> "0"
+        }
+    }
+
+    private fun updateGestureFragments() {
+        keyConfigFragments.keys.toList().forEach { fragment ->
+            if (isHuaweiKeyConfigFragment(fragment)) {
+                configureFreeBudsNativeGesturePage(fragment)
+            }
+        }
     }
 
     private fun settingsAncLevel(): String {
         loadState()
-        return if (currentAnc == 2) "0100" else "0000"
+        val route = currentHuaweiRoute()
+        if (!route.supportsAnc) return "0000"
+        return when (currentAnc) {
+            2 -> if (route.supportsDiscreteAncLevels) {
+                "01${ancSubMode().toString(16).padStart(2, '0')}"
+            } else {
+                "0100"
+            }
+            3 -> if (route.supportsTransparency) {
+                "02${transparencySubMode(route).toString(16).padStart(2, '0')}"
+            } else {
+                "0000"
+            }
+            else -> "0000"
+        }
     }
 
     private fun settingsRefreshPayload(): String {
@@ -810,20 +873,68 @@ object SettingsHeadsetHook : HookContext() {
         return values.joinToString(",")
     }
 
-    private fun huaweiAncFromSettings(mode: Int): Int {
+    private fun huaweiAncFromSettings(mode: Int): AncSelection? {
+        val route = currentHuaweiRoute()
+        if (!route.supportsAnc) return null
         return when (mode) {
-            1 -> 2
-            2 -> 1
-            else -> 1
+            1 -> AncSelection(2, ancSubMode().takeIf { route.supportsDiscreteAncLevels })
+            2 -> if (route.supportsTransparency) {
+                AncSelection(3, transparencySubMode(route))
+            } else {
+                AncSelection(1)
+            }
+            else -> AncSelection(1)
         }
     }
 
-    private fun huaweiAncFromLevel(level: String): Int {
-        return if (level.startsWith("01")) 2 else 1
+    private fun huaweiAncFromLevelCommand(level: String): AncSelection? {
+        val route = currentHuaweiRoute()
+        if (!route.supportsAnc) return null
+        val normalized = level.trim().lowercase()
+        if (normalized == "0000") return AncSelection(1)
+        if (normalized.length < 4) return null
+        val type = normalized.substring(0, 2)
+        val subMode = normalized.substring(2, 4).toIntOrNull(16) ?: return null
+        return when (type) {
+            "01" -> when {
+                !route.supportsAnc -> null
+                route.supportsDiscreteAncLevels -> HuaweiAncLevel.fromProtocolValue(subMode)
+                    ?.let { AncSelection(2, it.protocolValue) }
+                else -> AncSelection(2)
+            }
+            "02" -> subMode
+                .takeIf { route.supportsTransparency && it in supportedTransparencySubModes(route) }
+                ?.let { AncSelection(3, it) }
+            else -> null
+        }
     }
 
-    private fun huaweiAncFromLevelCommand(level: String): Int? {
-        return huaweiAncFromLevel(level)
+    private fun ancSubMode(): Int =
+        HuaweiAncLevel.fromProtocolValue(currentHuaweiAncLevel)?.protocolValue
+            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+
+    private fun defaultTransparencySubMode(route: HuaweiDeviceRoute): Int =
+        if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) 0x02 else 0xFF
+
+    private fun supportedTransparencySubModes(route: HuaweiDeviceRoute): Set<Int> =
+        if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) setOf(0x01, 0x02) else setOf(0x01, 0xFF)
+
+    private fun transparencySubMode(route: HuaweiDeviceRoute): Int =
+        currentTransparencySubMode.takeIf { it in supportedTransparencySubModes(route) }
+            ?: defaultTransparencySubMode(route)
+
+    private fun applyAncSelection(selection: AncSelection) {
+        currentAnc = selection.status
+        selection.subMode?.let { subMode ->
+            when (selection.status) {
+                2 -> if (currentHuaweiRoute().supportsDiscreteAncLevels) {
+                    HuaweiAncLevel.fromProtocolValue(subMode)?.let { currentHuaweiAncLevel = it.protocolValue }
+                }
+                3 -> if (subMode in supportedTransparencySubModes(currentHuaweiRoute())) {
+                    currentTransparencySubMode = subMode
+                }
+            }
+        }
     }
 
     private fun settingsSupport(): String = "${fakeDeviceId()},$SETTINGS_FREEBUDS_SUPPORT_FLAGS"
@@ -835,31 +946,75 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun configureFreeBudsNativeGesturePage(fragment: Any?) {
-        val address = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
-        if (resolveHuaweiDeviceRoute(address, currentName) != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
-            nativeGesturePreferenceKeys.forEach { key -> hideNativePreference(fragment, key) }
-            Log.d(TAG, "FreeBuds native gesture page hidden for unsupported route address=$address")
+        val address = gestureDeviceAddress(fragment).orEmpty()
+        val route = gestureDeviceRoute(fragment)
+        if (fragment != null) keyConfigFragments[fragment] = true
+
+        val doubleTapActions = HuaweiTapAction.availableFor(route, HuaweiGestureKind.DOUBLE_TAP)
+        val tripleTapActions = HuaweiTapAction.availableFor(route, HuaweiGestureKind.TRIPLE_TAP)
+        val swipeActions = HuaweiSwipeAction.availableFor(route)
+        if (doubleTapActions.isEmpty() && tripleTapActions.isEmpty() && swipeActions.isEmpty()) {
+            // Pro 3 uses its own long-press/toggle protocol, while the basic-test routes have no
+            // verified gesture mapping yet. Keep HyperOS' native page intact instead of turning it
+            // into an empty screen; verified controls remain available in the module app.
+            Log.d(TAG, "Huawei native gesture page preserved route=$route address=$address")
             return
         }
-        listOf(
-            "left_triple",
-            "right_triple",
-            "long_press_left_headset",
-            "long_press_right_headset"
-        ).forEach { key ->
-            hideNativePreference(fragment, key)
+
+        nativeGesturePreferenceKeys.forEach { key -> hideNativePreference(fragment, key) }
+        configureTapPreference(
+            fragment,
+            "mDoubleClickLeft",
+            "left_double",
+            address,
+            route,
+            HuaweiGestureKind.DOUBLE_TAP,
+            HuaweiGestureSide.LEFT,
+        )
+        configureTapPreference(
+            fragment,
+            "mDoubleClickRight",
+            "right_double",
+            address,
+            route,
+            HuaweiGestureKind.DOUBLE_TAP,
+            HuaweiGestureSide.RIGHT,
+        )
+        if (tripleTapActions.isNotEmpty()) {
+            configureTapPreference(
+                fragment,
+                "mTripleClickLeft",
+                "left_triple",
+                address,
+                route,
+                HuaweiGestureKind.TRIPLE_TAP,
+                HuaweiGestureSide.LEFT,
+            )
+            configureTapPreference(
+                fragment,
+                "mTripleClickRight",
+                "right_triple",
+                address,
+                route,
+                HuaweiGestureKind.TRIPLE_TAP,
+                HuaweiGestureSide.RIGHT,
+            )
         }
-        configureFreeBudsDoubleTapPreference(fragment, "mDoubleClickLeft", "left_double", address, HuaweiGestureSide.LEFT)
-        configureFreeBudsDoubleTapPreference(fragment, "mDoubleClickRight", "right_double", address, HuaweiGestureSide.RIGHT)
-        Log.d(TAG, "FreeBuds native gesture page configured address=$address")
+        if (swipeActions.isNotEmpty()) {
+            configureSwipePreference(fragment, "long_press_left_headset", address, route, HuaweiGestureSide.LEFT)
+            configureSwipePreference(fragment, "long_press_right_headset", address, route, HuaweiGestureSide.RIGHT)
+        }
+        Log.d(TAG, "Huawei native gesture page configured route=$route address=$address")
     }
 
-    private fun configureFreeBudsDoubleTapPreference(
+    private fun configureTapPreference(
         fragment: Any?,
         fieldName: String,
         key: String,
         address: String,
-        side: HuaweiGestureSide
+        route: HuaweiDeviceRoute,
+        kind: HuaweiGestureKind,
+        side: HuaweiGestureSide,
     ) {
         val preference = runCatching { getObjectField(fragment, fieldName) }.getOrNull()
             ?: nativePreference(fragment, key)
@@ -867,18 +1022,58 @@ object SettingsHeadsetHook : HookContext() {
         val context = (runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull())
             ?: context
             ?: return
-        val actions = HuaweiGestureAction.all
+        val actions = HuaweiTapAction.availableFor(route, kind)
+        if (actions.isEmpty()) return
         val entries = actions.map { gestureActionLabel(context, it) }.toTypedArray()
         val values = actions.map { it.extraValue }.toTypedArray()
-        val selected = readGesturePreference(address, side)
+        val selected = readGestureAction(address, kind, side, route)
         runCatching {
+            callCompatibleMethod(preference, "setPersistent", false)
+            callCompatibleMethod(preference, "setTitle", gesturePreferenceTitle(context, kind, side))
             callCompatibleMethod(preference, "setEntries", entries)
             callCompatibleMethod(preference, "setEntryValues", values)
             callCompatibleMethod(preference, "setValue", selected.extraValue)
             callCompatibleMethod(preference, "setVisible", true)
             callCompatibleMethod(preference, "setEnabled", true)
         }.onFailure {
-            Log.w(TAG, "configure native gesture preference failed key=$key side=${side.extraValue}", it)
+            Log.w(
+                TAG,
+                "configure native gesture preference failed key=$key kind=${kind.extraValue} side=${side.extraValue}",
+                it,
+            )
+        }
+    }
+
+    private fun configureSwipePreference(
+        fragment: Any?,
+        key: String,
+        address: String,
+        route: HuaweiDeviceRoute,
+        side: HuaweiGestureSide,
+    ) {
+        val preference = nativePreference(fragment, key) ?: return
+        val preferenceContext = runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull()
+            ?: context
+            ?: return
+        val actions = HuaweiSwipeAction.availableFor(route)
+        if (actions.isEmpty()) return
+        val entries = actions.map { swipeActionLabel(preferenceContext, it) }.toTypedArray()
+        val values = actions.map { it.extraValue }.toTypedArray()
+        val selected = readSwipeAction(address, side, route)
+        runCatching {
+            callCompatibleMethod(preference, "setPersistent", false)
+            callCompatibleMethod(
+                preference,
+                "setTitle",
+                gesturePreferenceTitle(preferenceContext, HuaweiGestureKind.SWIPE, side),
+            )
+            callCompatibleMethod(preference, "setEntries", entries)
+            callCompatibleMethod(preference, "setEntryValues", values)
+            callCompatibleMethod(preference, "setValue", selected.extraValue)
+            callCompatibleMethod(preference, "setVisible", true)
+            callCompatibleMethod(preference, "setEnabled", true)
+        }.onFailure {
+            Log.w(TAG, "configure native swipe preference failed key=$key side=${side.extraValue}", it)
         }
     }
 
@@ -936,42 +1131,190 @@ object SettingsHeadsetHook : HookContext() {
         }
     }
 
-    private fun readGesturePreference(address: String, side: HuaweiGestureSide): HuaweiGestureAction {
-        val defaultAction = defaultGestureAction(side)
-        val value = prefs.getInt(gesturePrefKey(address, side), defaultAction.protocolValue)
-        return HuaweiGestureAction.fromProtocolValue(value) ?: defaultAction
+    private fun readGestureAction(
+        address: String,
+        kind: HuaweiGestureKind,
+        side: HuaweiGestureSide,
+        route: HuaweiDeviceRoute,
+    ): HuaweiTapAction {
+        val key = gestureCacheKey(address, kind, side)
+        gestureActionCache[key]?.let { return it }
+        val defaultAction = defaultGestureAction(route, kind, side)
+        if (route != HuaweiDeviceRoute.HUAWEI_FREEBUDS3 || kind != HuaweiGestureKind.DOUBLE_TAP) {
+            return defaultAction
+        }
+        val defaultValue = defaultAction.protocolValue(route, kind) ?: return defaultAction
+        val localPreferences = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return defaultAction
+        val legacyValue = localPreferences.getInt(legacyGesturePrefKey(address, side), defaultValue)
+        val value = localPreferences.getInt(key, legacyValue)
+        return HuaweiTapAction.fromProtocolValue(route, kind, value) ?: defaultAction
     }
 
-    private fun writeGesturePreference(address: String, side: HuaweiGestureSide, action: HuaweiGestureAction) {
-        prefs.edit()
-            .putInt(gesturePrefKey(address, side), action.protocolValue)
-            .apply()
+    private fun cacheGestureAction(
+        address: String,
+        kind: HuaweiGestureKind,
+        side: HuaweiGestureSide,
+        route: HuaweiDeviceRoute,
+        action: HuaweiTapAction,
+    ) {
+        val protocolValue = action.protocolValue(route, kind) ?: return
+        val key = gestureCacheKey(address, kind, side)
+        gestureActionCache[key] = action
+        if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 && kind == HuaweiGestureKind.DOUBLE_TAP) {
+            runCatching {
+                context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    ?.edit()
+                    ?.putInt(key, protocolValue)
+                    ?.apply()
+            }.onFailure { Log.w(TAG, "persist local FreeBuds 3 gesture failed key=$key", it) }
+        }
     }
 
-    private fun defaultGestureAction(side: HuaweiGestureSide): HuaweiGestureAction = when (side) {
-        HuaweiGestureSide.LEFT -> HuaweiGestureAction.NOISE_CANCELLATION
-        HuaweiGestureSide.RIGHT -> HuaweiGestureAction.PLAY_PAUSE
+    private fun readSwipeAction(
+        address: String,
+        side: HuaweiGestureSide,
+        route: HuaweiDeviceRoute,
+    ): HuaweiSwipeAction = swipeActionCache[gestureCacheKey(address, HuaweiGestureKind.SWIPE, side)]
+        ?.takeIf { it in HuaweiSwipeAction.availableFor(route) }
+        ?: HuaweiSwipeAction.availableFor(route).firstOrNull()
+        ?: HuaweiSwipeAction.NONE
+
+    private fun cacheSwipeAction(
+        address: String,
+        side: HuaweiGestureSide,
+        action: HuaweiSwipeAction,
+    ) {
+        swipeActionCache[gestureCacheKey(address, HuaweiGestureKind.SWIPE, side)] = action
     }
 
-    private fun gesturePrefKey(address: String, side: HuaweiGestureSide): String {
+    private fun cacheGestureState(
+        intent: Intent,
+        route: HuaweiDeviceRoute,
+        address: String,
+    ) {
+        cacheTapState(
+            intent = intent,
+            route = route,
+            address = address,
+            kind = HuaweiGestureKind.DOUBLE_TAP,
+            leftExtra = HuaweiGestureController.EXTRA_DOUBLE_LEFT_ACTION,
+            rightExtra = HuaweiGestureController.EXTRA_DOUBLE_RIGHT_ACTION,
+            legacyLeftExtra = "left_action",
+            legacyRightExtra = "right_action",
+        )
+        cacheTapState(
+            intent = intent,
+            route = route,
+            address = address,
+            kind = HuaweiGestureKind.TRIPLE_TAP,
+            leftExtra = HuaweiGestureController.EXTRA_TRIPLE_LEFT_ACTION,
+            rightExtra = HuaweiGestureController.EXTRA_TRIPLE_RIGHT_ACTION,
+        )
+        listOf(
+            HuaweiGestureSide.LEFT to HuaweiGestureController.EXTRA_SWIPE_LEFT_ACTION,
+            HuaweiGestureSide.RIGHT to HuaweiGestureController.EXTRA_SWIPE_RIGHT_ACTION,
+        ).forEach { (side, extra) ->
+            HuaweiSwipeAction.fromExtra(intent.getStringExtra(extra))
+                ?.takeIf { it in HuaweiSwipeAction.availableFor(route) }
+                ?.let { cacheSwipeAction(address, side, it) }
+        }
+    }
+
+    private fun cacheTapState(
+        intent: Intent,
+        route: HuaweiDeviceRoute,
+        address: String,
+        kind: HuaweiGestureKind,
+        leftExtra: String,
+        rightExtra: String,
+        legacyLeftExtra: String? = null,
+        legacyRightExtra: String? = null,
+    ) {
+        listOf(
+            Triple(HuaweiGestureSide.LEFT, leftExtra, legacyLeftExtra),
+            Triple(HuaweiGestureSide.RIGHT, rightExtra, legacyRightExtra),
+        ).forEach { (side, extra, legacyExtra) ->
+            val value = intent.getStringExtra(extra) ?: legacyExtra?.let(intent::getStringExtra)
+            HuaweiTapAction.fromExtra(value)
+                ?.takeIf { it in HuaweiTapAction.availableFor(route, kind) }
+                ?.let { cacheGestureAction(address, kind, side, route, it) }
+        }
+    }
+
+    private fun defaultGestureAction(
+        route: HuaweiDeviceRoute,
+        kind: HuaweiGestureKind,
+        side: HuaweiGestureSide,
+    ): HuaweiTapAction {
+        val preferred = when {
+            route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 && side == HuaweiGestureSide.LEFT ->
+                HuaweiTapAction.NOISE_CANCELLATION
+            route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.TRIPLE_TAP &&
+                side == HuaweiGestureSide.LEFT -> HuaweiTapAction.PLAY_PREVIOUS
+            route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.TRIPLE_TAP ->
+                HuaweiTapAction.PLAY_NEXT
+            else -> HuaweiTapAction.PLAY_PAUSE
+        }
+        return preferred.takeIf { it in HuaweiTapAction.availableFor(route, kind) }
+            ?: HuaweiTapAction.availableFor(route, kind).firstOrNull()
+            ?: HuaweiTapAction.NONE
+    }
+
+    private fun gestureCacheKey(
+        address: String,
+        kind: HuaweiGestureKind,
+        side: HuaweiGestureSide,
+    ): String {
+        val normalizedAddress = address.ifBlank { currentAddress ?: "unknown" }.uppercase()
+        return "huawei_gesture_${normalizedAddress}_${kind.extraValue}_${side.extraValue}"
+    }
+
+    private fun legacyGesturePrefKey(address: String, side: HuaweiGestureSide): String {
         val normalizedAddress = address.ifBlank { currentAddress ?: "unknown" }.uppercase()
         return "huawei_gesture_${normalizedAddress}_${side.extraValue}"
     }
 
-    private fun gestureActionLabel(context: Context, action: HuaweiGestureAction): String {
-        val fallback = when (action) {
-            HuaweiGestureAction.PLAY_NEXT -> "播放/下一首"
-            HuaweiGestureAction.PLAY_PAUSE -> "播放/暂停"
-            HuaweiGestureAction.VOICE_ASSISTANT -> "唤醒语音助手"
-            HuaweiGestureAction.NOISE_CANCELLATION -> "开启/关闭主动降噪"
-            HuaweiGestureAction.NONE -> "无"
+    private fun gestureActionLabel(context: Context, action: HuaweiTapAction): String {
+        val (resId, fallback) = when (action) {
+            HuaweiTapAction.PLAY_NEXT -> R.string.huawei_gesture_action_next to "下一首"
+            HuaweiTapAction.PLAY_PREVIOUS -> R.string.huawei_gesture_action_previous to "上一首"
+            HuaweiTapAction.PLAY_PAUSE -> R.string.huawei_gesture_action_play_pause to "播放/暂停"
+            HuaweiTapAction.VOICE_ASSISTANT -> R.string.huawei_gesture_action_voice_assistant to "唤醒语音助手"
+            HuaweiTapAction.NOISE_CANCELLATION -> R.string.huawei_gesture_action_noise_control to "噪声控制"
+            HuaweiTapAction.SPATIAL_AUDIO -> R.string.huawei_gesture_action_spatial_audio to "空间音频开关"
+            HuaweiTapAction.NONE -> R.string.huawei_gesture_action_none to "无"
         }
-        val resId = when (action) {
-            HuaweiGestureAction.PLAY_NEXT -> R.string.gesture_action_play_next
-            HuaweiGestureAction.PLAY_PAUSE -> R.string.gesture_action_play_pause
-            HuaweiGestureAction.VOICE_ASSISTANT -> R.string.gesture_action_voice_assistant
-            HuaweiGestureAction.NOISE_CANCELLATION -> R.string.gesture_action_noise_cancellation
-            HuaweiGestureAction.NONE -> R.string.gesture_action_none
+        return moduleString(context, resId, fallback)
+    }
+
+    private fun swipeActionLabel(context: Context, action: HuaweiSwipeAction): String {
+        val (resId, fallback) = when (action) {
+            HuaweiSwipeAction.VOLUME_CONTROL -> R.string.huawei_gesture_action_volume_control to "调节音量"
+            HuaweiSwipeAction.TRACK_CONTROL -> R.string.huawei_gesture_action_track_control to "切换曲目"
+            HuaweiSwipeAction.NONE -> R.string.huawei_gesture_action_none to "无"
+        }
+        return moduleString(context, resId, fallback)
+    }
+
+    private fun gesturePreferenceTitle(
+        context: Context,
+        kind: HuaweiGestureKind,
+        side: HuaweiGestureSide,
+    ): String {
+        val (resId, fallback) = when (kind to side) {
+            HuaweiGestureKind.DOUBLE_TAP to HuaweiGestureSide.LEFT ->
+                R.string.huawei_gesture_left_double_tap to "左侧双击"
+            HuaweiGestureKind.DOUBLE_TAP to HuaweiGestureSide.RIGHT ->
+                R.string.huawei_gesture_right_double_tap to "右侧双击"
+            HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.LEFT ->
+                R.string.huawei_gesture_left_triple_tap to "左侧三击"
+            HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.RIGHT ->
+                R.string.huawei_gesture_right_triple_tap to "右侧三击"
+            HuaweiGestureKind.SWIPE to HuaweiGestureSide.LEFT ->
+                R.string.huawei_gesture_left_swipe to "左侧轻滑"
+            HuaweiGestureKind.SWIPE to HuaweiGestureSide.RIGHT ->
+                R.string.huawei_gesture_right_swipe to "右侧轻滑"
+            else -> R.string.huawei_gesture_controls_title to "手势操作"
         }
         return moduleString(context, resId, fallback)
     }
@@ -993,27 +1336,54 @@ object SettingsHeadsetHook : HookContext() {
             ?: currentAddress
     }
 
+    private fun gestureDeviceRoute(fragment: Any?): HuaweiDeviceRoute {
+        val device = runCatching { getObjectField(fragment, "mDevice") as? BluetoothDevice }.getOrNull()
+        val argDevice = runCatching {
+            (callMethod(fragment, "getArguments") as? Bundle)?.parcelableDevice("BT_Device")
+        }.getOrNull()
+        val target = device ?: argDevice
+        val address = runCatching { target?.address }.getOrNull() ?: currentAddress
+        val name = runCatching { target?.name ?: target?.alias }.getOrNull() ?: currentName
+        return resolveHuaweiDeviceRoute(address, name)
+    }
+
+    private fun requestHuaweiGestureState(fragment: Any?, reason: String) {
+        if (gestureDeviceRoute(fragment) != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        val targetContext = context ?: return
+        val address = gestureDeviceAddress(fragment).orEmpty()
+        targetContext.sendBroadcast(Intent(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_REFRESH).apply {
+            putExtra(HuaweiGestureController.EXTRA_ADDRESS, address)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+        })
+        Log.d(TAG, "Huawei gesture state requested reason=$reason address=$address")
+    }
+
     private fun sendHuaweiGestureFromSettings(
         context: Context,
         address: String,
+        kind: HuaweiGestureKind,
         side: HuaweiGestureSide,
-        action: HuaweiGestureAction
+        action: String,
     ) {
         val targetAddress = address.ifBlank { currentAddress.orEmpty() }
         context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_SET).apply {
             putExtra(HuaweiGestureController.EXTRA_ADDRESS, targetAddress)
+            putExtra(HuaweiGestureController.EXTRA_GESTURE_KIND, kind.extraValue)
             putExtra(HuaweiGestureController.EXTRA_SIDE, side.extraValue)
-            putExtra(HuaweiGestureController.EXTRA_GESTURE_ACTION, action.extraValue)
+            putExtra(HuaweiGestureController.EXTRA_GESTURE_ACTION, action)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
-        Log.i(TAG, "Settings gesture requested address=$targetAddress side=${side.extraValue} action=${action.extraValue}")
+        Log.i(
+            TAG,
+            "Settings gesture requested address=$targetAddress kind=${kind.extraValue} side=${side.extraValue} action=$action",
+        )
     }
 
     private fun schedulePruneFreeBudsUnsupportedViews(root: View?) {
         if (root == null) return
-        installPruneOnScroll(root)
-        listOf(0L, 120L, 360L).forEach { delay ->
+        listOf(0L, 180L).forEach { delay ->
             root.postDelayed({
                 runCatching { pruneFreeBudsUnsupportedViews(root) }
                     .onFailure { Log.w(TAG, "Settings unsupported row prune failed", it) }
@@ -1021,36 +1391,11 @@ object SettingsHeadsetHook : HookContext() {
         }
     }
 
-    private fun installPruneOnScroll(root: View) {
-        if (pruneRoots[root] == true) return
-        pruneRoots[root] = true
-        installPruneOnScroll(root, root)
-    }
-
-    private fun installPruneOnScroll(root: View, view: View) {
-        if (view.isSystemScrollingContainer()) {
-            view.setOnScrollChangeListener { _, _, _, _, _ ->
-                root.postDelayed({
-                    runCatching { pruneFreeBudsUnsupportedViews(root) }
-                        .onFailure { Log.w(TAG, "Settings scroll prune failed", it) }
-                }, 80L)
-            }
-        }
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                installPruneOnScroll(root, view.getChildAt(index))
-            }
-        }
-    }
-
     private fun pruneFreeBudsUnsupportedViews(root: View) {
         replaceSettingsHeaderImage(root)
-        hideRowsByText(root, transparencyKeywords)
-        hideRowsByText(root, earFitKeywords)
-        hideRowsByText(root, notificationEntryKeywords)
-        hideRowsByText(root, xiaomiOnlyEntryKeywords)
-        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
-            hideRowsByText(root, gestureEntryKeywords)
+        val route = currentHuaweiRoute()
+        if (!route.supportsAnc) {
+            modeButtonContainer(root)?.let(::hideViewOnly)
         }
         replaceHuaweiAncLevelsWithHuaweiDial(root)
     }
@@ -1071,13 +1416,19 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun loadSettingsHeaderBitmap(context: Context): Bitmap? {
-        settingsHeaderBitmap?.takeIf { !it.isRecycled }?.let { return it }
+        val route = currentHuaweiRoute()
+        settingsHeaderBitmaps[route]?.takeIf { !it.isRecycled }?.let { return it }
         return runCatching {
             val moduleContext = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
-            BitmapFactory.decodeResource(moduleContext.resources, R.drawable.img_box)
+            val resourceId = when (route) {
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> R.drawable.img_freebuds6i_settings
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> R.drawable.img_freeclip2_box
+                else -> R.drawable.img_box
+            }
+            BitmapFactory.decodeResource(moduleContext.resources, resourceId)
         }.onSuccess { bitmap ->
-            settingsHeaderBitmap = bitmap
-            Log.d(TAG, "Settings headset image loaded bitmap=${bitmap?.width}x${bitmap?.height}")
+            if (bitmap != null) settingsHeaderBitmaps[route] = bitmap
+            Log.d(TAG, "Settings headset image loaded route=$route bitmap=${bitmap?.width}x${bitmap?.height}")
         }.onFailure {
             Log.w(TAG, "Settings headset image load failed", it)
         }.getOrNull()
@@ -1106,18 +1457,9 @@ object SettingsHeadsetHook : HookContext() {
         return measuredLarge || declaredLarge
     }
 
-    private fun hideRowsByText(root: View, keywords: List<String>) {
-        val matches = mutableListOf<TextView>()
-        collectTextMatches(root, keywords, matches)
-        matches.forEach { textView ->
-            val target = bestHideTarget(root, textView)
-            collapseView(target)
-            Log.d(TAG, "Settings unsupported row hidden text=${textView.text} target=${target.javaClass.name}")
-        }
-    }
-
     private fun replaceHuaweiAncLevelsWithHuaweiDial(root: View) {
         loadState()
+        val route = currentHuaweiRoute()
         val existingDial = findTaggedView(root, SETTINGS_HUAWEI_DIAL_TAG) as? HuaweiAncLevelDialView
         val matches = mutableListOf<TextView>()
         collectTextMatches(root, ancLevelKeywords, matches)
@@ -1126,9 +1468,11 @@ object SettingsHeadsetHook : HookContext() {
             ancLevelAnchorKeywords.any { text.contains(it, ignoreCase = true) }
         }
         val levelAnchor = levelContainer(root, anchorMatches.ifEmpty { matches })
-        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+        if (!route.supportsAncDirectionDial) {
             existingDial?.visibility = View.GONE
-            levelAnchor?.let { hideHuaweiAncLevelArea(root, it) }
+            if (!route.supportsDiscreteAncLevels) {
+                levelAnchor?.let(::hideViewOnly)
+            }
             return
         }
         if (!currentAnc.isSettingsNoiseCancellation()) {
@@ -1183,57 +1527,16 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun hideHuaweiAncLevelArea(root: View, anchor: View) {
-        val parent = anchor.parent as? ViewGroup
-        if (parent == null || parent === root || parent.isSystemScrollingContainer()) {
-            hideViewOnly(anchor)
-            return
-        }
-
-        val parentHasModeButtons = parent.containsAnyText(ancModeKeywords)
-        if (!parentHasModeButtons) {
-            for (index in 0 until parent.childCount) {
-                val child = parent.getChildAt(index)
-                if (child.tag != SETTINGS_HUAWEI_DIAL_TAG) {
-                    hideViewOnly(child)
-                }
-            }
-            Log.d(TAG, "Settings MIUI ANC level area hidden parent=${parent.javaClass.name} children=${parent.childCount}")
-            return
-        }
-
-        val anchorIndex = parent.indexOfChild(anchor)
         hideViewOnly(anchor)
-        listOf(anchorIndex - 1, anchorIndex + 1).forEach { index ->
-            val sibling = parent.getChildAtOrNull(index) ?: return@forEach
-            if (sibling.tag == SETTINGS_HUAWEI_DIAL_TAG) return@forEach
-            if (sibling.containsAnyText(ancModeKeywords)) return@forEach
-            hideViewOnly(sibling)
-        }
-        Log.d(TAG, "Settings MIUI ANC level nearby views hidden parent=${parent.javaClass.name} anchorIndex=$anchorIndex")
+        Log.d(TAG, "Settings MIUI ANC level anchor hidden view=${anchor.javaClass.name}")
     }
 
     private fun hideViewOnly(view: View) {
-        collapseView(view)
-    }
-
-    private fun collapseView(view: View) {
         view.visibility = View.GONE
         view.isEnabled = false
         view.isClickable = false
         view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        view.minimumHeight = 0
-        view.setPadding(0, 0, 0, 0)
-        view.layoutParams = view.layoutParams?.apply {
-            height = 0
-            if (this is ViewGroup.MarginLayoutParams) {
-                setMargins(0, 0, 0, 0)
-            }
-        }
         view.requestLayout()
-    }
-
-    private fun ViewGroup.getChildAtOrNull(index: Int): View? {
-        return if (index in 0 until childCount) getChildAt(index) else null
     }
 
     private fun ViewGroup.hasHuaweiAncDialChild(): Boolean = findHuaweiAncDialChild() != null
@@ -1259,7 +1562,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun modeButtonContainer(root: View): View? {
         val matches = mutableListOf<TextView>()
-        collectTextMatches(root, ancModeKeywords, matches)
+        collectExactTextMatches(root, ancModeKeywords, matches)
         val common = commonAncestor(root, matches)
         if (common != null && common !== root && !common.isSystemScrollingContainer()) {
             return common
@@ -1293,22 +1596,6 @@ object SettingsHeadsetHook : HookContext() {
         return className.contains("RecyclerView") ||
             className.contains("ScrollView") ||
             className.contains("ListView")
-    }
-
-    private fun View.containsAnyText(keywords: List<String>): Boolean {
-        if (this is TextView) {
-            val text = this.text?.toString().orEmpty()
-            val contentDescription = this.contentDescription?.toString().orEmpty()
-            if (keywords.any { text.contains(it, ignoreCase = true) || contentDescription.contains(it, ignoreCase = true) }) {
-                return true
-            }
-        }
-        if (this is ViewGroup) {
-            for (index in 0 until childCount) {
-                if (getChildAt(index).containsAnyText(keywords)) return true
-            }
-        }
-        return false
     }
 
     private fun findTaggedView(view: View, tag: String): View? {
@@ -1365,6 +1652,10 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun sendHuaweiAncLevel(level: Int) {
+        if (!currentHuaweiRoute().supportsAnc) {
+            Log.w(TAG, "sendHuaweiAncLevel skipped: current route does not support ANC")
+            return
+        }
         val ctx = context ?: run {
             Log.w(TAG, "sendHuaweiAncLevel skipped: context is null level=$level")
             return
@@ -1526,23 +1817,59 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun Context.dp(value: Float): Float = value * resources.displayMetrics.density
 
-    private fun sendHuaweiAnc(mode: Int) {
+    private fun dispatchAncSelection(selection: AncSelection) {
+        val route = currentHuaweiRoute()
+        if (!route.supportsAnc) {
+            Log.w(TAG, "Settings ANC selection ignored for non-ANC route=$route selection=$selection")
+            return
+        }
+        val waitsForReadback = route.supportsAncStateReadback
+        currentAncConfirmed = !waitsForReadback
+        saveState(context)
+        sendHuaweiAnc(selection)
+        if (!waitsForReadback) {
+            sendAncChanged(selection)
+        }
+    }
+
+    private fun collectExactTextMatches(view: View, values: List<String>, out: MutableList<TextView>) {
+        if (view is TextView) {
+            val text = view.text?.toString()?.trim().orEmpty()
+            val contentDescription = view.contentDescription?.toString()?.trim().orEmpty()
+            if (values.any { it.equals(text, ignoreCase = true) || it.equals(contentDescription, ignoreCase = true) }) {
+                out.add(view)
+            }
+        }
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                collectExactTextMatches(view.getChildAt(index), values, out)
+            }
+        }
+    }
+
+    private fun sendHuaweiAnc(selection: AncSelection) {
         val ctx = context ?: run {
-            Log.w(TAG, "sendHuaweiAnc skipped: context is null mode=$mode")
+            Log.w(TAG, "sendHuaweiAnc skipped: context is null selection=$selection")
             return
         }
         ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
-            putExtra("status", mode)
+            currentAddress?.let { putExtra("address", it) }
+            currentName?.let { putExtra("device_name", it) }
+            putExtra("status", selection.status)
+            selection.subMode?.let { putExtra("submode", it) }
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
     }
 
-    private fun sendAncChanged(mode: Int) {
+    private fun sendAncChanged(selection: AncSelection) {
         val ctx = context ?: return
         listOf(BuildConfig.APPLICATION_ID, "com.android.settings", "com.milink.service").forEach { targetPackage ->
             ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED).apply {
-                putExtra("status", mode)
+                currentAddress?.let { putExtra("address", it) }
+                currentName?.let { putExtra("device_name", it) }
+                putExtra("status", selection.status)
+                selection.subMode?.let { putExtra("submode", it) }
                 setPackage(targetPackage)
                 addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             })
@@ -1592,6 +1919,7 @@ object SettingsHeadsetHook : HookContext() {
             .putString("name", currentName)
             .putInt("anc", currentAnc)
             .putInt("huawei_anc_level", currentHuaweiAncLevel)
+            .putInt("transparency_submode", currentTransparencySubMode)
             .putInt("left_battery", currentBattery.left?.battery ?: 0)
             .putBoolean("left_charging", currentBattery.left?.isCharging == true)
             .putBoolean("left_connected", currentBattery.left?.isConnected == true)
@@ -1615,13 +1943,15 @@ object SettingsHeadsetHook : HookContext() {
             currentBattery = BatteryParams()
             currentAnc = 1
             currentAncConfirmed = false
-            currentHuaweiAncLevel = 0
+            currentHuaweiAncLevel = HuaweiAncLevel.ADAPTIVE.protocolValue
+            currentTransparencySubMode = 0x02
             knownHuaweiAddresses.clear()
             prefs.edit()
                 .remove("address")
                 .remove("name")
                 .remove("anc")
                 .remove("huawei_anc_level")
+                .remove("transparency_submode")
                 .remove("left_battery")
                 .remove("left_charging")
                 .remove("left_connected")
@@ -1641,7 +1971,14 @@ object SettingsHeadsetHook : HookContext() {
         currentAddress = prefs.getString("address", currentAddress)
         currentName = prefs.getString("name", currentName)
         currentAnc = prefs.getInt("anc", currentAnc)
-        currentHuaweiAncLevel = prefs.getInt("huawei_anc_level", currentHuaweiAncLevel).coerceIn(0, HUAWEI_ANC_LEVEL_LAST)
+        val savedAncLevel = prefs.getInt("huawei_anc_level", currentHuaweiAncLevel)
+        currentHuaweiAncLevel = if (currentHuaweiRoute().supportsDiscreteAncLevels) {
+            HuaweiAncLevel.fromProtocolValue(savedAncLevel)?.protocolValue
+                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+        } else {
+            savedAncLevel.coerceIn(0, HUAWEI_ANC_LEVEL_LAST)
+        }
+        currentTransparencySubMode = prefs.getInt("transparency_submode", currentTransparencySubMode)
         currentAddress?.let { knownHuaweiAddresses.add(it.uppercase()) }
         if (!hasSavedBattery && hasCurrentBattery()) return
         currentBattery = BatteryParams(
@@ -1663,7 +2000,7 @@ object SettingsHeadsetHook : HookContext() {
                 prefs.getBoolean("case_connected", currentBattery.case?.isConnected == true),
                 0
             )
-        ).normalizedEarbudAvailability()
+        )
     }
 
     private fun hasCurrentBattery(): Boolean {

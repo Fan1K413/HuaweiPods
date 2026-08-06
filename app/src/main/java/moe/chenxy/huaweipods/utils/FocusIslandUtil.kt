@@ -123,8 +123,14 @@ object FocusIslandUtil {
 
             Log.d(TAG, "Focus Island shown: L=$leftText% R=$rightText%")
             return true
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "Failed to show Focus Island: insufficient bitmap memory", e)
+            return false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to show Focus Island", e)
+            return false
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to show Focus Island safely", t)
             return false
         }
     }

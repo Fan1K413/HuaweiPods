@@ -10,28 +10,103 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import moe.chenxy.huaweipods.BuildConfig
+import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.hook.HuaweiAncSubModeSelectorView
 import moe.chenxy.huaweipods.hook.HookContext
 import moe.chenxy.huaweipods.hook.Log
 import moe.chenxy.huaweipods.hook.callMethod
 import moe.chenxy.huaweipods.hook.getObjectField
 import moe.chenxy.huaweipods.hook.setObjectField
+import moe.chenxy.huaweipods.pods.HuaweiAncLevel
+import moe.chenxy.huaweipods.pods.HuaweiAncState
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.huaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.isSupported
+import moe.chenxy.huaweipods.pods.normalizeHuaweiAncSubMode
 import moe.chenxy.huaweipods.pods.resolveHuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.supportsAnc
+import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
+import moe.chenxy.huaweipods.pods.supportsTransparency
+import moe.chenxy.huaweipods.pods.usesReportedEarbudAvailability
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+
+internal data class MiLinkAncSelection(
+    val status: Int,
+    val subMode: Int? = null,
+)
+
+/** 将 Huawei 的 1/2/3 状态映射为融合设备中心的 0/1/2。无 ANC 的机型不参与接管。 */
+internal fun miLinkAncModeFor(
+    route: HuaweiDeviceRoute,
+    huaweiStatus: Int,
+): Int? {
+    if (!route.supportsAnc) return null
+    return when (huaweiStatus) {
+        2, 5, 6, 7, 8 -> 1
+        3 -> if (route.supportsTransparency) 2 else 0
+        else -> 0
+    }
+}
+
+/** 只接受当前机型确实支持的融合设备中心状态。 */
+internal fun huaweiAncStatusForMiLink(
+    route: HuaweiDeviceRoute,
+    miLinkMode: Int,
+): Int? {
+    if (!route.supportsAnc) return null
+    return when (miLinkMode) {
+        0 -> NoiseControlMode.OFF.broadcastStatus
+        1 -> NoiseControlMode.NOISE_CANCELLATION.broadcastStatus
+        2 -> NoiseControlMode.TRANSPARENCY.broadcastStatus.takeIf { route.supportsTransparency }
+        else -> null
+    }
+}
+
+/** 与耳机控制器共用子模式校验；Pro 5 的通透子模式由融合设备中心保留。 */
+internal fun normalizeMiLinkAncSubMode(
+    route: HuaweiDeviceRoute,
+    huaweiStatus: Int,
+    requestedSubMode: Int?,
+    storedSubMode: Int?,
+): Int? {
+    val mode = NoiseControlMode.fromBroadcastStatus(huaweiStatus)
+    if (!route.supportsAnc || mode == NoiseControlMode.UNKNOWN) return null
+    if (mode == NoiseControlMode.TRANSPARENCY && !route.supportsTransparency) return null
+    if (
+        route == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 &&
+        mode == NoiseControlMode.TRANSPARENCY
+    ) {
+        val accepted = setOf(0x01, 0xFF)
+        return requestedSubMode?.takeIf(accepted::contains)
+            ?: storedSubMode?.takeIf(accepted::contains)
+            ?: 0xFF
+    }
+    return normalizeHuaweiAncSubMode(
+        route = route,
+        mode = mode,
+        requestedSubMode = requestedSubMode,
+        previousState = HuaweiAncState(mode, storedSubMode),
+    )
+}
 
 @SuppressLint("MissingPermission")
 object MiLinkServiceHook : HookContext() {
@@ -45,14 +120,22 @@ object MiLinkServiceHook : HookContext() {
     private const val CIRCULATE_SERVICE_HEADSET_PRIMARY = 393216
     private const val CIRCULATE_SERVICE_HEADSET_FALLBACK = 524288
     private const val HEADSET_BOND_BONDED = 306
+    private const val ANC_SUBMODE_SELECTOR_TAG = "huaweipods_milink_anc_submode"
+    private const val PREF_ANC_SUBMODE = "anc_submode"
+    private const val PREF_ANC_SUBMODE_LEGACY_6I = "anc_level"
+    private const val PREF_ANC_SUBMODE_LEGACY_PRO3 = "huawei_anc_level"
+    private const val PREF_TRANSPARENCY_SUBMODE = "transparency_submode"
     private val knownHuaweiAddresses = linkedSetOf<String>()
     private val knownWindowsHostIds = linkedSetOf<String>()
+    private val ancCards = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
     internal var context: Context? = null
     private var receiverRegistered = false
     internal var currentAddress: String? = null
     private var currentName: String? = null
     private var currentBattery: BatteryParams = BatteryParams()
     private var currentAnc = 1
+    private var currentAncSubMode: Int? = HuaweiAncLevel.ADAPTIVE.protocolValue
+    private var currentTransparencySubMode: Int? = null
     internal var lastAncBatteryController: Any? = null
     internal var lastProfileContext: Any? = null
     private var circulationSignalRewriteUntilMs = 0L
@@ -95,13 +178,13 @@ object MiLinkServiceHook : HookContext() {
             hookBluetoothDeviceResult(className, "checkIsMiTWS") { 1 }
             hookBluetoothDeviceResult(className, "getDeviceId") { fakeDeviceId() }
             hookBluetoothDeviceResult(className, "getBatteryLevel") { 1 }
-            hookBluetoothDeviceResult(className, "getAncState") { miLinkAncState() }
+            hookBluetoothDeviceResult(className, "getAncState", requiresAnc = true) { miLinkAncState() }
             hookBluetoothDeviceResult(className, "getDeviceRunInfo") { 0 }
             hookBluetoothDeviceResult(className, "getWearStatus") { "0,0" }
             hookBluetoothDeviceResult(className, "isLeAudio") { false }
             hookAncCommand(className, "openAnc", 2, 1)
             hookAncCommand(className, "closeAnc", 1, 0)
-            hookAncCommand(className, "openTransparent", 1, 0)
+            hookAncCommand(className, "openTransparent", 3, 1, requiresTransparency = true)
         }
         classes.forEach { className ->
             hookStringAddressResult(className, "isMiTWS") { true }
@@ -115,7 +198,11 @@ object MiLinkServiceHook : HookContext() {
         hookBluetoothDeviceResult("com.miui.headset.runtime.ProfileContext", "getDeviceId") { fakeDeviceId() }
         hookBluetoothDeviceResult("com.miui.headset.runtime.ProfileContext", "getBatteryLevel") { miLinkBatteryLevels() }
         hookBluetoothDeviceResult("com.miui.headset.runtime.AncBatteryController", "getDeviceId") { fakeDeviceId() }
-        hookBluetoothDeviceResult("com.miui.headset.runtime.AncBatteryController", "getAncState") { miLinkAncState() }
+        hookBluetoothDeviceResult(
+            "com.miui.headset.runtime.AncBatteryController",
+            "getAncState",
+            requiresAnc = true,
+        ) { miLinkAncState() }
         hookBluetoothDeviceResult("com.miui.headset.runtime.AncBatteryController", "getBatteryLevelCache") { miLinkBatteryLevels() }
         hookBluetoothDeviceResult("com.miui.headset.runtime.AncBatteryController", "getHeadsetPropertyBlock") { batteryPercentForMiLink() }
         hookStringAddressResult("com.miui.headset.runtime.AncBatteryController", "getSwitchState") { miLinkSwitchState() }
@@ -127,17 +214,23 @@ object MiLinkServiceHook : HookContext() {
         hookHeadsetInfoNoArg("component3") { fakeDeviceId() }
         hookHeadsetInfoNoArg("getPowers") { miLinkBatteryLevels() }
         hookHeadsetInfoNoArg("component4") { miLinkBatteryLevels() }
-        hookHeadsetInfoNoArg("getMode") { miLinkAncState() }
-        hookHeadsetInfoNoArg("component5") { miLinkAncState() }
+        hookHeadsetInfoNoArg("getMode", requiresAnc = true) { miLinkAncState() }
+        hookHeadsetInfoNoArg("component5", requiresAnc = true) { miLinkAncState() }
         hookHeadsetInfoNoArg("getSwitchState") { miLinkSwitchState() }
         hookHeadsetInfoNoArg("component8") { miLinkSwitchState() }
     }
 
-    internal fun hookBluetoothDeviceResult(className: String, methodName: String, result: () -> Any) {
+    internal fun hookBluetoothDeviceResult(
+        className: String,
+        methodName: String,
+        requiresAnc: Boolean = false,
+        result: () -> Any,
+    ) {
         runCatching {
             hookAfter(findMethod(className, methodName, BluetoothDevice::class.java)) {
                 val device = args[0] as? BluetoothDevice ?: return@hookAfter
-                if (!isHuaweiPod(device)) return@hookAfter
+                val route = routeForDevice(device)
+                if (!route.isSupported || requiresAnc && !route.supportsAnc) return@hookAfter
                 cacheRuntimeOwner(className, instance)
                 captureRuntimeContext(instance)
                 this.result = result()
@@ -158,16 +251,33 @@ object MiLinkServiceHook : HookContext() {
         }.onFailure { Log.w(TAG, "hook $className.$methodName(String) skipped", it) }
     }
 
-    private fun hookAncCommand(className: String, methodName: String, huaweiAnc: Int, result: Int) {
+    private fun hookAncCommand(
+        className: String,
+        methodName: String,
+        huaweiAnc: Int,
+        result: Int,
+        requiresTransparency: Boolean = false,
+    ) {
         runCatching {
             hookBefore(findMethod(className, methodName, BluetoothDevice::class.java)) {
                 val device = args[0] as? BluetoothDevice ?: return@hookBefore
-                if (!isHuaweiPod(device)) return@hookBefore
+                val route = routeForDevice(device)
+                if (!route.isSupported) return@hookBefore
+                if (!route.supportsAnc || requiresTransparency && !route.supportsTransparency) {
+                    this.result = 0
+                    return@hookBefore
+                }
                 cacheRuntimeOwner(className, instance)
                 captureRuntimeContext(instance)
-                currentAnc = huaweiAnc
-                sendHuaweiAnc(huaweiAnc)
-                sendAncChanged(huaweiAnc)
+                val selection = selectionForStatus(route, huaweiAnc) ?: run {
+                    this.result = 0
+                    return@hookBefore
+                }
+                applyAncSelection(selection)
+                saveState(context)
+                sendHuaweiAnc(selection)
+                sendAncChanged(selection)
+                refreshAncCards("$methodName-command")
                 this.result = result
             }
         }.onFailure { Log.w(TAG, "hook $className.$methodName command skipped", it) }
@@ -177,18 +287,30 @@ object MiLinkServiceHook : HookContext() {
         runCatching {
             hookBefore(findMethod("com.miui.headset.runtime.AncBatteryController", "setAncStateBlock", BluetoothDevice::class.java, Int::class.javaPrimitiveType!!)) {
                 val device = args[0] as? BluetoothDevice ?: return@hookBefore
-                if (!isHuaweiPod(device)) return@hookBefore
+                val route = routeForDevice(device)
+                if (!route.isSupported) return@hookBefore
+                if (!route.supportsAnc) {
+                    this.result = 0
+                    return@hookBefore
+                }
                 lastAncBatteryController = instance
                 captureRuntimeContext(instance)
                 val miLinkMode = args[1] as? Int ?: return@hookBefore
-                val huaweiAnc = huaweiAncFromMiLink(miLinkMode)
+                val huaweiStatus = huaweiAncStatusForMiLink(route, miLinkMode)
+                val selection = huaweiStatus?.let { selectionForStatus(route, it) }
+                if (selection == null) {
+                    this.result = 0
+                    return@hookBefore
+                }
                 val instanceContext = runCatching { getObjectField(instance, "context") as? Context }.getOrNull()
                 if (instanceContext != null) {
                     context = instanceContext.applicationContext ?: instanceContext
                 }
-                currentAnc = huaweiAnc
-                sendHuaweiAnc(huaweiAnc, instanceContext)
-                sendAncChanged(huaweiAnc, instanceContext)
+                applyAncSelection(selection)
+                saveState(instanceContext)
+                sendHuaweiAnc(selection, instanceContext)
+                sendAncChanged(selection, instanceContext)
+                refreshAncCards("setAncStateBlock")
                 notifyHeadsetPropertyChanged(instance, device, 8)
                 notifyHeadsetPropertyChanged(instance, device, 4)
                 this.result = miLinkAncState()
@@ -196,10 +318,15 @@ object MiLinkServiceHook : HookContext() {
         }.onFailure { Log.w(TAG, "hook AncBatteryController.setAncStateBlock skipped", it) }
     }
 
-    internal fun hookHeadsetInfoNoArg(methodName: String, result: () -> Any) {
+    internal fun hookHeadsetInfoNoArg(
+        methodName: String,
+        requiresAnc: Boolean = false,
+        result: () -> Any,
+    ) {
         runCatching {
             hookAfter(findMethodByParamCount("com.miui.headset.api.HeadsetInfo", methodName, 0)) {
-                if (!isTargetHeadsetInfo(instance)) return@hookAfter
+                val route = routeForHeadsetInfo(instance)
+                if (!route.isSupported || requiresAnc && !route.supportsAnc) return@hookAfter
                 this.result = result()
             }
         }.onFailure { Log.w(TAG, "hook HeadsetInfo.$methodName skipped", it) }
@@ -222,12 +349,23 @@ object MiLinkServiceHook : HookContext() {
                     runCatching {
                         method.isAccessible = true
                         hookAfter(method) {
-                            if (!isHuaweiMethodTarget(args, instance)) return@hookAfter
-                            this.result = when (method.returnType) {
-                                Boolean::class.javaPrimitiveType, java.lang.Boolean::class.java -> false
-                                else -> 0
+                            val route = routeForMethodTarget(args, instance)
+                            if (!route.isSupported) return@hookAfter
+                            val supported = route.supportsTransparency
+                            val enabled = if (isTransparencyCapabilityMethod(method.name)) {
+                                supported
+                            } else {
+                                supported && currentAnc == NoiseControlMode.TRANSPARENCY.broadcastStatus
                             }
-                            Log.d(TAG, "MiLink hide transparency ${method.declaringClass.name}.${method.name} result=${this.result}")
+                            this.result = when (method.returnType) {
+                                Boolean::class.javaPrimitiveType, java.lang.Boolean::class.java -> enabled
+                                else -> if (enabled) 1 else 0
+                            }
+                            Log.d(
+                                TAG,
+                                "MiLink transparency ${method.declaringClass.name}.${method.name} " +
+                                    "route=$route result=${this.result}",
+                            )
                         }
                     }.onFailure {
                         Log.w(TAG, "hook ${method.declaringClass.name}.${method.name} transparency skipped", it)
@@ -241,7 +379,7 @@ object MiLinkServiceHook : HookContext() {
             val detailClass = findClass("com.miui.circulateplus.world.headset.HeadSetsDetail")
             val cardClass = findClass("com.miui.circulateplus.world.headset.j")
             hookConstructorAfter(cardClass.getDeclaredConstructor(detailClass).apply { isAccessible = true }) {
-                hideTransparencyOptionInAncCard(result ?: instance, "constructor")
+                configureAncCard(result ?: instance, "constructor")
             }
             cardClass.declaredMethods
                 .filter { it.returnType == Void.TYPE && it.parameterTypes.size <= 1 }
@@ -249,45 +387,196 @@ object MiLinkServiceHook : HookContext() {
                     runCatching {
                         method.isAccessible = true
                         hookAfter(method) {
-                            hideTransparencyOptionInAncCard(instance, method.name)
+                            configureAncCard(instance, method.name)
                         }
                     }.onFailure { Log.w(TAG, "hook ${cardClass.name}.${method.name} hide transparency skipped", it) }
                 }
         }.onFailure { Log.w(TAG, "hook CirculatePlus headset ANC card skipped", it) }
     }
 
-    private fun hideTransparencyOptionInAncCard(card: Any?, reason: String) {
+    private fun configureAncCard(card: Any?, reason: String) {
         if (card == null) return
+        loadState()
+        val route = currentHuaweiRoute()
+        if (!route.isSupported) return
+        ancCards[card] = true
         val clearView = runCatching { getObjectField(card, "f") as? View }.getOrNull()
-        hideTransparencyView(clearView)
-        clearView?.post { hideTransparencyView(clearView) }
-        Log.d(TAG, "MiLink hide transparency ANC card reason=$reason card=${card.javaClass.name}")
+        configureAncCardViews(card, route, clearView, reason)
+        clearView?.post {
+            configureAncCardViews(card, currentHuaweiRoute(), clearView, "$reason-post")
+        }
     }
 
-    private fun hideTransparencyView(view: View?) {
-        if (view == null) return
-        view.visibility = View.GONE
-        view.isEnabled = false
-        view.isClickable = false
-        view.setOnClickListener(null)
-        runCatching {
-            view.layoutParams = view.layoutParams?.apply {
-                width = 0
-                height = 0
+    private fun configureAncCardViews(
+        card: Any,
+        route: HuaweiDeviceRoute,
+        clearView: View?,
+        reason: String,
+    ) {
+        if (!route.isSupported) return
+        val modeRow = clearView?.parent as? ViewGroup
+        val ancContainer = modeRow?.parent as? ViewGroup
+        val capabilityContainer: View? = ancContainer ?: modeRow ?: clearView
+
+        if (!route.supportsAnc) {
+            setCapabilityViewVisible(capabilityContainer, false)
+            ancContainer?.let { findTaggedView(it, ANC_SUBMODE_SELECTOR_TAG)?.visibility = View.GONE }
+            Log.d(TAG, "MiLink ANC card hidden route=$route reason=$reason card=${card.javaClass.name}")
+            return
+        }
+
+        setCapabilityViewVisible(capabilityContainer, true)
+        setCapabilityViewVisible(clearView, route.supportsTransparency)
+        if (modeRow == null || ancContainer == null) return
+
+        val selector = findTaggedView(ancContainer, ANC_SUBMODE_SELECTOR_TAG) as? HuaweiAncSubModeSelectorView
+        val supportsCurrentSubMode = when (currentAnc) {
+            NoiseControlMode.NOISE_CANCELLATION.broadcastStatus -> route.supportsDiscreteAncLevels
+            NoiseControlMode.TRANSPARENCY.broadcastStatus -> route.supportsTransparency
+            else -> false
+        }
+        if (!supportsCurrentSubMode) {
+            selector?.visibility = View.GONE
+            return
+        }
+
+        val options = selectorOptions(route, currentAnc)
+        if (options.isEmpty()) {
+            selector?.visibility = View.GONE
+            return
+        }
+        val selected = selectionForStatus(route, currentAnc)?.subMode ?: options.first().value
+        val targetSelector = selector ?: HuaweiAncSubModeSelectorView(ancContainer.context) { subMode ->
+            val activeRoute = currentHuaweiRoute()
+            val selection = selectionForStatus(activeRoute, currentAnc, subMode)
+                ?: return@HuaweiAncSubModeSelectorView
+            applyAncSelection(selection)
+            saveState(ancContainer.context)
+            sendHuaweiAnc(selection, ancContainer.context)
+            sendAncChanged(selection, ancContainer.context)
+            refreshAncCards("submode-selected")
+        }.apply {
+            tag = ANC_SUBMODE_SELECTOR_TAG
+            val insertIndex = (ancContainer.indexOfChild(modeRow) + 1)
+                .coerceIn(0, ancContainer.childCount)
+            ancContainer.addView(
+                this,
+                insertIndex,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        targetSelector.render(options, selected, isDarkSurface(ancContainer))
+        targetSelector.visibility = View.VISIBLE
+        Log.d(TAG, "MiLink ANC submode configured route=$route mode=$currentAnc reason=$reason")
+    }
+
+    private fun selectorOptions(
+        route: HuaweiDeviceRoute,
+        status: Int,
+    ): List<HuaweiAncSubModeSelectorView.Option> = when (status) {
+        NoiseControlMode.NOISE_CANCELLATION.broadcastStatus -> listOf(
+            HuaweiAncSubModeSelectorView.Option(
+                HuaweiAncLevel.ADAPTIVE.protocolValue,
+                moduleString(R.string.anc_level_adaptive, "智慧动态"),
+            ),
+            HuaweiAncSubModeSelectorView.Option(
+                HuaweiAncLevel.LIGHT.protocolValue,
+                moduleString(R.string.anc_level_light, "轻度"),
+            ),
+            HuaweiAncSubModeSelectorView.Option(
+                HuaweiAncLevel.BALANCED.protocolValue,
+                moduleString(R.string.anc_level_balanced, "均衡"),
+            ),
+            HuaweiAncSubModeSelectorView.Option(
+                HuaweiAncLevel.DEEP.protocolValue,
+                moduleString(R.string.anc_level_deep, "深度"),
+            ),
+        )
+        NoiseControlMode.TRANSPARENCY.broadcastStatus -> when (route) {
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> transparencyOptions(standardValue = 0x02)
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 -> transparencyOptions(standardValue = 0xFF)
+            else -> emptyList()
+        }
+        else -> emptyList()
+    }
+
+    private fun transparencyOptions(standardValue: Int) = listOf(
+        HuaweiAncSubModeSelectorView.Option(
+            standardValue,
+            moduleString(R.string.transparency_standard, "普通"),
+        ),
+        HuaweiAncSubModeSelectorView.Option(
+            0x01,
+            moduleString(R.string.transparency_voice, "人声增强"),
+        ),
+    )
+
+    private fun moduleString(resId: Int, fallback: String): String {
+        val hostContext = context ?: return fallback
+        return runCatching {
+            hostContext.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
+                .getString(resId)
+        }.getOrDefault(fallback)
+    }
+
+    private fun findTaggedView(view: View, tag: String): View? {
+        if (view.tag == tag) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                findTaggedView(view.getChildAt(index), tag)?.let { return it }
             }
         }
-        runCatching { (view.parent as? ViewGroup)?.removeView(view) }
-        runCatching { (view.parent as? View)?.requestLayout() }
+        return null
     }
 
-    private fun isHuaweiMethodTarget(args: List<Any?>, instance: Any?): Boolean {
+    private fun setCapabilityViewVisible(view: View?, visible: Boolean) {
+        view ?: return
+        view.visibility = if (visible) View.VISIBLE else View.GONE
+        view.isEnabled = visible
+        view.requestLayout()
+    }
+
+    private fun isDarkSurface(view: View): Boolean {
+        var current: View? = view
+        repeat(4) {
+            val color = when (val background = current?.background) {
+                is ColorDrawable -> background.color
+                is GradientDrawable -> background.color?.defaultColor
+                else -> null
+            }
+            if (color != null && Color.alpha(color) > 32) {
+                val luminance = (
+                    Color.red(color) * 299 +
+                        Color.green(color) * 587 +
+                        Color.blue(color) * 114
+                    ) / 1000
+                return luminance < 128
+            }
+            current = current?.parent as? View
+        }
+        return true
+    }
+
+    private fun routeForMethodTarget(args: List<Any?>, instance: Any?): HuaweiDeviceRoute {
         args.forEach { arg ->
             when (arg) {
-                is BluetoothDevice -> return isHuaweiPod(arg)
-                is String -> if (isHuaweiAddress(arg)) return true
+                is BluetoothDevice -> routeForDevice(arg).takeIf { it.isSupported }?.let { return it }
+                is String -> routeForAddress(arg).takeIf { it.isSupported }?.let { return it }
             }
         }
-        return isTargetHeadsetInfo(instance) || isCurrentHuaweiHeadset()
+        return routeForHeadsetInfo(instance).takeIf { it.isSupported } ?: currentHuaweiRoute()
+    }
+
+    private fun isTransparencyCapabilityMethod(methodName: String): Boolean {
+        val name = methodName.lowercase()
+        return "support" in name ||
+            "capability" in name ||
+            "available" in name ||
+            "hastransparent" in name
     }
 
     private fun hookHeadsetCirculationExperiment() {
@@ -579,6 +868,7 @@ object MiLinkServiceHook : HookContext() {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_DISCONNECTED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONFIG_CHANGED)
         }
         context?.registerReceiver(object : BroadcastReceiver() {
@@ -587,6 +877,7 @@ object MiLinkServiceHook : HookContext() {
                 when (HuaweiPodsAction.canonical(receivedIntent.action)) {
                     HuaweiPodsAction.ACTION_CONFIG_CHANGED -> {
                         refreshConfig()
+                        refreshAncCards("config-changed")
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
@@ -601,13 +892,37 @@ object MiLinkServiceHook : HookContext() {
                             receivedIntent.batteryStatusFromExtras()
                                 ?: receivedIntent.parcelableStatus()
                                 ?: currentBattery
-                            ).normalizedEarbudAvailability()
+                            ).let(::normalizeBatteryAvailabilityForCurrentRoute)
                         saveState(context)
                     }
                     HuaweiPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
-                        currentAnc = receivedIntent.getIntExtra("status", currentAnc)
+                        val route = currentHuaweiRoute()
+                        val status = receivedIntent.getIntExtra("status", currentAnc)
+                        val requestedSubMode = receivedIntent.getIntExtra("submode", -1)
+                            .takeIf { receivedIntent.hasExtra("submode") && it >= 0 }
+                        when {
+                            !route.supportsAnc -> applyAncSelection(MiLinkAncSelection(1))
+                            status == 3 && !route.supportsTransparency -> Unit
+                            status in setOf(1, 2, 3) -> {
+                                selectionForStatus(route, status, requestedSubMode)
+                                    ?.let(::applyAncSelection)
+                            }
+                            status in setOf(5, 6, 7, 8) -> currentAnc = status
+                        }
                         saveState(context)
+                        refreshAncCards("anc-changed")
+                    }
+                    HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED -> {
+                        if (!rememberSupportedDevice(receivedIntent)) return
+                        val route = currentHuaweiRoute()
+                        if (!route.supportsDiscreteAncLevels || currentAnc != 2) return
+                        val level = receivedIntent.getIntExtra("level", -1)
+                        selectionForStatus(route, currentAnc, level)
+                            ?.let(::applyAncSelection)
+                            ?: return
+                        saveState(context)
+                        refreshAncCards("anc-level-changed")
                     }
                 }
             }
@@ -620,16 +935,7 @@ object MiLinkServiceHook : HookContext() {
     }
 
     internal fun isHuaweiPod(device: BluetoothDevice): Boolean {
-        val address = runCatching { device.address }.getOrNull()
-        if (address != null && isHuaweiAddress(address)) return true
-        val name = runCatching { device.name ?: device.alias }.getOrNull().orEmpty()
-        val result = device.huaweiDeviceRoute().isSupported
-        if (result && address != null) {
-            knownHuaweiAddresses.add(address.uppercase())
-            currentAddress = address
-            currentName = name
-        }
-        return result
+        return routeForDevice(device).isSupported
     }
 
     internal fun isHuaweiAddress(address: String): Boolean {
@@ -639,27 +945,88 @@ object MiLinkServiceHook : HookContext() {
             normalized in knownHuaweiAddresses
     }
 
-    private fun isTargetHeadsetInfo(info: Any?): Boolean {
-        if (info == null) return false
+    private fun routeForHeadsetInfo(info: Any?): HuaweiDeviceRoute {
+        if (info == null) return HuaweiDeviceRoute.UNSUPPORTED
         listOf("getAddress", "component1").forEach { method ->
             val address = runCatching { callMethod(info, method) as? String }.getOrNull()
-            if (address != null && isHuaweiAddress(address)) return true
+            if (address != null) {
+                routeForAddress(address).takeIf { it.isSupported }?.let { return it }
+            }
         }
-        return false
+        return HuaweiDeviceRoute.UNSUPPORTED
     }
 
     private fun miLinkAncState(): Int {
         loadState()
-        return when (currentAnc) {
-            2, 5, 6, 7, 8 -> 1
-            else -> 0
+        return miLinkAncModeFor(currentHuaweiRoute(), currentAnc) ?: 0
+    }
+
+    private fun currentHuaweiRoute(): HuaweiDeviceRoute =
+        resolveHuaweiDeviceRoute(currentAddress, currentName)
+
+    private fun routeForAddress(address: String): HuaweiDeviceRoute {
+        val currentDeviceName = currentName.takeIf {
+            address.equals(currentAddress, ignoreCase = true)
+        }
+        return resolveHuaweiDeviceRoute(address, currentDeviceName)
+    }
+
+    private fun routeForDevice(device: BluetoothDevice): HuaweiDeviceRoute {
+        val address = runCatching { device.address }.getOrNull()
+        val name = runCatching {
+            device.name?.takeIf(String::isNotBlank)
+                ?: device.alias?.takeIf(String::isNotBlank)
+        }.getOrNull()
+        var route = device.huaweiDeviceRoute()
+        if (
+            !route.isSupported &&
+            detectHuaweiDeviceRoute(name) == HuaweiDeviceRoute.UNSUPPORTED &&
+            address != null &&
+            (address.equals(currentAddress, ignoreCase = true) || address.uppercase() in knownHuaweiAddresses)
+        ) {
+            route = resolveHuaweiDeviceRoute(address, currentName)
+        }
+        if (route.isSupported) {
+            address?.takeIf(String::isNotBlank)?.let {
+                knownHuaweiAddresses.add(it.uppercase())
+                currentAddress = it
+            }
+            name?.takeIf(String::isNotBlank)?.let { currentName = it }
+        }
+        return route
+    }
+
+    private fun selectionForStatus(
+        route: HuaweiDeviceRoute,
+        status: Int,
+        requestedSubMode: Int? = null,
+    ): MiLinkAncSelection? {
+        if (!route.supportsAnc || status == 3 && !route.supportsTransparency) return null
+        if (status !in setOf(1, 2, 3)) return null
+        val storedSubMode = when (status) {
+            2 -> currentAncSubMode
+            3 -> currentTransparencySubMode
+            else -> null
+        }
+        return MiLinkAncSelection(
+            status = status,
+            subMode = normalizeMiLinkAncSubMode(route, status, requestedSubMode, storedSubMode),
+        )
+    }
+
+    private fun applyAncSelection(selection: MiLinkAncSelection) {
+        currentAnc = selection.status
+        when (selection.status) {
+            2 -> currentAncSubMode = selection.subMode
+            3 -> currentTransparencySubMode = selection.subMode
         }
     }
 
-    private fun huaweiAncFromMiLink(mode: Int): Int {
-        return when (mode) {
-            1 -> 2
-            else -> 1
+    private fun refreshAncCards(reason: String) {
+        val cards = synchronized(ancCards) { ancCards.keys.toList() }
+        cards.forEach { card ->
+            runCatching { configureAncCard(card, reason) }
+                .onFailure { Log.w(TAG, "MiLink ANC card refresh failed reason=$reason", it) }
         }
     }
 
@@ -695,26 +1062,33 @@ object MiLinkServiceHook : HookContext() {
         return if (params?.isConnected == true && params.isCharging) 1 else 0
     }
 
-    private fun sendHuaweiAnc(mode: Int, fallbackContext: Context? = null) {
+    private fun sendHuaweiAnc(selection: MiLinkAncSelection, fallbackContext: Context? = null) {
+        val route = currentHuaweiRoute()
+        if (!route.supportsAnc || selection.status == 3 && !route.supportsTransparency) {
+            Log.d(TAG, "sendHuaweiAnc skipped: route=$route selection=$selection")
+            return
+        }
         val ctx = fallbackContext ?: context ?: run {
-            Log.w(TAG, "sendHuaweiAnc skipped: context is null mode=$mode")
+            Log.w(TAG, "sendHuaweiAnc skipped: context is null selection=$selection")
             return
         }
         Intent(HuaweiPodsAction.ACTION_ANC_SELECT).apply {
-            putExtra("status", mode)
+            putExtra("status", selection.status)
+            selection.subMode?.let { putExtra("submode", it) }
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             ctx.sendBroadcast(this)
         }
     }
 
-    private fun sendAncChanged(mode: Int, fallbackContext: Context? = null) {
+    private fun sendAncChanged(selection: MiLinkAncSelection, fallbackContext: Context? = null) {
         val ctx = fallbackContext ?: context ?: return
         listOf(BuildConfig.APPLICATION_ID, "com.milink.service", "com.android.settings").forEach { targetPackage ->
             ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED).apply {
                 currentAddress?.let { putExtra("address", it) }
                 currentName?.let { putExtra("device_name", it) }
-                putExtra("status", mode)
+                putExtra("status", selection.status)
+                selection.subMode?.let { putExtra("submode", it) }
                 setPackage(targetPackage)
                 addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             })
@@ -727,16 +1101,45 @@ object MiLinkServiceHook : HookContext() {
     }
 
     private fun rememberSupportedDevice(intent: Intent): Boolean {
-        val address = intent.getStringExtra("address") ?: currentAddress
-        val name = intent.getStringExtra("device_name") ?: currentName
-        if (!resolveHuaweiDeviceRoute(address, name).isSupported) {
+        val address = intent.getStringExtra("address")
+            ?.takeIf(String::isNotBlank)
+            ?: currentAddress
+        val name = intent.getStringExtra("device_name")
+            ?.takeIf(String::isNotBlank)
+            ?: currentName
+        val route = resolveHuaweiDeviceRoute(address, name)
+        if (!route.isSupported) {
             Log.w(TAG, "ignored unsupported persisted/broadcast device=${name.orEmpty()}/${address.orEmpty()}")
             return false
+        }
+        val previousRoute = currentHuaweiRoute()
+        val identityChanged = when {
+            !address.isNullOrBlank() -> !address.equals(currentAddress, ignoreCase = true)
+            else -> name != currentName
         }
         currentName = name
         currentAddress = address
         currentAddress?.takeIf { it.isNotBlank() }?.let { knownHuaweiAddresses.add(it.uppercase()) }
+        if (identityChanged || previousRoute != route) {
+            resetAncState(route)
+        }
         return true
+    }
+
+    private fun resetAncState(route: HuaweiDeviceRoute) {
+        currentAnc = NoiseControlMode.OFF.broadcastStatus
+        currentAncSubMode = normalizeMiLinkAncSubMode(
+            route,
+            NoiseControlMode.NOISE_CANCELLATION.broadcastStatus,
+            requestedSubMode = null,
+            storedSubMode = null,
+        )
+        currentTransparencySubMode = normalizeMiLinkAncSubMode(
+            route,
+            NoiseControlMode.TRANSPARENCY.broadcastStatus,
+            requestedSubMode = null,
+            storedSubMode = null,
+        )
     }
 
     private fun isCurrentHuaweiHeadset(): Boolean {
@@ -1226,7 +1629,7 @@ object MiLinkServiceHook : HookContext() {
 
     private fun saveState(ctx: Context?) {
         val prefs = (ctx ?: context)?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
-        prefs.edit()
+        val editor = prefs.edit()
             .putString("address", currentAddress)
             .putString("name", currentName)
             .putInt("anc", currentAnc)
@@ -1239,7 +1642,11 @@ object MiLinkServiceHook : HookContext() {
             .putInt("case_battery", currentBattery.case?.battery ?: 0)
             .putBoolean("case_charging", currentBattery.case?.isCharging == true)
             .putBoolean("case_connected", currentBattery.case?.isConnected == true)
-            .apply()
+        currentAncSubMode?.let { editor.putInt(PREF_ANC_SUBMODE, it) }
+            ?: editor.remove(PREF_ANC_SUBMODE)
+        currentTransparencySubMode?.let { editor.putInt(PREF_TRANSPARENCY_SUBMODE, it) }
+            ?: editor.remove(PREF_TRANSPARENCY_SUBMODE)
+        editor.apply()
     }
 
     private fun loadState() {
@@ -1252,11 +1659,17 @@ object MiLinkServiceHook : HookContext() {
             currentName = null
             currentBattery = BatteryParams()
             currentAnc = 1
+            currentAncSubMode = null
+            currentTransparencySubMode = null
             knownHuaweiAddresses.clear()
             prefs.edit()
                 .remove("address")
                 .remove("name")
                 .remove("anc")
+                .remove(PREF_ANC_SUBMODE)
+                .remove(PREF_ANC_SUBMODE_LEGACY_6I)
+                .remove(PREF_ANC_SUBMODE_LEGACY_PRO3)
+                .remove(PREF_TRANSPARENCY_SUBMODE)
                 .remove("left_battery")
                 .remove("left_charging")
                 .remove("left_connected")
@@ -1273,6 +1686,30 @@ object MiLinkServiceHook : HookContext() {
         currentAddress = prefs.getString("address", currentAddress)
         currentName = prefs.getString("name", currentName)
         currentAnc = prefs.getInt("anc", currentAnc)
+        val route = currentHuaweiRoute()
+        val persistedAncSubMode = when {
+            prefs.contains(PREF_ANC_SUBMODE) -> prefs.getInt(PREF_ANC_SUBMODE, -1)
+            prefs.contains(PREF_ANC_SUBMODE_LEGACY_6I) -> prefs.getInt(PREF_ANC_SUBMODE_LEGACY_6I, -1)
+            prefs.contains(PREF_ANC_SUBMODE_LEGACY_PRO3) -> prefs.getInt(PREF_ANC_SUBMODE_LEGACY_PRO3, -1)
+            else -> -1
+        }.takeIf { it >= 0 }
+        val persistedTransparencySubMode = prefs.getInt(PREF_TRANSPARENCY_SUBMODE, -1)
+            .takeIf { prefs.contains(PREF_TRANSPARENCY_SUBMODE) && it >= 0 }
+        currentAncSubMode = normalizeMiLinkAncSubMode(
+            route,
+            NoiseControlMode.NOISE_CANCELLATION.broadcastStatus,
+            persistedAncSubMode,
+            storedSubMode = null,
+        )
+        currentTransparencySubMode = normalizeMiLinkAncSubMode(
+            route,
+            NoiseControlMode.TRANSPARENCY.broadcastStatus,
+            persistedTransparencySubMode,
+            storedSubMode = null,
+        )
+        if (!route.supportsAnc || currentAnc == 3 && !route.supportsTransparency) {
+            currentAnc = NoiseControlMode.OFF.broadcastStatus
+        }
         currentAddress?.let { knownHuaweiAddresses.add(it.uppercase()) }
         currentBattery = BatteryParams(
             left = PodParams(
@@ -1293,6 +1730,13 @@ object MiLinkServiceHook : HookContext() {
                 prefs.getBoolean("case_connected", currentBattery.case?.isConnected == true),
                 0
             )
-        ).normalizedEarbudAvailability()
+        ).let(::normalizeBatteryAvailabilityForCurrentRoute)
     }
+
+    private fun normalizeBatteryAvailabilityForCurrentRoute(status: BatteryParams): BatteryParams =
+        if (currentHuaweiRoute().usesReportedEarbudAvailability) {
+            status
+        } else {
+            status.normalizedEarbudAvailability()
+        }
 }

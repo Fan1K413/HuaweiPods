@@ -41,21 +41,25 @@ object HeadsetStateDispatcher : HookContext() {
                 return@hookAfter
             }
             handler.post {
-                val isHuawei = isHuaweiPod(device)
-                Log.d("HuaweiPods", "A2DP Connection State: $currState, isHuaweiPod=$isHuawei")
-                val context = instance as ContextWrapper
-                registerAppRequestReceiver(context)
-                if (!isHuawei) return@post
+                runCatching {
+                    val isHuawei = isHuaweiPod(device)
+                    Log.d("HuaweiPods", "A2DP Connection State: $currState, isHuaweiPod=$isHuawei")
+                    val context = instance as ContextWrapper
+                    registerAppRequestReceiver(context)
+                    if (!isHuawei) return@runCatching
 
-                val statusBarManager = context.getSystemService("statusbar") as StatusBarManager
-                if (currState == BluetoothHeadset.STATE_CONNECTED) {
-                    connectedA2dpAddresses.add(device.address.uppercase())
-                    statusBarManager.setIconVisibility("wireless_headset", true)
-                    HuaweiHfpController.connectPod(context, device)
-                } else if (currState == BluetoothHeadset.STATE_DISCONNECTING || currState == BluetoothHeadset.STATE_DISCONNECTED) {
-                    connectedA2dpAddresses.remove(device.address.uppercase())
-                    statusBarManager.setIconVisibility("wireless_headset", false)
-                    HuaweiHfpController.disconnectedPod(context, device)
+                    val statusBarManager = context.getSystemService("statusbar") as StatusBarManager
+                    if (currState == BluetoothHeadset.STATE_CONNECTED) {
+                        connectedA2dpAddresses.add(device.address.uppercase())
+                        statusBarManager.setIconVisibility("wireless_headset", true)
+                        HuaweiHfpController.connectPod(context, device)
+                    } else if (currState == BluetoothHeadset.STATE_DISCONNECTING || currState == BluetoothHeadset.STATE_DISCONNECTED) {
+                        connectedA2dpAddresses.remove(device.address.uppercase())
+                        statusBarManager.setIconVisibility("wireless_headset", false)
+                        HuaweiHfpController.disconnectedPod(context, device)
+                    }
+                }.onFailure {
+                    Log.e("HuaweiPods", "A2DP state callback failed without interrupting Bluetooth", it)
                 }
             }
         }
@@ -64,55 +68,65 @@ object HeadsetStateDispatcher : HookContext() {
     @SuppressLint("MissingPermission")
     private fun registerAppRequestReceiver(context: Context?) {
         if (context == null || appRequestReceiverRegistered) return
-        context.registerReceiver(object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (context == null) return
-                val receivedIntent = intent ?: return
-                when (HuaweiPodsAction.canonical(receivedIntent.action)) {
-                    HuaweiPodsAction.ACTION_PODS_UI_INIT,
-                    HuaweiPodsAction.ACTION_REFRESH_STATUS -> {
-                        context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE).apply {
-                            setPackage(BuildConfig.APPLICATION_ID)
-                            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-                        })
-                    }
-                    HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST -> {
-                        val device = receivedIntent.getParcelableExtra("device", BluetoothDevice::class.java) ?: return
-                        Log.d("HuaweiPods", "connect request from app device=${device.name}/${device.address}")
-                        val supported = isHuaweiPod(device)
-                        if (supported && isDeviceConnected(device)) {
-                            HuaweiHfpController.connectPod(context, device)
-                        } else if (supported) {
-                            notifyRejectedDevice(
-                                context = context,
-                                device = device,
-                                state = "error",
-                                operation = "connect",
-                                reason = "not_connected",
-                                supported = true,
-                            )
-                        } else {
-                            notifyRejectedDevice(context, device, state = "error", operation = "connect")
+        val registered = runCatching {
+            context.registerReceiver(object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (context == null) return
+                    val receivedIntent = intent ?: return
+                    runCatching {
+                        when (HuaweiPodsAction.canonical(receivedIntent.action)) {
+                            HuaweiPodsAction.ACTION_PODS_UI_INIT,
+                            HuaweiPodsAction.ACTION_REFRESH_STATUS -> {
+                                context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE).apply {
+                                    setPackage(BuildConfig.APPLICATION_ID)
+                                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                                })
+                            }
+                            HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST -> {
+                                val device = receivedIntent.getParcelableExtra("device", BluetoothDevice::class.java)
+                                    ?: return@runCatching
+                                Log.d("HuaweiPods", "connect request from app device=${device.name}/${device.address}")
+                                val supported = isHuaweiPod(device)
+                                if (supported && isDeviceConnected(device)) {
+                                    HuaweiHfpController.connectPod(context, device)
+                                } else if (supported) {
+                                    notifyRejectedDevice(
+                                        context = context,
+                                        device = device,
+                                        state = "error",
+                                        operation = "connect",
+                                        reason = "not_connected",
+                                        supported = true,
+                                    )
+                                } else {
+                                    notifyRejectedDevice(context, device, state = "error", operation = "connect")
+                                }
+                            }
+                            HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST -> {
+                                val device = receivedIntent.getParcelableExtra("device", BluetoothDevice::class.java)
+                                    ?: return@runCatching
+                                Log.d("HuaweiPods", "disconnect request from app device=${device.name}/${device.address}")
+                                if (isHuaweiPod(device)) {
+                                    HuaweiHfpController.disconnectedPod(context, device)
+                                } else {
+                                    notifyRejectedDevice(context, device, state = "disconnected", operation = "disconnect")
+                                }
+                            }
                         }
-                    }
-                    HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST -> {
-                        val device = receivedIntent.getParcelableExtra("device", BluetoothDevice::class.java) ?: return
-                        Log.d("HuaweiPods", "disconnect request from app device=${device.name}/${device.address}")
-                        if (isHuaweiPod(device)) {
-                            HuaweiHfpController.disconnectedPod(context, device)
-                        } else {
-                            notifyRejectedDevice(context, device, state = "disconnected", operation = "disconnect")
-                        }
+                    }.onFailure {
+                        Log.e("HuaweiPods", "App request receiver failed without interrupting Bluetooth", it)
                     }
                 }
-            }
-        }, IntentFilter().apply {
-            addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_UI_INIT)
-            addHuaweiPodsAction(HuaweiPodsAction.ACTION_REFRESH_STATUS)
-            addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST)
-            addHuaweiPodsAction(HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST)
-        }, Context.RECEIVER_EXPORTED)
-        appRequestReceiverRegistered = true
+            }, IntentFilter().apply {
+                addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_UI_INIT)
+                addHuaweiPodsAction(HuaweiPodsAction.ACTION_REFRESH_STATUS)
+                addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST)
+                addHuaweiPodsAction(HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST)
+            }, Context.RECEIVER_EXPORTED)
+        }.onFailure {
+            Log.e("HuaweiPods", "Failed to register app request receiver", it)
+        }.isSuccess
+        if (registered) appRequestReceiverRegistered = true
     }
 
     @SuppressLint("MissingPermission")
@@ -142,7 +156,9 @@ object HeadsetStateDispatcher : HookContext() {
 
     @SuppressLint("MissingPermission")
     private fun isHuaweiPod(device: BluetoothDevice): Boolean {
-        return device.huaweiDeviceRoute().isSupported
+        return runCatching { device.huaweiDeviceRoute().isSupported }
+            .onFailure { Log.e("HuaweiPods", "Huawei route resolution failed", it) }
+            .getOrDefault(false)
     }
 
     private fun isDeviceConnected(device: BluetoothDevice): Boolean {

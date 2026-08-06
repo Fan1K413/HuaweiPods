@@ -30,14 +30,24 @@ class DeviceRoutePrefsTest {
     }
 
     @Test
-    fun `binding from another model branch cannot bypass build isolation`() {
-        val disabledRoute = HuaweiDeviceRoute.entries.first {
-            it != HuaweiDeviceRoute.UNSUPPORTED && it !in enabledHuaweiDeviceRoutes()
+    fun `every integrated model binding survives a user rename`() {
+        enabledHuaweiDeviceRoutes().forEach { route ->
+            assertEquals(
+                route,
+                resolveBoundOrNamedRoute(
+                    boundRoute = route,
+                    deviceName = "Renamed device",
+                ),
+            )
         }
+    }
+
+    @Test
+    fun `unsupported binding remains rejected`() {
         assertEquals(
             HuaweiDeviceRoute.UNSUPPORTED,
             resolveBoundOrNamedRoute(
-                boundRoute = disabledRoute,
+                boundRoute = HuaweiDeviceRoute.UNSUPPORTED,
                 deviceName = "Renamed device",
             ),
         )

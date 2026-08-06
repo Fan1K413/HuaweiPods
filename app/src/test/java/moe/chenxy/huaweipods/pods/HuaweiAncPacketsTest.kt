@@ -66,6 +66,25 @@ class HuaweiAncPacketsTest {
     }
 
     @Test
+    fun `FreeBuds Pro 5 three mode packets match verified capture`() {
+        assertArrayEquals(
+            hex("5A0007002B0401020000D22D"),
+            HuaweiAncPackets.mode(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5, NoiseControlMode.OFF),
+        )
+        assertArrayEquals(
+            hex("5A0007002B04010201FFFFEC"),
+            HuaweiAncPackets.mode(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
+                NoiseControlMode.NOISE_CANCELLATION,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A0007002B04010202FFAABF"),
+            HuaweiAncPackets.mode(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5, NoiseControlMode.TRANSPARENCY),
+        )
+    }
+
+    @Test
     fun `FreeBuds 7i basic mode packets match verified capture`() {
         assertArrayEquals(
             hex("5A0007002B0401020000D22D"),
@@ -83,6 +102,7 @@ class HuaweiAncPacketsTest {
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4, 0))
+        assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I, 0))
         assertNull(HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_EYEWEAR, 0))
     }
@@ -95,24 +115,114 @@ class HuaweiAncPacketsTest {
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4))
+        assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2))
         assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_EYEWEAR))
+        assertArrayEquals(query, HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_EYEWEAR2))
         assertNull(HuaweiAncPackets.batteryQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
     }
 
     @Test
-    fun `only FreeBuds Pro 3 exposes the verified ANC state query`() {
+    fun `modern models with captured readback expose the ANC state query`() {
         val query = hex("5A0005002B2A0100427E")
 
+        assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I))
         assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3))
+        assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS5))
-        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2))
+    }
+
+    @Test
+    fun `FreeBuds 6i and Pro 3 expose four verified ANC levels`() {
+        val expected = mapOf(
+            HuaweiAncLevel.ADAPTIVE to "5A0007002B0401020101F13D",
+            HuaweiAncLevel.LIGHT to "5A0007002B0401020100E11C",
+            HuaweiAncLevel.BALANCED to "5A0007002B0401020102C15E",
+            HuaweiAncLevel.DEEP to "5A0007002B0401020103D17F",
+        )
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        ).forEach { route ->
+            expected.forEach { (level, packet) ->
+                assertArrayEquals(
+                    hex(packet),
+                    HuaweiAncPackets.mode(route, NoiseControlMode.NOISE_CANCELLATION, level.protocolValue),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `FreeBuds 6i exposes both verified transparency submodes`() {
+        assertArrayEquals(
+            hex("5A0007002B0401020201A46E"),
+            HuaweiAncPackets.mode(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                NoiseControlMode.TRANSPARENCY,
+                0x01,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A0007002B0401020202940D"),
+            HuaweiAncPackets.mode(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                NoiseControlMode.TRANSPARENCY,
+                0x02,
+            ),
+        )
+        assertNull(
+            HuaweiAncPackets.mode(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                NoiseControlMode.TRANSPARENCY,
+                0x7F,
+            ),
+        )
+    }
+
+    @Test
+    fun `FreeBuds 3 direction dial exposes all nine verified forward packets`() {
+        val packets = listOf(
+            "5A0006002B080101002713",
+            "5A0006002B080101013732",
+            "5A0006002B080101020751",
+            "5A0006002B080101031770",
+            "5A0006002B080101046797",
+            "5A0006002B0801010577B6",
+            "5A0006002B0801010647D5",
+            "5A0006002B0801010757F4",
+            "5A0006002B08010108A61B",
+        )
+
+        packets.forEachIndexed { level, packet ->
+            assertArrayEquals(
+                "level=$level",
+                hex(packet),
+                HuaweiAncPackets.level(HuaweiDeviceRoute.HUAWEI_FREEBUDS3, level),
+            )
+        }
+    }
+
+    @Test
+    fun `transparency defaults use each models captured standard mode`() {
+        assertArrayEquals(
+            hex("5A0007002B0401020202940D"),
+            HuaweiAncPackets.mode(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, NoiseControlMode.TRANSPARENCY),
+        )
+        assertArrayEquals(
+            hex("5A0007002B04010202FFAABF"),
+            HuaweiAncPackets.mode(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3, NoiseControlMode.TRANSPARENCY),
+        )
+        assertArrayEquals(
+            hex("5A0007002B04010202FFAABF"),
+            HuaweiAncPackets.mode(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5, NoiseControlMode.TRANSPARENCY),
+        )
     }
 
     private fun hex(value: String): ByteArray = value.chunked(2)

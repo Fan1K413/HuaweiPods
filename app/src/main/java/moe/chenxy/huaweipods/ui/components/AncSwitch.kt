@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,8 +33,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import moe.chenxy.huaweipods.R
+import moe.chenxy.huaweipods.pods.HuaweiAncLevel
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.isNoiseCancellation
+import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
+import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
+import moe.chenxy.huaweipods.pods.supportsTransparency
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.SinkFeedback
@@ -50,6 +56,7 @@ import kotlin.math.sin
 fun AncSwitch(
     ancStatus: NoiseControlMode,
     onAncModeChange: (NoiseControlMode) -> Unit,
+    deviceRoute: HuaweiDeviceRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
     compact: Boolean = false,
     huaweiAncLevel: Int = 0,
     onHuaweiAncLevelChange: ((Int) -> Unit)? = null,
@@ -60,17 +67,68 @@ fun AncSwitch(
             .fillMaxWidth()
             .padding(vertical = verticalPadding)
     ) {
-        HuaweiAncSimpleHeader(
-            enabled = ancStatus.isNoiseCancellation(),
-            onToggle = {
-                onAncModeChange(
-                    if (ancStatus.isNoiseCancellation()) NoiseControlMode.OFF else NoiseControlMode.NOISE_CANCELLATION
-                )
-            },
-            compact = compact
-        )
+        if (deviceRoute.supportsTransparency) {
+            HuaweiNoiseControlSelector(
+                selectedMode = ancStatus,
+                onModeChange = onAncModeChange,
+                compact = compact,
+            )
+        } else {
+            HuaweiAncSimpleHeader(
+                enabled = ancStatus.isNoiseCancellation(),
+                onToggle = {
+                    onAncModeChange(
+                        if (ancStatus.isNoiseCancellation()) {
+                            NoiseControlMode.OFF
+                        } else {
+                            NoiseControlMode.NOISE_CANCELLATION
+                        },
+                    )
+                },
+                compact = compact,
+            )
+        }
 
-        if (ancStatus.isNoiseCancellation() && onHuaweiAncLevelChange != null) {
+        if (
+            ancStatus.isNoiseCancellation() &&
+            onHuaweiAncLevelChange != null &&
+            deviceRoute.supportsDiscreteAncLevels
+        ) {
+            HuaweiAncSubModeSelector(
+                title = stringResource(R.string.anc_level_title),
+                values = listOf(
+                    HuaweiAncLevel.ADAPTIVE.protocolValue to stringResource(R.string.anc_level_adaptive),
+                    HuaweiAncLevel.LIGHT.protocolValue to stringResource(R.string.anc_level_light),
+                    HuaweiAncLevel.BALANCED.protocolValue to stringResource(R.string.anc_level_balanced),
+                    HuaweiAncLevel.DEEP.protocolValue to stringResource(R.string.anc_level_deep),
+                ),
+                selectedValue = huaweiAncLevel,
+                onValueChange = onHuaweiAncLevelChange,
+                compact = compact,
+                modifier = Modifier.padding(top = if (compact) 8.dp else 14.dp),
+            )
+        } else if (
+            ancStatus == NoiseControlMode.TRANSPARENCY &&
+            onHuaweiAncLevelChange != null &&
+            deviceRoute.supportsTransparency
+        ) {
+            val standardValue = if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) 0x02 else 0xFF
+            HuaweiAncSubModeSelector(
+                title = stringResource(R.string.transparency_level_title),
+                values = listOf(
+                    standardValue to stringResource(R.string.transparency_standard),
+                    0x01 to stringResource(R.string.transparency_voice),
+                ),
+                selectedValue = huaweiAncLevel,
+                onValueChange = onHuaweiAncLevelChange,
+                compact = compact,
+                modifier = Modifier.padding(top = if (compact) 8.dp else 14.dp),
+            )
+        } else if (
+            ancStatus.isNoiseCancellation() &&
+            onHuaweiAncLevelChange != null &&
+            deviceRoute.supportsAncDirectionDial
+        ) {
             HuaweiAncLevelDial(
                 level = huaweiAncLevel.coerceIn(0, 8),
                 onLevelChange = onHuaweiAncLevelChange,
@@ -78,6 +136,126 @@ fun AncSwitch(
                 modifier = Modifier.padding(top = if (compact) 8.dp else 14.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun HuaweiNoiseControlSelector(
+    selectedMode: NoiseControlMode,
+    onModeChange: (NoiseControlMode) -> Unit,
+    compact: Boolean,
+) {
+    Text(
+        text = stringResource(R.string.noise_control_title),
+        fontSize = if (compact) 14.sp else 16.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = MiuixTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(
+            horizontal = if (compact) 10.dp else 14.dp,
+            vertical = if (compact) 2.dp else 4.dp,
+        ),
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = if (compact) 8.dp else 12.dp,
+                vertical = if (compact) 6.dp else 10.dp,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+    ) {
+        listOf(
+            NoiseControlMode.TRANSPARENCY to R.string.transparency_mode,
+            NoiseControlMode.NOISE_CANCELLATION to R.string.noise_cancellation_title,
+            NoiseControlMode.OFF to R.string.off,
+        ).forEach { (mode, labelRes) ->
+            HuaweiAncChoice(
+                label = stringResource(labelRes),
+                selected = selectedMode == mode,
+                onClick = { onModeChange(mode) },
+                compact = compact,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HuaweiAncSubModeSelector(
+    title: String,
+    values: List<Pair<Int, String>>,
+    selectedValue: Int,
+    onValueChange: (Int) -> Unit,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            fontSize = if (compact) 13.sp else 15.sp,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(horizontal = if (compact) 10.dp else 14.dp),
+        )
+        values.chunked(2).forEachIndexed { rowIndex, rowValues ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (compact) 8.dp else 12.dp,
+                        end = if (compact) 8.dp else 12.dp,
+                        top = if (rowIndex == 0) 4.dp else 6.dp,
+                    ),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+            ) {
+                rowValues.forEach { (value, label) ->
+                    HuaweiAncChoice(
+                        label = label,
+                        selected = selectedValue == value,
+                        onClick = { onValueChange(value) },
+                        compact = compact,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HuaweiAncChoice(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val primary = MiuixTheme.colorScheme.primary
+    Box(
+        modifier = modifier
+            .background(
+                color = if (selected) {
+                    primary
+                } else {
+                    MiuixTheme.colorScheme.onBackground.copy(alpha = 0.07f)
+                },
+                shape = RoundedCornerShape(if (compact) 9.dp else 11.dp),
+            )
+            .pressable(interactionSource = interactionSource, indication = SinkFeedback())
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(
+                horizontal = if (compact) 6.dp else 10.dp,
+                vertical = if (compact) 8.dp else 10.dp,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            fontSize = if (compact) 12.sp else 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) Color.White else MiuixTheme.colorScheme.onBackground,
+        )
     }
 }
 

@@ -54,12 +54,18 @@ import moe.chenxy.huaweipods.pods.HuaweiGestureAction
 import moe.chenxy.huaweipods.pods.HuaweiGestureController
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
 import moe.chenxy.huaweipods.ui.components.AncSwitch
+import moe.chenxy.huaweipods.ui.components.FreeClip2Controls
+import moe.chenxy.huaweipods.ui.components.HuaweiGestureControls
 import moe.chenxy.huaweipods.ui.components.PodStatus
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.supportsAnc
+import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
+import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
+import moe.chenxy.huaweipods.pods.supportsGestureConfiguration
+import moe.chenxy.huaweipods.pods.supportsTransparency
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -91,7 +97,9 @@ fun PodDetailPage(
             BluetoothAdapter.checkBluetoothAddress(connectedDeviceAddress)
     }
     val ancLevelChange = onHuaweiAncLevelChange.takeIf {
-        deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS3
+        deviceRoute.supportsAncDirectionDial ||
+            deviceRoute.supportsDiscreteAncLevels ||
+            deviceRoute.supportsTransparency
     }
     var leftGestureAction by remember(connectedDeviceAddress) {
         mutableStateOf(readGesturePreference(gesturePrefs, connectedDeviceAddress, HuaweiGestureSide.LEFT))
@@ -135,7 +143,7 @@ fun PodDetailPage(
                 verticalArrangement = Arrangement.Center
             ) {
                 Image(
-                    painter = rememberPodImagePainter(boxImagePath),
+                    painter = rememberPodImagePainter(boxImagePath, deviceRoute),
                     contentDescription = "Earphones",
                     modifier = Modifier
                         .fillMaxWidth(0.82f)
@@ -164,7 +172,8 @@ fun PodDetailPage(
                     onAncModeChange = onAncModeChange,
                     huaweiAncLevel = huaweiAncLevel,
                     onHuaweiAncLevelChange = ancLevelChange,
-                    showAnc = deviceRoute.supportsAnc,
+                    deviceRoute = deviceRoute,
+                    connectedDeviceAddress = connectedDeviceAddress,
                     gestureControlEnabled = gestureControlEnabled,
                     leftGestureAction = leftGestureAction,
                     rightGestureAction = rightGestureAction,
@@ -183,7 +192,7 @@ fun PodDetailPage(
     ) {
         item {
             Image(
-                painter = rememberPodImagePainter(boxImagePath),
+                painter = rememberPodImagePainter(boxImagePath, deviceRoute),
                 contentDescription = "Earphones",
                 modifier = Modifier
                     .fillMaxWidth(0.7f)
@@ -198,7 +207,8 @@ fun PodDetailPage(
             onAncModeChange = onAncModeChange,
             huaweiAncLevel = huaweiAncLevel,
             onHuaweiAncLevelChange = ancLevelChange,
-            showAnc = deviceRoute.supportsAnc,
+            deviceRoute = deviceRoute,
+            connectedDeviceAddress = connectedDeviceAddress,
             gestureControlEnabled = gestureControlEnabled,
             leftGestureAction = leftGestureAction,
             rightGestureAction = rightGestureAction,
@@ -208,13 +218,19 @@ fun PodDetailPage(
     }
 }
 @Composable
-private fun rememberPodImagePainter(path: String?) = remember(path) {
+private fun rememberPodImagePainter(path: String?, route: HuaweiDeviceRoute) = remember(path, route) {
     path?.let {
         runCatching { BitmapFactory.decodeFile(it) }
             .getOrNull()
             ?.let { bitmap -> BitmapPainter(bitmap.asImageBitmap()) }
     }
-} ?: painterResource(R.drawable.img_box)
+} ?: painterResource(
+    when (route) {
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> R.drawable.img_freebuds6i_box
+        HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> R.drawable.img_freeclip2_box
+        else -> R.drawable.img_box
+    },
+)
 
 private fun LazyListScope.podControlItems(
     batteryParams: BatteryParams,
@@ -222,7 +238,8 @@ private fun LazyListScope.podControlItems(
     onAncModeChange: (NoiseControlMode) -> Unit,
     huaweiAncLevel: Int,
     onHuaweiAncLevelChange: ((Int) -> Unit)?,
-    showAnc: Boolean,
+    deviceRoute: HuaweiDeviceRoute,
+    connectedDeviceAddress: String,
     gestureControlEnabled: Boolean,
     leftGestureAction: HuaweiGestureAction,
     rightGestureAction: HuaweiGestureAction,
@@ -240,7 +257,7 @@ private fun LazyListScope.podControlItems(
         }
     }
 
-    if (showAnc) {
+    if (deviceRoute.supportsAnc) {
         item {
             Card(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
@@ -250,7 +267,18 @@ private fun LazyListScope.podControlItems(
                     onAncModeChange = onAncModeChange,
                     huaweiAncLevel = huaweiAncLevel,
                     onHuaweiAncLevelChange = onHuaweiAncLevelChange,
+                    deviceRoute = deviceRoute,
                 )
+            }
+        }
+    }
+
+    if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+        item {
+            Card(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                FreeClip2Controls(address = connectedDeviceAddress)
             }
         }
     }
@@ -271,6 +299,16 @@ private fun LazyListScope.podControlItems(
                     onActionChange = { onGestureActionChange(HuaweiGestureSide.RIGHT, it) },
                 )
             }
+        }
+    }
+
+    if (deviceRoute.supportsGestureConfiguration && !gestureControlEnabled) {
+        item {
+            HuaweiGestureControls(
+                route = deviceRoute,
+                address = connectedDeviceAddress,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            )
         }
     }
 

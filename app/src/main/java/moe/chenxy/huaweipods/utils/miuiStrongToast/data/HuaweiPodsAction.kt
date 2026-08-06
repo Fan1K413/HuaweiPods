@@ -30,6 +30,8 @@ object HuaweiPodsAction {
     const val ACTION_RFCOMM_LOG = PREFIX + ".rfcomm_log"
     const val ACTION_HUAWEI_LEGACY_DEBUG_SEND = PREFIX + ".huawei_legacy_debug_send"
     const val ACTION_HUAWEI_GESTURE_SET = PREFIX + ".huawei_gesture_set"
+    const val ACTION_HUAWEI_GESTURE_REFRESH = PREFIX + ".huawei_gesture_refresh"
+    const val ACTION_HUAWEI_GESTURE_CHANGED = PREFIX + ".huawei_gesture_changed"
     const val ACTION_CONFIG_CHANGED = PREFIX + ".config_changed"
 
     fun canonical(action: String?): String? = action

@@ -45,9 +45,13 @@ object DeviceRoutePrefs {
     ): Boolean {
         val key = bindingKey(address) ?: return false
         if (!isHuaweiDeviceRouteEnabled(route)) return false
-        return prefs.edit()
-            .putString(key, route.storageId())
-            .commit()
+        // 注入进程拿到的 LSPosed RemotePreferences 可能是只读实现。
+        // 绑定应由模块 App 主动完成，任何误用都不能让系统宿主进程崩溃。
+        return runCatching {
+            prefs.edit()
+                .putString(key, route.storageId())
+                .commit()
+        }.getOrDefault(false)
     }
 
     fun syncWithRemote(
@@ -91,10 +95,12 @@ object DeviceRoutePrefs {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> "freebuds6i"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 -> "freebuds_pro3"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 -> "freebuds_pro4"
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 -> "freebuds_pro5"
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> "freebuds7i"
         HuaweiDeviceRoute.HUAWEI_FREECLIP -> "freeclip"
         HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> "freeclip2"
         HuaweiDeviceRoute.HUAWEI_EYEWEAR -> "eyewear"
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> "eyewear2"
         HuaweiDeviceRoute.UNSUPPORTED -> "unsupported"
     }
 
@@ -104,10 +110,12 @@ object DeviceRoutePrefs {
         "freebuds6i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
         "freebuds_pro3" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3
         "freebuds_pro4" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4
+        "freebuds_pro5" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5
         "freebuds7i" -> HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
         "freeclip" -> HuaweiDeviceRoute.HUAWEI_FREECLIP
         "freeclip2" -> HuaweiDeviceRoute.HUAWEI_FREECLIP2
         "eyewear" -> HuaweiDeviceRoute.HUAWEI_EYEWEAR
+        "eyewear2" -> HuaweiDeviceRoute.HUAWEI_EYEWEAR2
         else -> null
     }
 

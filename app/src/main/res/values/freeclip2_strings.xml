@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="freeclip2_smart_features">Smart features</string>
+    <string name="freeclip2_wear_detection">Wear detection</string>
+    <string name="freeclip2_drop_reminder">Drop reminder</string>
+    <string name="freeclip2_adaptive_volume">Adaptive volume</string>
+    <string name="freeclip2_head_motion">Head motion control</string>
+    <string name="freeclip2_spatial_audio">Spatial audio</string>
+    <string name="freeclip2_spatial_mode">Spatial audio mode</string>
+    <string name="freeclip2_spatial_fixed">Fixed</string>
+    <string name="freeclip2_spatial_head_tracking">Head tracking</string>
+    <string name="freeclip2_spatial_scene">Spatial scene</string>
+    <string name="freeclip2_spatial_scene_default">Default</string>
+    <string name="freeclip2_spatial_scene_theater">Audio theater</string>
+    <string name="freeclip2_spatial_scene_cinema">Cinema</string>
+    <string name="freeclip2_spatial_scene_concert">Concert hall</string>
+    <string name="freeclip2_sound_and_connection">Sound and connection</string>
+    <string name="freeclip2_sound_effect">Sound effect</string>
+    <string name="freeclip2_sound_effect_1">Official preset 1</string>
+    <string name="freeclip2_sound_effect_2">Official preset 2</string>
+    <string name="freeclip2_sound_effect_3">Official preset 3</string>
+    <string name="freeclip2_sound_quality_priority">Prioritize sound quality</string>
+    <string name="freeclip2_low_latency">Low latency mode</string>
+    <string name="freeclip2_dual_device">Dual-device connection</string>
+    <string name="freeclip2_case_prompt_sound">Case prompt sound</string>
+    <string name="freeclip2_state_hint">State reflects the last value set by this module. Select it again after changing it in a Huawei app.</string>
+</resources>

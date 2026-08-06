@@ -47,6 +47,28 @@ object HuaweiL2capAncController {
         enqueueWrite(context, device, route, packet, "enabled=$enabled", onComplete = onComplete)
     }
 
+    fun setAncMode(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        mode: NoiseControlMode,
+        subMode: Int? = null,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
+        val packet = HuaweiAncPackets.mode(route, mode, subMode) ?: run {
+            notifyComplete(onComplete, false)
+            return
+        }
+        enqueueWrite(
+            context = context,
+            device = device,
+            route = route,
+            packet = packet,
+            description = "mode=$mode subMode=${subMode?.toString(16) ?: "default"}",
+            onComplete = onComplete,
+        )
+    }
+
     fun setAncLevel(
         context: Context,
         device: BluetoothDevice,
@@ -76,6 +98,7 @@ object HuaweiL2capAncController {
                 val battery = HuaweiRfcommResponseParser.parseBattery(
                     response,
                     includeCase = route.hasChargingCase,
+                    useReportedEarbudAvailability = route.usesReportedEarbudAvailability,
                 )
                 logInfo(
                     context.applicationContext ?: context,
@@ -86,11 +109,11 @@ object HuaweiL2capAncController {
         )
     }
 
-    fun requestAncState(
+    internal fun requestAncState(
         context: Context,
         device: BluetoothDevice,
         route: HuaweiDeviceRoute,
-        onResult: (Int?) -> Unit,
+        onResult: (HuaweiAncState?) -> Unit,
     ) {
         val packet = HuaweiAncPackets.currentStateQuery(route) ?: run {
             onResult(null)
@@ -104,13 +127,13 @@ object HuaweiL2capAncController {
             description = "anc-state-query",
             responseWindowMs = 1_500L,
             responseComplete = { response ->
-                HuaweiRfcommResponseParser.parseAncStatus(response) != null
+                HuaweiRfcommResponseParser.parseAncState(response) != null
             },
             onComplete = { success ->
                 if (!success) onResult(null)
             },
             onResponse = { response ->
-                val status = HuaweiRfcommResponseParser.parseAncStatus(response)
+                val state = HuaweiRfcommResponseParser.parseAncState(response)
                 RfcommLog.d(
                     context.applicationContext ?: context,
                     "RFCOMM/RX",
@@ -118,10 +141,31 @@ object HuaweiL2capAncController {
                 )
                 logInfo(
                     context.applicationContext ?: context,
-                    "Huawei ANC state response bytes=${response.size} parsed=${status != null} device=${device.address}",
+                    "Huawei ANC state response bytes=${response.size} parsed=$state device=${device.address}",
                 )
-                onResult(status)
+                onResult(state)
             },
+        )
+    }
+
+    fun requestRawPacketOnce(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        packet: ByteArray,
+        description: String,
+        responseWindowMs: Long = 1_000L,
+        onResponse: (ByteArray) -> Unit,
+    ) {
+        enqueueWrite(
+            context = context,
+            device = device,
+            route = route,
+            packet = packet,
+            description = description,
+            keepSocket = false,
+            responseWindowMs = responseWindowMs,
+            onResponse = onResponse,
         )
     }
 
