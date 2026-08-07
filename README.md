@@ -80,11 +80,11 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 
 ## 适配新型号
 
-未支持型号需要先采集官方智慧生活 / 智慧音频与耳机之间的真实通信数据。通用协议采集版只负责引导和记录，不代表该型号已经适配。
+未支持型号需要先采集官方智慧音频与耳机之间的真实通信数据。通用协议采集版只负责引导和记录，不代表该型号已经适配。
 
 请勿直接公开包含设备地址、账号或其他个人信息的原始采集文件。提交前请检查并脱敏，完整流程见 [华为耳机协议采集指南](docs/DEBUG_CAPTURE_GUIDE.md)。
 
-建议优先加入 QQ 群 `1022359908` 参与对应型号复测；可复现问题则提交至 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)。
+建议优先加入 QQ 群 `1022359908` 参与对应型号测试交流；GitHub则提交至 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)。
 
 ## 构建
 
