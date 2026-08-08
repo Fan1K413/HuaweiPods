@@ -43,13 +43,14 @@ data class EarphonePref(
 }
 
 @Serializable
-private data class CloudImageIdentityPref(
+internal data class CloudImageIdentityPref(
     val address: String,
     val modelId: String,
     val subModelId: String,
 )
 
 object PodImagePrefs {
+    private const val MAX_CLOUD_IDENTITIES = 16
     const val AUTHORITY = "moe.chenxy.huaweipods.podimages"
     private const val PREF_KEY_EARPHONES = "earphone_prefs_json"
     private const val PREF_KEY_CLOUD_IDENTITIES = "cloud_image_identities_json"
@@ -168,9 +169,11 @@ object PodImagePrefs {
         if (address.isBlank() || modelId.isBlank() || subModelId.isBlank()) return false
         return synchronized(mutationLock) {
             val updated = CloudImageIdentityPref(address, modelId, subModelId)
-            val identities = listOf(updated) + loadCloudIdentities(prefs).filterNot {
-                it.address.equals(address, ignoreCase = true)
-            }
+            val identities = (
+                listOf(updated) + loadCloudIdentities(prefs).filterNot {
+                    it.address.equals(address, ignoreCase = true)
+                }
+            ).take(MAX_CLOUD_IDENTITIES)
             prefs.edit()
                 .putString(
                     PREF_KEY_CLOUD_IDENTITIES,
@@ -190,6 +193,9 @@ object PodImagePrefs {
             it.address.equals(address, ignoreCase = true)
         }?.let { it.modelId == modelId && it.subModelId == subModelId } == true
     }
+
+    internal fun latestCloudIdentities(prefs: SharedPreferences): List<CloudImageIdentityPref> =
+        synchronized(mutationLock) { loadCloudIdentities(prefs).take(MAX_CLOUD_IDENTITIES) }
 
     /**
      * 仅当下载身份仍是该地址的最新身份时写入云图。身份比较与偏好写入共享同一把锁，

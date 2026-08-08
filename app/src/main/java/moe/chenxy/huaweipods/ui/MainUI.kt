@@ -661,30 +661,6 @@ fun MainUI(
         }
     }
 
-    fun onDeviceDisconnect(device: BluetoothDevice) {
-        connectingDeviceAddress = null
-        pendingOpenEarphonesAfterPickerLoaded = false
-        if (device.address == connectedDeviceAddress) {
-            val route = currentDeviceRoute()
-            hookConnected.value = false
-            hookConnectionState = "disconnected"
-            connectedDeviceAddress = ""
-            mainTitle.value = ""
-            batteryParams.value = BatteryParams()
-            ancMode.value = NoiseControlMode.UNKNOWN
-            huaweiAncLevel.value = route.defaultAncSubMode
-                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
-            hasHuaweiAncLevel.value = false
-            huaweiTransparencySubMode.value = -1
-        }
-        Intent(HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST).apply {
-            putExtra("device", device)
-            setPackage("com.android.bluetooth")
-            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-            context.sendBroadcast(this)
-        }
-    }
-
     fun onConnectedDeviceClick() {
         if (connectedDeviceAddress.isBlank() && mainTitle.value.isBlank()) return
         pendingOpenEarphonesAfterPickerLoaded = false
@@ -852,7 +828,6 @@ fun MainUI(
                 showConnectErrorDialog = showConnectErrorDialog,
                 onDeviceSelected = { device, route -> onDeviceSelected(device, route) },
                 onConnectedDeviceClick = { onConnectedDeviceClick() },
-                onDeviceDisconnect = { onDeviceDisconnect(it) },
                 onDismissConnectError = { showConnectErrorDialog = false },
                 desktopIconHidden = desktopIconHidden,
                 onDesktopIconHiddenChange = {

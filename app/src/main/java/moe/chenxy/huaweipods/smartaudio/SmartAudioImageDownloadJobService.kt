@@ -13,13 +13,17 @@ class SmartAudioImageDownloadJobService : JobService() {
             subModelId = params.extras.getString(SmartAudioImageCache.EXTRA_SUB_MODEL_ID),
         ) ?: return false
         if (SmartAudioImageCache.isReady(this, identity)) return false
+        Log.i(TAG, "Official image job started model=${identity.modelId}/${identity.subModelId}")
 
         val task = Thread(
             {
-                runCatching {
+                val result = runCatching {
                     SmartAudioImageCache.downloadAndInstall(applicationContext, identity)
                 }.onFailure {
                     Log.w(TAG, "Official image job failed for ${identity.modelId}", it)
+                }
+                if (result.isSuccess) {
+                    Log.i(TAG, "Official image job finished model=${identity.modelId}/${identity.subModelId}")
                 }
                 if (runningTasks.remove(params.jobId, Thread.currentThread())) {
                     jobFinished(params, SmartAudioImageJobPolicy.shouldRescheduleAfterFailure())

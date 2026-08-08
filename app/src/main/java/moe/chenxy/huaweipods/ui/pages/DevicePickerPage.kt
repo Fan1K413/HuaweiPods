@@ -67,7 +67,6 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
-import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Edit
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -84,7 +83,6 @@ fun DevicePickerPage(
     bottomContentPadding: Dp = 16.dp,
     onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit = {},
-    onDeviceDisconnect: (BluetoothDevice) -> Unit = {},
     onDismissConnectError: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -270,7 +268,6 @@ fun DevicePickerPage(
                         onChangeModel = {
                             pendingRouteDevice = device
                         }.takeIf { route.isSupported && !connected },
-                        onDisconnect = { onDeviceDisconnect(device) },
                     )
                 }
             }
@@ -371,7 +368,6 @@ private fun DeviceRow(
     connecting: Boolean,
     onClick: () -> Unit,
     onChangeModel: (() -> Unit)?,
-    onDisconnect: () -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -399,18 +395,7 @@ private fun DeviceRow(
             }
             if (connecting) {
                 InfiniteProgressIndicator()
-            } else if (connected) {
-                IconButton(
-                    modifier = Modifier.size(32.dp),
-                    onClick = onDisconnect,
-                ) {
-                    Icon(
-                        modifier = Modifier.size(18.dp),
-                        imageVector = MiuixIcons.Close,
-                        contentDescription = null,
-                    )
-                }
-            } else if (onChangeModel != null) {
+            } else if (onChangeModel != null && !connected) {
                 IconButton(
                     modifier = Modifier.size(32.dp),
                     onClick = onChangeModel,

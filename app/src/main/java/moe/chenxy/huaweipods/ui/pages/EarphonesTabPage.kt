@@ -34,7 +34,6 @@ internal fun EarphonesTabPage(
     nestedScrollConnection: NestedScrollConnection,
     onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit,
-    onDeviceDisconnect: (BluetoothDevice) -> Unit,
     onDismissConnectError: () -> Unit,
 ) {
     AnimatedContent(
@@ -68,7 +67,6 @@ internal fun EarphonesTabPage(
                 bottomContentPadding = pageBottomContentPadding,
                 onDeviceSelected = onDeviceSelected,
                 onConnectedDeviceClick = onConnectedDeviceClick,
-                onDeviceDisconnect = onDeviceDisconnect,
                 onDismissConnectError = onDismissConnectError,
             )
         }

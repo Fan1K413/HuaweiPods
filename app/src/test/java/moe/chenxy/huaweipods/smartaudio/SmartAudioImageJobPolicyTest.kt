@@ -18,7 +18,7 @@ class SmartAudioImageJobPolicyTest {
     }
 
     @Test
-    fun `failed jobs wait for a new identity event instead of automatic retry`() {
+    fun `failed jobs wait for a new identity event instead of unbounded background retry`() {
         assertFalse(SmartAudioImageJobPolicy.shouldRescheduleAfterFailure())
     }
 }

@@ -49,8 +49,9 @@ class PodImageProvider : ContentProvider() {
             modelId = extras?.getString(SmartAudioImageCache.EXTRA_MODEL_ID),
             subModelId = extras?.getString(SmartAudioImageCache.EXTRA_SUB_MODEL_ID),
         )
-        val accepted = identity != null
-        if (identity != null) SmartAudioImageCache.request(context, identity)
+        val accepted = identity?.let {
+            runCatching { SmartAudioImageCache.request(context, it) }.getOrDefault(false)
+        } == true
         return Bundle().apply { putBoolean("accepted", accepted) }
     }
 

@@ -124,6 +124,24 @@ class PodImagePrefsConcurrencyTest {
         assertEquals("/images/new.png", saved.cloudBoxImagePath)
     }
 
+    @Test
+    fun `cloud identity recovery is bounded to the most recent devices`() {
+        val prefs = InMemoryPreferences().preferences
+        repeat(20) { index ->
+            PodImagePrefs.recordLatestCloudIdentity(
+                prefs = prefs,
+                address = String.format(Locale.US, "AA:BB:CC:DD:EE:%02X", index),
+                modelId = "000027",
+                subModelId = "01",
+            )
+        }
+
+        val identities = PodImagePrefs.latestCloudIdentities(prefs)
+        assertEquals(16, identities.size)
+        assertEquals("AA:BB:CC:DD:EE:13", identities.first().address)
+        assertEquals("AA:BB:CC:DD:EE:04", identities.last().address)
+    }
+
     private class InMemoryPreferences {
         private val raw = Collections.synchronizedMap(mutableMapOf<String, String>())
 

@@ -1,17 +1,29 @@
 package moe.chenxy.huaweipods
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.concurrent.CopyOnWriteArraySet
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.PodImagePrefs
+import moe.chenxy.huaweipods.smartaudio.SmartAudioImageCache
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 
 class HuaweiPodsApp : Application(), XposedServiceHelper.OnServiceListener {
     override fun onCreate() {
         super.onCreate()
         XposedServiceHelper.registerListener(this)
+        runCatching { SmartAudioImageCache.resumePending(this) }
+            .onFailure { Log.w(TAG, "Unable to resume official image jobs", it) }
+        runCatching {
+            sendBroadcast(
+                Intent(HuaweiPodsAction.ACTION_SMART_AUDIO_IMAGE_PROVIDER_READY)
+                    .setPackage("com.huawei.smartaudio")
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND),
+            )
+        }.onFailure { Log.w(TAG, "Unable to request Smart Audio image identity", it) }
     }
 
     override fun onServiceBind(service: XposedService) {

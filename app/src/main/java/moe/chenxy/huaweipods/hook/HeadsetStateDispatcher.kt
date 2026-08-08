@@ -103,16 +103,6 @@ object HeadsetStateDispatcher : HookContext() {
                                     notifyRejectedDevice(context, device, state = "error", operation = "connect")
                                 }
                             }
-                            HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST -> {
-                                val device = receivedIntent.getParcelableExtra("device", BluetoothDevice::class.java)
-                                    ?: return@runCatching
-                                Log.d("HuaweiPods", "disconnect request from app device=${device.name}/${device.address}")
-                                if (isHuaweiPod(device)) {
-                                    HuaweiHfpController.disconnectedPod(context, device)
-                                } else {
-                                    notifyRejectedDevice(context, device, state = "disconnected", operation = "disconnect")
-                                }
-                            }
                         }
                     }.onFailure {
                         Log.e("HuaweiPods", "App request receiver failed without interrupting Bluetooth", it)
@@ -122,7 +112,6 @@ object HeadsetStateDispatcher : HookContext() {
                 addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_UI_INIT)
                 addHuaweiPodsAction(HuaweiPodsAction.ACTION_REFRESH_STATUS)
                 addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST)
-                addHuaweiPodsAction(HuaweiPodsAction.ACTION_DISCONNECT_POD_REQUEST)
             }, Context.RECEIVER_EXPORTED)
         }.onFailure {
             Log.e("HuaweiPods", "Failed to register app request receiver", it)

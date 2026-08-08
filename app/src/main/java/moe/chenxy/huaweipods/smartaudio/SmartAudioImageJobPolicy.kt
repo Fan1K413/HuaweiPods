@@ -17,6 +17,6 @@ internal object SmartAudioImageJobPolicy {
         return JOB_ID_NAMESPACE or (hash and JOB_ID_MASK)
     }
 
-    /** 永久格式错误与短暂网络错误均等到下一次身份事件再调度，避免后台无限重试。 */
+    /** 失败等到下一次身份事件或模块启动恢复，避免永久资源错误形成后台重试循环。 */
     fun shouldRescheduleAfterFailure(): Boolean = false
 }

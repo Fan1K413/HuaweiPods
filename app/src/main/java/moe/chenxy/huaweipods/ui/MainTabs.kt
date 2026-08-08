@@ -89,7 +89,6 @@ internal fun MainTabsScaffold(
     showConnectErrorDialog: Boolean,
     onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit,
-    onDeviceDisconnect: (BluetoothDevice) -> Unit,
     onDismissConnectError: () -> Unit,
     desktopIconHidden: MutableState<Boolean>,
     onDesktopIconHiddenChange: (Boolean) -> Unit,
@@ -211,7 +210,6 @@ internal fun MainTabsScaffold(
                         pageBottomContentPadding = pageBottomContentPadding,
                         onDeviceSelected = onDeviceSelected,
                         onConnectedDeviceClick = onConnectedDeviceClick,
-                        onDeviceDisconnect = onDeviceDisconnect,
                         onDismissConnectError = onDismissConnectError,
                         onBackToDevicePicker = onBackToDevicePicker,
                         onOpenPodImageConfig = { showPodImageDialog = true },
@@ -343,7 +341,6 @@ private fun EarphonesTabShell(
     pageBottomContentPadding: Dp,
     onDeviceSelected: (BluetoothDevice, HuaweiDeviceRoute) -> Unit,
     onConnectedDeviceClick: () -> Unit,
-    onDeviceDisconnect: (BluetoothDevice) -> Unit,
     onDismissConnectError: () -> Unit,
     onBackToDevicePicker: () -> Unit,
     onOpenPodImageConfig: () -> Unit,
@@ -393,7 +390,6 @@ private fun EarphonesTabShell(
             nestedScrollConnection = scrollBehavior.nestedScrollConnection,
             onDeviceSelected = onDeviceSelected,
             onConnectedDeviceClick = onConnectedDeviceClick,
-            onDeviceDisconnect = onDeviceDisconnect,
             onDismissConnectError = onDismissConnectError,
         )
     }

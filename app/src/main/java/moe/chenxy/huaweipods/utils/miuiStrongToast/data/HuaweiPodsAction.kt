@@ -32,7 +32,6 @@ object HuaweiPodsAction {
     const val ACTION_PODS_CONNECTED = PREFIX + ".pods_connected"
     const val ACTION_PODS_DISCONNECTED = PREFIX + ".pods_disconnected"
     const val ACTION_CONNECT_POD_REQUEST = PREFIX + ".connect_pod_request"
-    const val ACTION_DISCONNECT_POD_REQUEST = PREFIX + ".disconnect_pod_request"
     const val ACTION_PODS_CONNECTION_STATE_CHANGED = PREFIX + ".pods_connection_state_changed"
     const val ACTION_PODS_BATTERY_CHANGED = PREFIX + ".pods_battery_changed"
     const val ACTION_ANC_SELECT = PREFIX + ".anc_select"
@@ -51,6 +50,8 @@ object HuaweiPodsAction {
     const val ACTION_FREECLIP2_AUDIO_SET = PREFIX + ".freeclip2_audio_set"
     const val ACTION_FREECLIP2_AUDIO_REFRESH = PREFIX + ".freeclip2_audio_refresh"
     const val ACTION_FREECLIP2_AUDIO_CHANGED = PREFIX + ".freeclip2_audio_changed"
+    const val ACTION_SMART_AUDIO_IMAGE_PROVIDER_READY =
+        PREFIX + ".smart_audio_image_provider_ready"
     const val ACTION_POD_IMAGES_CHANGED = PREFIX + ".pod_images_changed"
     const val ACTION_CONFIG_CHANGED = PREFIX + ".config_changed"
 

@@ -9,6 +9,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.PersistableBundle
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -39,8 +40,9 @@ internal object SmartAudioImageCache {
     private const val MAX_NORMALIZATION_PIXELS = 4_194_304L
     private const val VISIBLE_ALPHA_THRESHOLD = 8
     private const val STAGING_DIRECTORY = "smart_audio_image_staging"
+    private const val TAG = "HuaweiPods-CloudImage"
 
-    fun request(context: Context, identity: SmartAudioResourceIdentity) {
+    fun request(context: Context, identity: SmartAudioResourceIdentity): Boolean {
         val appContext = context.applicationContext ?: context
         val prefs = appContext.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
         val identityPersisted = PodImagePrefs.recordLatestCloudIdentity(
@@ -49,26 +51,64 @@ internal object SmartAudioImageCache {
             modelId = identity.modelId,
             subModelId = identity.subModelId,
         )
-        if (!identityPersisted) return
-        if (isReady(appContext, identity)) return
-        val scheduler = appContext.getSystemService(JobScheduler::class.java) ?: return
+        if (!identityPersisted) {
+            Log.w(TAG, "Official image identity could not be persisted model=${identity.modelId}")
+            return false
+        }
+        if (isReady(appContext, identity)) {
+            Log.i(TAG, "Official image already ready model=${identity.modelId}/${identity.subModelId}")
+            return true
+        }
+        val scheduler = appContext.getSystemService(JobScheduler::class.java) ?: run {
+            Log.w(TAG, "JobScheduler unavailable for official image model=${identity.modelId}")
+            return false
+        }
         val jobId = SmartAudioImageJobPolicy.jobId(identity)
-        if (scheduler.getPendingJob(jobId) != null) return
+        if (runCatching { scheduler.getPendingJob(jobId) }.getOrNull() != null) {
+            Log.i(TAG, "Official image job already pending model=${identity.modelId}/${identity.subModelId}")
+            return true
+        }
         val extras = PersistableBundle().apply {
             putString(EXTRA_ADDRESS, identity.address)
             putString(EXTRA_MODEL_ID, identity.modelId)
             putString(EXTRA_SUB_MODEL_ID, identity.subModelId)
         }
-        scheduler.schedule(
-            JobInfo.Builder(
-                jobId,
-                ComponentName(appContext, SmartAudioImageDownloadJobService::class.java),
+        return runCatching {
+            scheduler.schedule(
+                JobInfo.Builder(
+                    jobId,
+                    ComponentName(appContext, SmartAudioImageDownloadJobService::class.java),
+                )
+                    .setExtras(extras)
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .setPersisted(false)
+                    .build(),
             )
-                .setExtras(extras)
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                .setPersisted(false)
-                .build(),
-        )
+        }.onFailure {
+            Log.w(TAG, "Official image job scheduling failed model=${identity.modelId}", it)
+        }.getOrDefault(JobScheduler.RESULT_FAILURE).also { result ->
+            if (result == JobScheduler.RESULT_SUCCESS) {
+                Log.i(TAG, "Official image job scheduled model=${identity.modelId}/${identity.subModelId}")
+            } else {
+                Log.w(TAG, "Official image job rejected model=${identity.modelId}/${identity.subModelId}")
+            }
+        } == JobScheduler.RESULT_SUCCESS
+    }
+
+    fun resumePending(context: Context) {
+        val appContext = context.applicationContext ?: context
+        val prefs = appContext.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
+        val identities = PodImagePrefs.latestCloudIdentities(prefs)
+        if (identities.isNotEmpty()) {
+            Log.i(TAG, "Resuming ${identities.size} stored official image identities")
+        }
+        identities.forEach { stored ->
+            SmartAudioResourceIdentityPolicy.normalize(
+                address = stored.address,
+                modelId = stored.modelId,
+                subModelId = stored.subModelId,
+            )?.let { request(appContext, it) }
+        }
     }
 
     internal fun isReady(context: Context, identity: SmartAudioResourceIdentity): Boolean {
