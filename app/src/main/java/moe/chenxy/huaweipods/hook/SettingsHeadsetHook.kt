@@ -24,6 +24,8 @@ import android.widget.ImageView
 import android.widget.TextView
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
+import moe.chenxy.huaweipods.config.PodImageChangeNotifier
+import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.NoiseControlMode
@@ -51,6 +53,7 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
 import moe.chenxy.huaweipods.utils.ModuleResourceResolver
+import moe.chenxy.huaweipods.utils.PodImageLoader
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -60,14 +63,20 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import java.util.WeakHashMap
 
-internal fun shouldUpdateSettingsAncUi(route: HuaweiDeviceRoute): Boolean =
-    route.isSupported && route.supportsAnc
-
-internal fun usesCustomSettingsAncSelector(route: HuaweiDeviceRoute): Boolean =
-    route.supportsDiscreteAncLevels && route.ancLevelOptions.size != 4
-
 @SuppressLint("MissingPermission")
 object SettingsHeadsetHook : HookContext() {
+    private data class SettingsHeaderImageKey(
+        val address: String,
+        val route: HuaweiDeviceRoute,
+        val manualPath: String?,
+        val cloudPath: String?,
+    )
+
+    private data class SettingsHeaderBitmapCache(
+        val key: SettingsHeaderImageKey,
+        val bitmap: Bitmap,
+    )
+
     private data class AncSelection(
         val status: Int,
         val subMode: Int? = null,
@@ -78,6 +87,8 @@ object SettingsHeadsetHook : HookContext() {
         val isEnabled: Boolean,
         val isClickable: Boolean,
         val importantForAccessibility: Int,
+        val layoutState: SettingsRowLayoutState,
+        var layoutCollapsed: Boolean = false,
     )
 
     private const val TAG = "HuaweiPods-Settings"
@@ -97,6 +108,12 @@ object SettingsHeadsetHook : HookContext() {
     private const val SETTINGS_HUAWEI_ANC_SELECTOR_TAG = "huaweipods_settings_anc_selector"
     private const val SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG =
         "huaweipods_settings_freeclip2_audio_controls"
+    private val gestureEntryKeywords = listOf(
+        "手势操作",
+        "手势控制",
+        "Gesture control",
+        "Gestures",
+    )
     private val ancLevelKeywords = listOf("自适应", "智能", "轻度", "均衡", "深度", "Smart", "Adaptive", "Light", "Medium", "Deep")
     private val ancLevelAnchorKeywords = listOf("轻度", "均衡", "深度", "Light", "Medium", "Deep")
     private val ancModeKeywords = listOf("降噪", "通透", "关闭", "Noise", "Transparency", "Off")
@@ -130,8 +147,10 @@ object SettingsHeadsetHook : HookContext() {
     private var proxySetCommonCommandCalls = 0
     private var proxyGetDeviceConfigCalls = 0
     private var proxyGetCommonConfigCalls = 0
-    private val settingsHeaderBitmaps = mutableMapOf<HuaweiDeviceRoute, Bitmap>()
+    private var settingsHeaderBitmapCache: SettingsHeaderBitmapCache? = null
     private val hiddenSettingsCapabilityViews = WeakHashMap<View, HiddenSettingsCapabilityView>()
+    private val observedSettingsRoots = WeakHashMap<View, Boolean>()
+    private val pendingSettingsScrollPrunes = WeakHashMap<View, Boolean>()
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var refreshLoopStarted = false
     private val refreshRunnable = object : Runnable {
@@ -615,6 +634,7 @@ object SettingsHeadsetHook : HookContext() {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONFIG_CHANGED)
         }
         context?.registerReceiver(object : BroadcastReceiver() {
@@ -624,6 +644,14 @@ object SettingsHeadsetHook : HookContext() {
                     HuaweiPodsAction.ACTION_CONFIG_CHANGED -> {
                         refreshConfig()
                         updateFragments()
+                    }
+                    HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED -> {
+                        val imageAddress = receivedIntent.getStringExtra(PodImageChangeNotifier.EXTRA_ADDRESS)
+                        if (imageAddress.isNullOrBlank() || imageAddress.equals(currentAddress, ignoreCase = true)) {
+                            settingsHeaderBitmapCache = null
+                            updateFragments()
+                            Log.i(TAG, "Settings headset image invalidated address=${imageAddress.orEmpty()}")
+                        }
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
@@ -937,6 +965,7 @@ object SettingsHeadsetHook : HookContext() {
         }
         if (identityChanged || currentHuaweiRoute() != route) {
             resetCurrentDeviceState(route)
+            settingsHeaderBitmapCache = null
         }
         currentName = name
         currentAddress = address
@@ -1610,6 +1639,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun schedulePruneFreeBudsUnsupportedViews(root: View?) {
         if (root == null) return
+        observeSettingsScroll(root)
         val expectedAddress = currentAddress?.takeIf(String::isNotBlank) ?: return
         val expectedRoute = currentHuaweiRoute()
         listOf(0L, 180L).forEach { delay ->
@@ -1624,14 +1654,62 @@ object SettingsHeadsetHook : HookContext() {
         }
     }
 
+    private fun observeSettingsScroll(root: View) {
+        if (observedSettingsRoots.put(root, true) == true) return
+        root.viewTreeObserver.addOnScrollChangedListener {
+            if (!root.isAttachedToWindow || pendingSettingsScrollPrunes.put(root, true) == true) {
+                return@addOnScrollChangedListener
+            }
+            root.postDelayed({
+                pendingSettingsScrollPrunes.remove(root)
+                if (root.isAttachedToWindow) schedulePruneFreeBudsUnsupportedViews(root)
+            }, 80L)
+        }
+    }
+
     private fun pruneFreeBudsUnsupportedViews(root: View) {
+        // RecyclerView 会复用条目 View；先恢复当前根节点下的历史裁剪状态，再按现有标题
+        // 重新应用策略，避免一个已隐藏条目被复用后继续误伤无关设置。
+        restoreTrackedSettingsCapabilityViews(root)
         replaceSettingsHeaderImage(root)
         val route = currentHuaweiRoute()
+        val policy = settingsHeadsetUiPolicy(route)
         val modeContainer = modeButtonContainer(root)
-        modeContainer?.let { setSettingsCapabilityViewVisible(it, route.supportsAnc) }
+        modeContainer?.let { setSettingsCapabilityViewVisible(it, policy.showAnc) }
+        setSettingsRowsVisible(root, settingsEarTipFitKeywords, policy.showEarTipFitTest)
+        setSettingsRowsVisible(root, gestureEntryKeywords, policy.showGestureConfiguration)
         syncFreeClip2AudioControls(root, modeContainer)
-        if (route.supportsAnc) configureTransparencyModeView(root, modeContainer, route)
+        if (policy.showAnc) configureTransparencyModeView(root, modeContainer, route)
         replaceHuaweiAncLevelsWithHuaweiDial(root)
+    }
+
+    private fun setSettingsRowsVisible(
+        root: View,
+        keywords: List<String>,
+        visible: Boolean,
+    ) {
+        val matches = mutableListOf<TextView>()
+        collectExactTextMatches(root, keywords, matches)
+        matches.forEach { textView ->
+            val target = bestHideTarget(root, textView)
+            if (target !== root && !target.isSystemScrollingContainer()) {
+                val collapseRecyclerItem =
+                    (target.parent as? View)?.isRecyclingRowsContainer() == true &&
+                        target.layoutParams != null
+                setSettingsCapabilityViewVisible(
+                    view = target,
+                    visible = visible,
+                    collapseLayout = collapseRecyclerItem,
+                )
+                if (!visible) {
+                    Log.d(
+                        TAG,
+                        "Settings unsupported row hidden route=${currentHuaweiRoute()} " +
+                            "text=${textView.text} target=${target.javaClass.name}",
+                    )
+                }
+            }
+        }
     }
 
     private fun syncFreeClip2AudioControls(root: View, modeContainer: View?) {
@@ -1794,21 +1872,40 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun loadSettingsHeaderBitmap(context: Context): Bitmap? {
         val route = currentHuaweiRoute()
-        settingsHeaderBitmaps[route]?.takeIf { !it.isRecycled }?.let { return it }
+        val address = currentAddress?.takeIf(String::isNotBlank)
+        val imagePreference = address?.let { runCatching { PodImagePrefs.find(prefs, it) }.getOrNull() }
+        val key = SettingsHeaderImageKey(
+            address = address.orEmpty().uppercase(),
+            route = route,
+            manualPath = imagePreference?.boxImagePath,
+            cloudPath = imagePreference?.cloudBoxImagePath,
+        )
+        settingsHeaderBitmapCache
+            ?.takeIf { it.key == key && !it.bitmap.isRecycled }
+            ?.let { return it.bitmap }
         return runCatching {
-            val moduleContext = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
-            if (!ModuleResourceResolver.isCurrentModuleBuild(moduleContext)) return null
-            val resourceId = when (route) {
-                HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> R.drawable.img_freebuds5_box
-                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> R.drawable.img_freebuds6i_settings
-                HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> R.drawable.img_freeclip2_box
-                HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> R.drawable.img_eyewear2_box
-                else -> R.drawable.img_box
+            if (address != null) {
+                PodImageLoader.loadBoxBitmap(context, prefs, address)
+            } else {
+                val moduleContext = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
+                if (!ModuleResourceResolver.isCurrentModuleBuild(moduleContext)) return null
+                val resourceId = when (route) {
+                    HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> R.drawable.img_freebuds5_box
+                    HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> R.drawable.img_freebuds6i_settings
+                    HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> R.drawable.img_freeclip2_box
+                    HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> R.drawable.img_eyewear2_box
+                    else -> R.drawable.img_box
+                }
+                BitmapFactory.decodeResource(moduleContext.resources, resourceId)
             }
-            BitmapFactory.decodeResource(moduleContext.resources, resourceId)
         }.onSuccess { bitmap ->
-            if (bitmap != null) settingsHeaderBitmaps[route] = bitmap
-            Log.d(TAG, "Settings headset image loaded route=$route bitmap=${bitmap?.width}x${bitmap?.height}")
+            if (bitmap != null) settingsHeaderBitmapCache = SettingsHeaderBitmapCache(key, bitmap)
+            val source = when {
+                imagePreference?.boxImagePath != null -> "manual"
+                imagePreference?.cloudBoxImagePath != null -> "official"
+                else -> "built-in"
+            }
+            Log.d(TAG, "Settings headset image loaded route=$route source=$source bitmap=${bitmap?.width}x${bitmap?.height}")
         }.onFailure {
             Log.w(TAG, "Settings headset image load failed", it)
         }.getOrNull()
@@ -2067,9 +2164,16 @@ object SettingsHeadsetHook : HookContext() {
         Log.d(TAG, "Settings MIUI ANC level anchor hidden view=${anchor.javaClass.name}")
     }
 
-    private fun setSettingsCapabilityViewVisible(view: View, visible: Boolean) {
+    private fun setSettingsCapabilityViewVisible(
+        view: View,
+        visible: Boolean,
+        collapseLayout: Boolean = false,
+    ) {
         if (visible) {
             val original = hiddenSettingsCapabilityViews.remove(view) ?: return
+            if (original.layoutCollapsed) {
+                view.applySettingsRowLayoutState(original.layoutState)
+            }
             view.visibility = original.visibility
             view.isEnabled = original.isEnabled
             view.isClickable = original.isClickable
@@ -2083,9 +2187,63 @@ object SettingsHeadsetHook : HookContext() {
                 isEnabled = view.isEnabled,
                 isClickable = view.isClickable,
                 importantForAccessibility = view.importantForAccessibility,
+                layoutState = view.captureSettingsRowLayoutState(),
             )
         }
-        hideViewOnly(view)
+        val hiddenState = hiddenSettingsCapabilityViews.getValue(view)
+        if (
+            view.visibility != View.GONE ||
+            view.isEnabled ||
+            view.isClickable ||
+            view.importantForAccessibility != View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        ) {
+            hideViewOnly(view)
+        }
+        if (collapseLayout) {
+            hiddenState.layoutCollapsed = true
+            view.applySettingsRowLayoutState(hiddenState.layoutState.collapsed())
+            view.requestLayout()
+        }
+    }
+
+    private fun View.captureSettingsRowLayoutState(): SettingsRowLayoutState {
+        val params = layoutParams
+        val margins = params as? ViewGroup.MarginLayoutParams
+        return SettingsRowLayoutState(
+            height = params?.height,
+            topMargin = margins?.topMargin,
+            bottomMargin = margins?.bottomMargin,
+            minimumHeight = minimumHeight,
+        )
+    }
+
+    private fun View.applySettingsRowLayoutState(state: SettingsRowLayoutState) {
+        val params = layoutParams
+        if (params != null && state.height != null) {
+            params.height = state.height
+            if (params is ViewGroup.MarginLayoutParams) {
+                state.topMargin?.let { params.topMargin = it }
+                state.bottomMargin?.let { params.bottomMargin = it }
+            }
+            layoutParams = params
+        }
+        minimumHeight = state.minimumHeight
+    }
+
+    private fun restoreTrackedSettingsCapabilityViews(root: View) {
+        hiddenSettingsCapabilityViews.keys
+            .filter { view -> view === root || view.isDescendantOf(root) }
+            .toList()
+            .forEach { view -> setSettingsCapabilityViewVisible(view, true) }
+    }
+
+    private fun View.isDescendantOf(ancestor: View): Boolean {
+        var current = parent as? View
+        while (current != null) {
+            if (current === ancestor) return true
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun hideViewOnly(view: View) {
@@ -2210,6 +2368,7 @@ object SettingsHeadsetHook : HookContext() {
     private fun Int.isSettingsNoiseCancellation(): Boolean = this == 2 || this in 5..8
 
     private fun bestHideTarget(root: View, textView: TextView): View {
+        recyclerItemHideTarget(root, textView)?.let { return it }
         var target: View = textView
         var parent = textView.parent as? ViewGroup
         var depth = 0
@@ -2223,6 +2382,7 @@ object SettingsHeadsetHook : HookContext() {
                 break
             }
             val grandParent = parent.parent as? ViewGroup
+            if (grandParent?.isRecyclingRowsContainer() == true) break
             if (parent.isClickable || parent.isFocusable || (grandParent != null && grandParent.childCount > 1)) {
                 target = parent
                 break
@@ -2233,6 +2393,55 @@ object SettingsHeadsetHook : HookContext() {
         }
         return target
     }
+
+    /**
+     * RecyclerView/ListView 不会替内部 GONE 子树自动移除 ViewHolder 占位；
+     * 对确认只承载一行设置的 item 隐藏直接子 View，复用时由现有追踪表恢复原状态。
+     */
+    private fun recyclerItemHideTarget(root: View, textView: TextView): View? {
+        var child: View = textView
+        var parent = child.parent as? ViewGroup
+        var depth = 0
+        while (parent != null && depth < 12) {
+            if (parent.isRecyclingRowsContainer()) {
+                val interactiveDescendants = countTopLevelInteractiveDescendants(child, limit = 2)
+                return child.takeIf {
+                    shouldCollapseSettingsRecyclerItem(
+                        itemInteractive = child.isClickable || child.isFocusable,
+                        topLevelInteractiveDescendantCount = interactiveDescendants,
+                    )
+                }
+            }
+            if (parent === root || parent.isNonRecyclingScrollContainer()) return null
+            child = parent
+            parent = parent.parent as? ViewGroup
+            depth++
+        }
+        return null
+    }
+
+    private fun countTopLevelInteractiveDescendants(view: View, limit: Int): Int {
+        if (view !is ViewGroup || limit <= 0) return 0
+        var count = 0
+        for (index in 0 until view.childCount) {
+            val child = view.getChildAt(index)
+            if (child.isClickable || child.isFocusable) {
+                count++
+            } else {
+                count += countTopLevelInteractiveDescendants(child, limit - count)
+            }
+            if (count >= limit) return limit
+        }
+        return count
+    }
+
+    private fun View.isRecyclingRowsContainer(): Boolean {
+        val className = javaClass.name
+        return className.contains("RecyclerView") || className.contains("ListView")
+    }
+
+    private fun View.isNonRecyclingScrollContainer(): Boolean =
+        javaClass.name.contains("ScrollView")
 
     private fun sendHuaweiAncLevel(level: Int) {
         if (!currentHuaweiRoute().supportsAnc) {

@@ -27,9 +27,12 @@ object HuaweiL2capAncController {
     private const val RFCOMM_CONNECT_TIMEOUT_MS = 3_000L
     private const val RFCOMM_CONNECT_RETRY_DELAY_MS = 350L
     private const val RFCOMM_CONNECT_ATTEMPTS = 2
+    private const val ROUTE_PROBE_CONNECT_TIMEOUT_MS = 2_000L
+    private const val ROUTE_PROBE_RESPONSE_WINDOW_MS = 1_200L
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val routeProbeExecutor = Executors.newSingleThreadExecutor()
     private val submissionLock = Any()
     private val transportGeneration = HuaweiRfcommTransportGeneration()
     private var socket: BluetoothSocket? = null
@@ -116,6 +119,97 @@ object HuaweiL2capAncController {
                 battery?.let(onBattery)
             },
         )
+    }
+
+    internal fun requestDeviceInfoIdentity(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        onResult: (HuaweiDeviceInfoIdentity?) -> Unit,
+    ) {
+        val packet = HuaweiAncPackets.deviceInfoQuery(route) ?: run {
+            onResult(null)
+            return
+        }
+        enqueueWrite(
+            context = context,
+            device = device,
+            route = route,
+            packet = packet,
+            description = "device-info-query",
+            responseWindowMs = 1_500L,
+            responseComplete = { response ->
+                HuaweiDeviceInfoIdentityParser.parse(response) != null
+            },
+            onComplete = { success ->
+                if (!success) onResult(null)
+            },
+            onResponse = { response ->
+                val identity = HuaweiDeviceInfoIdentityParser.parse(response)
+                logInfo(
+                    context.applicationContext ?: context,
+                    "Huawei DeviceInfo response bytes=${response.size} " +
+                        "parsed=${identity != null} device=${device.address}",
+                )
+                onResult(identity)
+            },
+        )
+    }
+
+    /**
+     * 用户主动点选已连接的未知设备时使用的窄探测入口。它不依赖 route，也不复用常驻传输：
+     * 只尝试一次标准 secure SPP UUID，短超时后关闭独立 socket，响应必须通过严格 DeviceInfo 解析。
+     */
+    internal fun requestDeviceInfoIdentityRouteFree(
+        context: Context,
+        device: BluetoothDevice,
+        onResult: (HuaweiDeviceInfoIdentity?) -> Unit,
+    ) {
+        val appContext = context.applicationContext ?: context
+        val address = runCatching { device.address }.getOrDefault("")
+        runCatching {
+            routeProbeExecutor.execute {
+                var probeSocket: BluetoothSocket? = null
+                val identity = runCatching {
+                    val packet = HuaweiAncPackets.routeFreeDeviceInfoQuery()
+                    probeSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                    val connectedSocket = connectSocketWithTimeout(
+                        socket = probeSocket,
+                        label = "route-probe-secure-spp-$SPP_UUID",
+                        timeoutMs = ROUTE_PROBE_CONNECT_TIMEOUT_MS,
+                    )
+                    connectedSocket.outputStream.write(packet)
+                    connectedSocket.outputStream.flush()
+                    RfcommLog.d(
+                        appContext,
+                        "RFCOMM/TX",
+                        "route-free-device-info ${packet.toHexString()}",
+                    )
+                    val response = collectSocketResponse(
+                        socket = connectedSocket,
+                        timeoutMs = ROUTE_PROBE_RESPONSE_WINDOW_MS,
+                        responseComplete = { bytes ->
+                            HuaweiDeviceInfoIdentityParser.parse(bytes) != null
+                        },
+                    )
+                    HuaweiDeviceInfoIdentityParser.parse(response).also { parsed ->
+                        logInfo(
+                            appContext,
+                            "Route-free DeviceInfo response bytes=${response.size} " +
+                                "parsed=${parsed != null} device=$address",
+                        )
+                    }
+                }.onFailure {
+                    logError(appContext, "Route-free DeviceInfo probe failed device=$address", it)
+                }.getOrNull()
+                runCatching { probeSocket?.close() }
+                    .onFailure { Log.w(TAG, "Route-free DeviceInfo socket close failed", it) }
+                mainHandler.post { onResult(identity) }
+            }
+        }.onFailure {
+            logError(appContext, "Route-free DeviceInfo probe enqueue failed device=$address", it)
+            mainHandler.post { onResult(null) }
+        }
     }
 
     internal fun requestAncState(
@@ -391,7 +485,11 @@ object HuaweiL2capAncController {
         return method.invoke(device, channel) as BluetoothSocket
     }
 
-    private fun connectSocketWithTimeout(socket: BluetoothSocket, label: String): BluetoothSocket {
+    private fun connectSocketWithTimeout(
+        socket: BluetoothSocket,
+        label: String,
+        timeoutMs: Long = RFCOMM_CONNECT_TIMEOUT_MS,
+    ): BluetoothSocket {
         val connected = AtomicBoolean(false)
         val failure = AtomicReference<Throwable?>(null)
         val thread = Thread({
@@ -401,7 +499,7 @@ object HuaweiL2capAncController {
             }.onFailure { failure.set(it) }
         }, "HuaweiAnc-rfcomm-connect")
         thread.start()
-        thread.join(RFCOMM_CONNECT_TIMEOUT_MS)
+        thread.join(timeoutMs)
 
         if (connected.get()) return socket
         failure.get()?.let {
@@ -411,7 +509,7 @@ object HuaweiL2capAncController {
         }
         runCatching { socket.close() }
             .onFailure { Log.w(TAG, "Huawei ANC RFCOMM timeout close failed label=$label", it) }
-        throw SocketTimeoutException("Huawei ANC RFCOMM connect timed out after ${RFCOMM_CONNECT_TIMEOUT_MS}ms label=$label")
+        throw SocketTimeoutException("Huawei ANC RFCOMM connect timed out after ${timeoutMs}ms label=$label")
     }
 
     private fun closeSocket() {

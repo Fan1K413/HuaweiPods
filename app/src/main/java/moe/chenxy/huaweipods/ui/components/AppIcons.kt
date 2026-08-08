@@ -9,6 +9,45 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
 object AppIcons {
+    val Documentation: ImageVector = ImageVector.Builder(
+        name = "Documentation",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).apply {
+        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2.1f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
+            moveTo(3f, 4.8f)
+            curveTo(6.4f, 3.9f, 9.2f, 4.7f, 12f, 6.8f)
+            curveTo(14.8f, 4.7f, 17.6f, 3.9f, 21f, 4.8f)
+            verticalLineTo(19.5f)
+            curveTo(17.6f, 18.6f, 14.8f, 19.4f, 12f, 21f)
+            curveTo(9.2f, 19.4f, 6.4f, 18.6f, 3f, 19.5f)
+            close()
+            moveTo(12f, 6.8f)
+            verticalLineTo(21f)
+        }
+    }.build()
+
+    val Support: ImageVector = ImageVector.Builder(
+        name = "Support",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).apply {
+        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2.1f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
+            moveTo(12f, 21f)
+            curveTo(9.8f, 19.3f, 3.5f, 14.9f, 3.5f, 9.4f)
+            curveTo(3.5f, 6.4f, 5.6f, 4.4f, 8.4f, 4.4f)
+            curveTo(10f, 4.4f, 11.2f, 5.2f, 12f, 6.4f)
+            curveTo(12.8f, 5.2f, 14f, 4.4f, 15.6f, 4.4f)
+            curveTo(18.4f, 4.4f, 20.5f, 6.4f, 20.5f, 9.4f)
+            curveTo(20.5f, 14.9f, 14.2f, 19.3f, 12f, 21f)
+            close()
+        }
+    }.build()
+
     val Home: ImageVector = ImageVector.Builder(
         name = "Home",
         defaultWidth = 24.dp,

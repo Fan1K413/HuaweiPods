@@ -1,0 +1,76 @@
+package moe.chenxy.huaweipods.hook
+
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.ancLevelOptions
+import moe.chenxy.huaweipods.pods.isSupported
+import moe.chenxy.huaweipods.pods.supportsAnc
+import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
+import moe.chenxy.huaweipods.pods.supportsGestureConfiguration
+import moe.chenxy.huaweipods.pods.supportsTransparency
+
+internal val settingsEarTipFitKeywords = listOf(
+    "耳塞贴合度检测",
+    "耳塞贴合度测试",
+    "耳塞贴合",
+    "Ear tip fit test",
+    "Earbud fit test",
+    "Ear tip fit",
+)
+
+internal fun isSettingsEarTipFitText(text: String): Boolean =
+    settingsEarTipFitKeywords.any { it.equals(text.trim(), ignoreCase = true) }
+
+/**
+ * 系统蓝牙详情页使用的是小米耳机模板。这里只暴露已经桥接到华为协议的能力，
+ * 避免模板把硬件可能具备、但 HuaweiPods 尚未实现的入口显示成可用功能。
+ */
+internal data class SettingsHeadsetUiPolicy(
+    val showAnc: Boolean,
+    val showTransparency: Boolean,
+    val showGestureConfiguration: Boolean,
+    val showEarTipFitTest: Boolean,
+)
+
+internal fun settingsHeadsetUiPolicy(route: HuaweiDeviceRoute): SettingsHeadsetUiPolicy {
+    val supported = route.isSupported
+    return SettingsHeadsetUiPolicy(
+        showAnc = supported && route.supportsAnc,
+        showTransparency = supported && route.supportsAnc && route.supportsTransparency,
+        showGestureConfiguration = supported && route.supportsGestureConfiguration,
+        // 物理能力与本模块的协议覆盖分开：尚未桥接测试命令前，所有型号都不展示。
+        showEarTipFitTest = false,
+    )
+}
+
+internal fun shouldUpdateSettingsAncUi(route: HuaweiDeviceRoute): Boolean =
+    settingsHeadsetUiPolicy(route).showAnc
+
+internal fun usesCustomSettingsAncSelector(route: HuaweiDeviceRoute): Boolean =
+    route.supportsDiscreteAncLevels && route.ancLevelOptions.size != 4
+
+/**
+ * RecyclerView 的一个 item 可能只是单行设置，也可能承载整组相邻设置。
+ * 仅在 item 自身/内部只形成一个交互分支时整项折叠，避免误删同卡片中的其他行。
+ */
+internal fun shouldCollapseSettingsRecyclerItem(
+    itemInteractive: Boolean,
+    topLevelInteractiveDescendantCount: Int,
+): Boolean = when {
+    topLevelInteractiveDescendantCount > 1 -> false
+    itemInteractive -> true
+    else -> topLevelInteractiveDescendantCount == 1
+}
+
+internal data class SettingsRowLayoutState(
+    val height: Int?,
+    val topMargin: Int?,
+    val bottomMargin: Int?,
+    val minimumHeight: Int,
+)
+
+internal fun SettingsRowLayoutState.collapsed(): SettingsRowLayoutState = copy(
+    height = height?.let { 0 },
+    topMargin = topMargin?.let { 0 },
+    bottomMargin = bottomMargin?.let { 0 },
+    minimumHeight = 0,
+)

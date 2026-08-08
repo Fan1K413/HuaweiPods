@@ -13,6 +13,7 @@ import android.os.SystemClock
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.hook.Log
+import moe.chenxy.huaweipods.smartaudio.OfficialImageIdentityBridge
 import moe.chenxy.huaweipods.utils.miuiStrongToast.MiuiStrongToastUtil
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
@@ -29,6 +30,7 @@ object HuaweiHfpController {
     private const val GESTURE_REFRESH_MIN_INTERVAL_MS = 750L
     private const val FREECLIP2_AUDIO_CONFIRM_DELAY_MS = 450L
     private const val FREECLIP2_AUDIO_REFRESH_MIN_INTERVAL_MS = 2_500L
+    private const val DEVICE_INFO_REFRESH_MIN_INTERVAL_MS = 60_000L
     private const val FREEBUDS3_SNAPSHOT_TTL_MS = 10 * 60_000L
     private const val EXTRA_STATE_CACHED = "state_cached"
 
@@ -52,8 +54,14 @@ object HuaweiHfpController {
     private var lastAncRequestAt = 0L
     private var lastGestureStateRequestAt = 0L
     private var lastFreeClip2AudioStateRequestAt = 0L
+    private var lastDeviceInfoRequestAt = 0L
     private var batteryRequestInFlight = false
     private var ancRequestInFlight = false
+    private var deviceInfoRequestInFlight = false
+    private var deviceIdentityPublishInFlight = false
+    private var deviceIdentityPublished = false
+    private var deviceInfoQueryUnavailableLogged = false
+    private var currentDeviceInfoIdentity: HuaweiDeviceInfoIdentity? = null
     private var sessionGeneration = 0L
     private val freeClip2AudioStateTracker = FreeClip2AudioStateTracker()
     private val batteryIslandTriggerPolicy = BatteryIslandTriggerPolicy()
@@ -111,6 +119,7 @@ object HuaweiHfpController {
                             restoreCurrentNotification()
                         }
                     }
+                    requestOfficialImageIdentity()
                     requestPrivateBattery()
                     if (sessionRoute.supportsAnc) {
                         val requestStarted = requestAncState()
@@ -200,6 +209,7 @@ object HuaweiHfpController {
             restored?.battery?.let { sendBattery(it, cached = true) }
             restored?.moduleAnc?.let { sendAnc(it, cached = true) }
         }
+        requestOfficialImageIdentity(force = true)
         requestAncState(force = true)
         requestPrivateBattery()
         if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
@@ -239,8 +249,14 @@ object HuaweiHfpController {
             lastAncRequestAt = 0L
             lastGestureStateRequestAt = 0L
             lastFreeClip2AudioStateRequestAt = 0L
+            lastDeviceInfoRequestAt = 0L
             batteryRequestInFlight = false
             ancRequestInFlight = false
+            deviceInfoRequestInFlight = false
+            deviceIdentityPublishInFlight = false
+            deviceIdentityPublished = false
+            deviceInfoQueryUnavailableLogged = false
+            currentDeviceInfoIdentity = null
             sessionGeneration++
             synchronized(sessionStateLock) { freeClip2AudioStateTracker.reset() }
             mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
@@ -776,8 +792,14 @@ object HuaweiHfpController {
             lastAncRequestAt = 0L
             lastGestureStateRequestAt = 0L
             lastFreeClip2AudioStateRequestAt = 0L
+            lastDeviceInfoRequestAt = 0L
             batteryRequestInFlight = false
             ancRequestInFlight = false
+            deviceInfoRequestInFlight = false
+            deviceIdentityPublishInFlight = false
+            deviceIdentityPublished = false
+            deviceInfoQueryUnavailableLogged = false
+            currentDeviceInfoIdentity = null
             synchronized(sessionStateLock) { freeClip2AudioStateTracker.reset() }
             mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
             batteryIslandTriggerPolicy.onNewSession()
@@ -881,6 +903,124 @@ object HuaweiHfpController {
             }
         )
     }
+
+    private fun requestOfficialImageIdentity(force: Boolean = false) {
+        val currentContext = context ?: return
+        val currentDevice = device ?: return
+        val requestedRoute = sessionRoute
+        if (HuaweiAncPackets.deviceInfoQuery(requestedRoute) == null) {
+            if (!deviceInfoQueryUnavailableLogged) {
+                deviceInfoQueryUnavailableLogged = true
+                Log.i(
+                    TAG,
+                    "Official image identity unavailable from device; " +
+                        "catalog selection required route=$requestedRoute",
+                )
+            }
+            return
+        }
+        if (
+            deviceIdentityPublished ||
+            deviceInfoRequestInFlight ||
+            deviceIdentityPublishInFlight
+        ) {
+            return
+        }
+        currentDeviceInfoIdentity?.let {
+            publishCachedOfficialImageIdentity(
+                currentContext = currentContext,
+                currentDevice = currentDevice,
+                requestedRoute = requestedRoute,
+                identity = it,
+            )
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastDeviceInfoRequestAt < DEVICE_INFO_REFRESH_MIN_INTERVAL_MS) return
+        lastDeviceInfoRequestAt = now
+        deviceInfoRequestInFlight = true
+        val requestedAddress = currentDevice.address
+        val requestedGeneration = sessionGeneration
+        HuaweiL2capAncController.requestDeviceInfoIdentity(
+            context = currentContext,
+            device = currentDevice,
+            route = requestedRoute,
+        ) result@{ identity ->
+            if (!isCurrentSession(requestedGeneration, requestedAddress, requestedRoute)) {
+                return@result
+            }
+            deviceInfoRequestInFlight = false
+            if (identity == null) {
+                Log.i(TAG, "Huawei DeviceInfo identity unavailable device=$requestedAddress")
+                return@result
+            }
+            if (!HuaweiDeviceInfoRoutePolicy.isCompatible(requestedRoute, identity.modelId)) {
+                Log.w(
+                    TAG,
+                    "Huawei DeviceInfo identity conflicts with route " +
+                        "model=${identity.modelId} route=$requestedRoute",
+                )
+                return@result
+            }
+            currentDeviceInfoIdentity = identity
+            publishCachedOfficialImageIdentity(
+                currentContext = currentContext,
+                currentDevice = currentDevice,
+                requestedRoute = requestedRoute,
+                identity = identity,
+            )
+        }
+    }
+
+    private fun publishCachedOfficialImageIdentity(
+        currentContext: Context,
+        currentDevice: BluetoothDevice,
+        requestedRoute: HuaweiDeviceRoute,
+        identity: HuaweiDeviceInfoIdentity,
+    ) {
+        val request = HuaweiDeviceInfoPublishRequest(
+            generation = sessionGeneration,
+            address = currentDevice.address,
+            route = requestedRoute,
+            identity = identity,
+        )
+        if (!matchesCurrentDeviceInfoPublishRequest(request)) return
+        deviceIdentityPublishInFlight = true
+        OfficialImageIdentityBridge.publishAsync(
+            context = currentContext,
+            address = request.address,
+            route = requestedRoute,
+            identity = identity,
+            callbackHandler = mainHandler,
+        ) result@{ accepted ->
+            if (!matchesCurrentDeviceInfoPublishRequest(request)) return@result
+            deviceIdentityPublishInFlight = false
+            deviceIdentityPublished = accepted
+            if (accepted) {
+                Log.i(
+                    TAG,
+                    "Huawei official image identity published " +
+                        "model=${identity.modelId}/${identity.subModelId} device=${request.address}",
+                )
+            } else {
+                Log.d(
+                    TAG,
+                    "Huawei official image identity pending module provider " +
+                        "model=${identity.modelId}/${identity.subModelId}",
+                )
+            }
+        }
+    }
+
+    private fun matchesCurrentDeviceInfoPublishRequest(
+        request: HuaweiDeviceInfoPublishRequest,
+    ): Boolean = matchesHuaweiDeviceInfoPublishSession(
+        request = request,
+        activeGeneration = sessionGeneration,
+        activeAddress = device?.address,
+        activeRoute = sessionRoute,
+        activeIdentity = currentDeviceInfoIdentity,
+    )
 
     private fun startBackgroundBatteryRefresh() {
         if (!sessionRoute.supportsBackgroundBatteryRefresh || backgroundBatteryRefreshActive) return

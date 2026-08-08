@@ -7,6 +7,9 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.Bundle
+import moe.chenxy.huaweipods.HuaweiPodsApp
+import moe.chenxy.huaweipods.pods.HuaweiDeviceInfoRoutePolicy
+import moe.chenxy.huaweipods.smartaudio.OfficialImageIdentityBridge
 import moe.chenxy.huaweipods.smartaudio.SmartAudioImageCache
 import moe.chenxy.huaweipods.smartaudio.SmartAudioResourceIdentityPolicy
 import java.io.File
@@ -41,7 +44,7 @@ class PodImageProvider : ContentProvider() {
             return super.call(method, arg, extras)
         }
         val context = context ?: return Bundle().apply { putBoolean("accepted", false) }
-        if (!PodImageProviderAccessPolicy.maySubmitSmartAudioIdentity(resolveCallingPackage(context))) {
+        if (!PodImageProviderAccessPolicy.maySubmitOfficialImageIdentity(resolveCallingPackage(context))) {
             return Bundle().apply { putBoolean("accepted", false) }
         }
         val identity = SmartAudioResourceIdentityPolicy.normalize(
@@ -49,10 +52,32 @@ class PodImageProvider : ContentProvider() {
             modelId = extras?.getString(SmartAudioImageCache.EXTRA_MODEL_ID),
             subModelId = extras?.getString(SmartAudioImageCache.EXTRA_SUB_MODEL_ID),
         )
-        val accepted = identity?.let {
-            runCatching { SmartAudioImageCache.request(context, it) }.getOrDefault(false)
+        val prefs = context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
+        val verifiedRoute = identity?.modelId?.let(HuaweiDeviceInfoRoutePolicy::routeForModelId)
+        val identityVerified = identity != null && verifiedRoute != null
+        val routeBound = if (identity != null && verifiedRoute != null) {
+            runCatching {
+                DeviceRoutePrefs.bindIfAbsent(
+                    prefs = prefs,
+                    service = HuaweiPodsApp.xposedService,
+                    address = identity.address,
+                    route = verifiedRoute,
+                ) && DeviceRoutePrefs.find(prefs, identity.address) == verifiedRoute
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+        val imageScheduled = identity?.let { confirmedIdentity ->
+            runCatching { SmartAudioImageCache.request(context, confirmedIdentity) }
+                .getOrDefault(false)
         } == true
-        return Bundle().apply { putBoolean("accepted", accepted) }
+        return Bundle().apply {
+            // 保留旧调用方语义：accepted 只表示图片任务已就绪或已调度。
+            putBoolean("accepted", imageScheduled)
+            putBoolean(OfficialImageIdentityBridge.RESULT_IDENTITY_VERIFIED, identityVerified)
+            putBoolean(OfficialImageIdentityBridge.RESULT_ROUTE_BOUND, routeBound)
+            putBoolean(OfficialImageIdentityBridge.RESULT_IMAGE_SCHEDULED, imageScheduled)
+        }
     }
 
     override fun getType(uri: Uri): String = "image/*"

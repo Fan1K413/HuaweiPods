@@ -51,6 +51,7 @@ import moe.chenxy.huaweipods.config.AppLifecyclePrefs
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.config.PodImagePrefs
+import moe.chenxy.huaweipods.config.PodImageChangeNotifier
 import moe.chenxy.huaweipods.config.PodImageResource
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
@@ -68,9 +69,13 @@ import moe.chenxy.huaweipods.pods.supportsTransparency
 import moe.chenxy.huaweipods.ui.dialogs.AvailableUpdateDialog
 import moe.chenxy.huaweipods.ui.dialogs.UpdatedAppDialog
 import moe.chenxy.huaweipods.ui.pages.AboutPage
+import moe.chenxy.huaweipods.ui.pages.DocumentationPage
+import moe.chenxy.huaweipods.ui.pages.SponsorPage
 import moe.chenxy.huaweipods.ui.pages.ThemeSettingsPage
+import moe.chenxy.huaweipods.ui.pages.UpdateCheckSummary
 import moe.chenxy.huaweipods.update.GitHubRelease
 import moe.chenxy.huaweipods.update.GitHubReleaseChecker
+import moe.chenxy.huaweipods.update.UpdateCheckFeedbackGate
 import moe.chenxy.huaweipods.update.UpdateCheckResult
 import moe.chenxy.huaweipods.utils.RootManager
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
@@ -98,6 +103,8 @@ sealed interface Screen : NavKey {
     data object Main : Screen
     data object About : Screen
     data object Theme : Screen
+    data object Documentation : Screen
+    data object Sponsor : Screen
 }
 
 private const val DEVICE_CONNECT_TIMEOUT_MS = 15_000L
@@ -176,6 +183,8 @@ fun MainUI(
         mutableStateOf(lifecyclePrefs.checkUpdatesOnLaunch())
     }
     var checkingForUpdates by remember { mutableStateOf(false) }
+    val updateFeedbackGate = remember { UpdateCheckFeedbackGate() }
+    var updateCheckSummary by remember { mutableStateOf<UpdateCheckSummary?>(null) }
     var availableUpdate by remember { mutableStateOf<GitHubRelease?>(null) }
 
     fun currentDeviceRoute(): HuaweiDeviceRoute = DeviceRoutePrefs.resolve(
@@ -185,37 +194,55 @@ fun MainUI(
     )
 
     fun checkForUpdates(manual: Boolean) {
+        if (manual) {
+            updateFeedbackGate.request()
+            updateCheckSummary = null
+        }
         if (checkingForUpdates) return
         if (!manual) {
             lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
         }
         checkingForUpdates = true
         coroutineScope.launch {
-            when (
-                val result = GitHubReleaseChecker.check(
-                    currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
-                    currentVersionName = BuildConfig.VERSION_NAME,
-                )
-            ) {
-                is UpdateCheckResult.Available -> {
-                    if (manual) lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
-                    availableUpdate = result.release
-                }
+            try {
+                when (
+                    val result = GitHubReleaseChecker.check(
+                        currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                        currentVersionName = BuildConfig.VERSION_NAME,
+                    )
+                ) {
+                    is UpdateCheckResult.Available -> {
+                        if (updateFeedbackGate.shouldShow(manual)) {
+                            lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                            updateCheckSummary = UpdateCheckSummary.Available(
+                                versionName = result.release.versionName,
+                            )
+                        }
+                        availableUpdate = result.release
+                    }
 
-                is UpdateCheckResult.UpToDate -> {
-                    if (manual) lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
-                    if (manual) {
-                        Toast.makeText(context, R.string.already_latest_version, Toast.LENGTH_SHORT).show()
+                    is UpdateCheckResult.UpToDate -> {
+                        if (updateFeedbackGate.shouldShow(manual)) {
+                            lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                            updateCheckSummary = UpdateCheckSummary.UpToDate(
+                                versionName = result.latest.versionName,
+                            )
+                            Toast.makeText(context, R.string.already_latest_version, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+
+                    is UpdateCheckResult.Failure -> {
+                        Log.w("HuaweiPods-Update", "Update check failed: ${result.message}")
+                        if (updateFeedbackGate.shouldShow(manual)) {
+                            updateCheckSummary = UpdateCheckSummary.Failure
+                            Toast.makeText(context, R.string.update_check_failed, Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
-
-                is UpdateCheckResult.Failure -> {
-                    if (manual) {
-                        Toast.makeText(context, R.string.update_check_failed, Toast.LENGTH_SHORT).show()
-                    }
-                }
+            } finally {
+                checkingForUpdates = false
+                updateFeedbackGate.reset()
             }
-            checkingForUpdates = false
         }
     }
 
@@ -731,6 +758,7 @@ fun MainUI(
         clearedImages: Set<PodImageResource>,
     ) {
         earphonePrefs.value = PodImagePrefs.saveImages(context, prefs, xposedService, address, name, images, clearedImages)
+        PodImageChangeNotifier.notify(context, address)
     }
 
     fun restartScopes(packages: List<String>) {
@@ -823,6 +851,7 @@ fun MainUI(
                 },
                 onHuaweiAncLevelChange = { setHuaweiAncLevel(it) },
                 earphonePrefs = earphonePrefs.value,
+                deviceRoute = currentDeviceRoute(),
                 connectedDeviceAddress = connectedDeviceAddress,
                 connectingDeviceAddress = connectingDeviceAddress,
                 showConnectErrorDialog = showConnectErrorDialog,
@@ -884,6 +913,8 @@ fun MainUI(
                 },
                 onOpenTheme = { backStack.add(Screen.Theme) },
                 onOpenAbout = { backStack.add(Screen.About) },
+                onOpenDocumentation = { backStack.add(Screen.Documentation) },
+                onOpenSponsor = { backStack.add(Screen.Sponsor) },
                 showRestartScopeDialog = showRestartScopeDialog,
                 restartingScopes = restartingScopes,
                 onShowRestartScopeDialog = { showRestartScopeDialog = true },
@@ -935,6 +966,7 @@ fun MainUI(
                         contentPadding = PaddingValues(bottom = pageBottomContentPadding),
                         appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         checkingForUpdates = checkingForUpdates,
+                        updateCheckSummary = updateCheckSummary,
                         onCheckForUpdates = { checkForUpdates(manual = true) },
                         onOpenGitHub = { openExternalUrl(context, GITHUB_REPOSITORY_URL) },
                         onOpenIssues = { openExternalUrl(context, GITHUB_ISSUES_URL) },
@@ -981,6 +1013,75 @@ fun MainUI(
                         onFloatingBottomBarChange = onFloatingBottomBarChange,
                         blurBottomBar = blurBottomBar,
                         onBlurBottomBarChange = onBlurBottomBarChange,
+                    )
+                }
+            }
+        }
+        entry<Screen.Documentation> {
+            val documentationScrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = stringResource(R.string.documentation_title),
+                        largeTitle = stringResource(R.string.documentation_title),
+                        scrollBehavior = documentationScrollBehavior,
+                        navigationIcon = {
+                            IconButton(onClick = { backStack.removeLast() }) {
+                                Icon(
+                                    imageVector = MiuixIcons.Back,
+                                    contentDescription = stringResource(R.string.back),
+                                )
+                            }
+                        },
+                    )
+                },
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(backgroundColor)
+                        .padding(padding),
+                ) {
+                    DocumentationPage(
+                        onOpenExternalUrl = { openExternalUrl(context, it) },
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = pageBottomContentPadding),
+                    )
+                }
+            }
+        }
+        entry<Screen.Sponsor> {
+            val sponsorScrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = stringResource(R.string.sponsor_title),
+                        largeTitle = stringResource(R.string.sponsor_title),
+                        scrollBehavior = sponsorScrollBehavior,
+                        navigationIcon = {
+                            IconButton(onClick = { backStack.removeLast() }) {
+                                Icon(
+                                    imageVector = MiuixIcons.Back,
+                                    contentDescription = stringResource(R.string.back),
+                                )
+                            }
+                        },
+                    )
+                },
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(backgroundColor)
+                        .padding(padding),
+                ) {
+                    SponsorPage(
+                        modifier = Modifier
+                            .overScrollVertical()
+                            .nestedScroll(sponsorScrollBehavior.nestedScrollConnection),
+                        contentPadding = PaddingValues(bottom = pageBottomContentPadding),
                     )
                 }
             }

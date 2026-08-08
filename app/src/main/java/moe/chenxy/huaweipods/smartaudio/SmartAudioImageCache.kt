@@ -4,7 +4,6 @@ import android.app.job.JobInfo
 import android.app.job.JobScheduler
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -22,7 +21,7 @@ import moe.chenxy.huaweipods.HuaweiPodsApp
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.config.PodImageResource
-import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
+import moe.chenxy.huaweipods.config.PodImageChangeNotifier
 
 /** 在模块进程中下载并缓存智慧音频官方设备图；所有失败都保留内置图片兜底。 */
 internal object SmartAudioImageCache {
@@ -41,6 +40,16 @@ internal object SmartAudioImageCache {
     private const val VISIBLE_ALPHA_THRESHOLD = 8
     private const val STAGING_DIRECTORY = "smart_audio_image_staging"
     private const val TAG = "HuaweiPods-CloudImage"
+
+    /** 仅从固定华为 CDN 读取指定机型的官方配色，调用方必须在 I/O 线程执行。 */
+    fun loadOfficialOptions(modelId: String): List<OfficialSmartAudioResourceOption> {
+        val configBytes = downloadBytes(
+            uri = OfficialSmartAudioResource.configUri(modelId),
+            maxBytes = OfficialSmartAudioResource.MAX_CONFIG_BYTES.toLong(),
+            accept = "application/json",
+        )
+        return OfficialSmartAudioResource.listOptions(configBytes, modelId)
+    }
 
     fun request(context: Context, identity: SmartAudioResourceIdentity): Boolean {
         val appContext = context.applicationContext ?: context
@@ -198,11 +207,7 @@ internal object SmartAudioImageCache {
             imagePaths = installed,
         )
         if (committed) {
-            context.sendBroadcast(
-                Intent(HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED)
-                    .setPackage(context.packageName)
-                    .putExtra(EXTRA_ADDRESS, identity.address),
-            )
+            PodImageChangeNotifier.notify(context, identity.address)
         }
     }
 

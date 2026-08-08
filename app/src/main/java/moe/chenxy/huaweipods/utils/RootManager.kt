@@ -5,7 +5,6 @@ import java.util.concurrent.TimeUnit
 object RootManager {
     private val packageNameRegex = Regex("^[A-Za-z0-9_.]+$")
     private val restartOrder = listOf(
-        "com.huawei.smartaudio",
         "com.android.settings",
         "com.milink.service",
         "com.xiaomi.bluetooth",

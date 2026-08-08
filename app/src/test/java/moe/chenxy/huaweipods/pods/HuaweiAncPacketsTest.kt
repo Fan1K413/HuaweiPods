@@ -169,6 +169,22 @@ class HuaweiAncPacketsTest {
     }
 
     @Test
+    fun `modern RFCOMM models use the verified DeviceInfo query`() {
+        val query = hex(
+            "5A00210001070100020003000400050006000700080009000A000B000C000F0018001900DFF3",
+        )
+
+        enabledHuaweiDeviceRoutes()
+            .filter { it.supportsRfcommBattery }
+            .forEach { route ->
+                assertArrayEquals(route.name, query, HuaweiAncPackets.deviceInfoQuery(route))
+            }
+        assertNull(HuaweiAncPackets.deviceInfoQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
+        assertNull(HuaweiAncPackets.deviceInfoQuery(HuaweiDeviceRoute.UNSUPPORTED))
+        assertArrayEquals(query, HuaweiAncPackets.routeFreeDeviceInfoQuery())
+    }
+
+    @Test
     fun `modern models with captured readback expose the ANC state query`() {
         val query = hex("5A0005002B2A0100427E")
 

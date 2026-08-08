@@ -48,14 +48,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRouteProbePolicy
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRouteProbeSession
 import moe.chenxy.huaweipods.pods.detectHuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.displayName
 import moe.chenxy.huaweipods.pods.enabledHuaweiDeviceRoutes
 import moe.chenxy.huaweipods.pods.isSupported
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.sendIdentitySharingBroadcast
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -71,6 +77,16 @@ import top.yukonga.miuix.kmp.icon.extended.Edit
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
+
+private const val ROUTE_PROBE_UI_TIMEOUT_MS = 6_500L
+private val routeProbeGeneration = AtomicLong(System.currentTimeMillis().coerceAtLeast(1L))
+
+private data class PendingDeviceRouteProbe(
+    val device: BluetoothDevice,
+    val session: HuaweiDeviceRouteProbeSession,
+)
 
 @SuppressLint("MissingPermission")
 @Composable
@@ -105,6 +121,7 @@ fun DevicePickerPage(
     var bluetoothRefreshToken by remember { mutableStateOf(0) }
     var routeRefreshToken by remember { mutableStateOf(0) }
     var pendingRouteDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
+    var pendingRouteProbe by remember { mutableStateOf<PendingDeviceRouteProbe?>(null) }
 
     fun selectDevice(device: BluetoothDevice) {
         val route = DeviceRoutePrefs.resolve(
@@ -114,8 +131,43 @@ fun DevicePickerPage(
         )
         if (route.isSupported) {
             onDeviceSelected(device, route)
-        } else {
+            return
+        }
+        val mayProbe = HuaweiDeviceRouteProbePolicy.mayRequest(
+            bonded = runCatching { device.bondState == BluetoothDevice.BOND_BONDED }
+                .getOrDefault(false),
+            audioDevice = device.isBluetoothAudioDevice(),
+            requestAlreadyPending = pendingRouteProbe != null,
+        )
+        if (!mayProbe) {
+            if (pendingRouteProbe == null) pendingRouteDevice = device
+            return
+        }
+        val generation = routeProbeGeneration.incrementAndGet()
+        val session = HuaweiDeviceRouteProbePolicy.session(
+            address = runCatching { device.address }.getOrNull(),
+            generation = generation,
+            nonce = UUID.randomUUID().toString(),
+        )
+        if (session == null) {
             pendingRouteDevice = device
+            return
+        }
+        pendingRouteProbe = PendingDeviceRouteProbe(device, session)
+        runCatching {
+            val requestIntent = Intent(HuaweiPodsAction.ACTION_DEVICE_ROUTE_PROBE_REQUEST).apply {
+                putExtra(HuaweiPodsAction.EXTRA_ROUTE_PROBE_ADDRESS, session.address)
+                putExtra(HuaweiPodsAction.EXTRA_ROUTE_PROBE_GENERATION, session.generation)
+                putExtra(HuaweiPodsAction.EXTRA_ROUTE_PROBE_NONCE, session.nonce)
+                setPackage(HuaweiDeviceRouteProbePolicy.RESULT_SENDER_PACKAGE)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            }
+            context.sendIdentitySharingBroadcast(requestIntent)
+        }.onFailure {
+            if (pendingRouteProbe?.session == session) {
+                pendingRouteProbe = null
+                pendingRouteDevice = device
+            }
         }
     }
 
@@ -125,19 +177,67 @@ fun DevicePickerPage(
         }
     }
 
+    LaunchedEffect(pendingRouteProbe?.session?.generation) {
+        val pending = pendingRouteProbe ?: return@LaunchedEffect
+        delay(ROUTE_PROBE_UI_TIMEOUT_MS)
+        if (pendingRouteProbe?.session == pending.session) {
+            pendingRouteProbe = null
+            pendingRouteDevice = pending.device
+        }
+    }
+
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED ||
-                    intent?.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED
-                ) {
-                    bluetoothRefreshToken++
+                when (intent?.action) {
+                    BluetoothAdapter.ACTION_STATE_CHANGED,
+                    BluetoothDevice.ACTION_BOND_STATE_CHANGED -> bluetoothRefreshToken++
+
+                    HuaweiPodsAction.ACTION_DEVICE_ROUTE_PROBE_RESULT -> {
+                        if (!HuaweiDeviceRouteProbePolicy.isTrustedResultSender(sentFromPackage)) {
+                            return
+                        }
+                        val pending = pendingRouteProbe ?: return
+                        val resultAddress = intent.getStringExtra(
+                            HuaweiPodsAction.EXTRA_ROUTE_PROBE_ADDRESS,
+                        )
+                        val resultGeneration = intent.getLongExtra(
+                            HuaweiPodsAction.EXTRA_ROUTE_PROBE_GENERATION,
+                            -1L,
+                        )
+                        val resultNonce = intent.getStringExtra(
+                            HuaweiPodsAction.EXTRA_ROUTE_PROBE_NONCE,
+                        )
+                        if (!pending.session.matches(resultAddress, resultGeneration, resultNonce)) {
+                            return
+                        }
+                        val route = HuaweiDeviceRouteProbePolicy.resolveVerifiedRoute(
+                            modelId = intent.getStringExtra(
+                                HuaweiPodsAction.EXTRA_ROUTE_PROBE_MODEL_ID,
+                            ),
+                            subModelId = intent.getStringExtra(
+                                HuaweiPodsAction.EXTRA_ROUTE_PROBE_SUB_MODEL_ID,
+                            ),
+                        )
+                        pendingRouteProbe = null
+                        val providerBoundRoute = DeviceRoutePrefs.find(
+                            routePrefs,
+                            pending.session.address,
+                        )
+                        if (route != null && providerBoundRoute == route) {
+                            routeRefreshToken++
+                            onDeviceSelected(pending.device, route)
+                        } else {
+                            pendingRouteDevice = pending.device
+                        }
+                    }
                 }
             }
         }
         context.registerReceiver(receiver, IntentFilter().apply {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_DEVICE_ROUTE_PROBE_RESULT)
         }, Context.RECEIVER_EXPORTED)
         onDispose {
             runCatching { context.unregisterReceiver(receiver) }
@@ -264,7 +364,20 @@ fun DevicePickerPage(
                             ?: device.address,
                         connected = connected,
                         connecting = device.address == connectingDeviceAddress,
-                        onClick = { if (connected) onConnectedDeviceClick() else selectDevice(device) },
+                        identifying = pendingRouteProbe?.session?.address
+                            ?.equals(device.address, ignoreCase = true) == true,
+                        onClick = {
+                            if (
+                                HuaweiDeviceRouteProbePolicy.shouldOpenConnectedDetails(
+                                    connected = connected,
+                                    resolvedRouteSupported = route.isSupported,
+                                )
+                            ) {
+                                onConnectedDeviceClick()
+                            } else {
+                                selectDevice(device)
+                            }
+                        },
                         onChangeModel = {
                             pendingRouteDevice = device
                         }.takeIf { route.isSupported && !connected },
@@ -366,6 +479,7 @@ private fun DeviceRow(
     summary: String,
     connected: Boolean,
     connecting: Boolean,
+    identifying: Boolean,
     onClick: () -> Unit,
     onChangeModel: (() -> Unit)?,
 ) {
@@ -393,7 +507,7 @@ private fun DeviceRow(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            if (connecting) {
+            if (connecting || identifying) {
                 InfiniteProgressIndicator()
             } else if (onChangeModel != null && !connected) {
                 IconButton(

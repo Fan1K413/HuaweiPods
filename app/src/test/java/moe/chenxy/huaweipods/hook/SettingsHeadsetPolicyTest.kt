@@ -1,6 +1,8 @@
 package moe.chenxy.huaweipods.hook
 
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.enabledHuaweiDeviceRoutes
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,10 +32,141 @@ class SettingsHeadsetPolicyTest {
     }
 
     @Test
+    fun `settings policy exposes only the controls bridged for every route`() {
+        fun expectedPolicy(
+            anc: Boolean,
+            transparency: Boolean,
+            gestures: Boolean,
+        ) = SettingsHeadsetUiPolicy(
+            showAnc = anc,
+            showTransparency = transparency,
+            showGestureConfiguration = gestures,
+            showEarTipFitTest = false,
+        )
+
+        val expected = linkedMapOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS3 to expectedPolicy(true, false, true),
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS5 to expectedPolicy(true, false, false),
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I to expectedPolicy(true, true, true),
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 to expectedPolicy(true, true, true),
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 to expectedPolicy(true, false, false),
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 to expectedPolicy(true, true, false),
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to expectedPolicy(true, false, false),
+            HuaweiDeviceRoute.HUAWEI_FREECLIP to expectedPolicy(false, false, false),
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2 to expectedPolicy(false, false, true),
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR to expectedPolicy(false, false, false),
+            HuaweiDeviceRoute.HUAWEI_EYEWEAR2 to expectedPolicy(false, false, true),
+        )
+
+        assertEquals(enabledHuaweiDeviceRoutes(), expected.keys.toList())
+        expected.forEach { (route, policy) ->
+            assertEquals(route.name, policy, settingsHeadsetUiPolicy(route))
+        }
+    }
+
+    @Test
+    fun `ear tip fit stays hidden for every route until its command is bridged`() {
+        enabledHuaweiDeviceRoutes().forEach { route ->
+            assertFalse(route.name, settingsHeadsetUiPolicy(route).showEarTipFitTest)
+        }
+        assertFalse(
+            HuaweiDeviceRoute.UNSUPPORTED.name,
+            settingsHeadsetUiPolicy(HuaweiDeviceRoute.UNSUPPORTED).showEarTipFitTest,
+        )
+    }
+
+    @Test
+    fun `ear tip fit labels cover exact Chinese and English settings titles`() {
+        listOf(
+            "耳塞贴合度检测",
+            "耳塞贴合度测试",
+            "耳塞贴合",
+            "Ear tip fit test",
+            "Earbud fit test",
+        ).forEach { label -> assertTrue(label, isSettingsEarTipFitText(label)) }
+
+        listOf(
+            "佩戴检测",
+            "通话",
+            "检查更新",
+            "Find earbuds",
+            "Head tracking",
+            "打开耳塞贴合度检测可获得更准确的结果",
+            "Run the Ear tip fit test after changing ear tips",
+        ).forEach { label -> assertFalse(label, isSettingsEarTipFitText(label)) }
+    }
+
+    @Test
+    fun `unsupported route exposes no settings controls`() {
+        val policy = settingsHeadsetUiPolicy(HuaweiDeviceRoute.UNSUPPORTED)
+        assertFalse(policy.showAnc)
+        assertFalse(policy.showTransparency)
+        assertFalse(policy.showGestureConfiguration)
+        assertFalse(policy.showEarTipFitTest)
+    }
+
+    @Test
     fun `FreeBuds 5 replaces the native four-level row with a three-level selector`() {
         assertTrue(usesCustomSettingsAncSelector(HuaweiDeviceRoute.HUAWEI_FREEBUDS5))
         assertFalse(usesCustomSettingsAncSelector(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I))
         assertFalse(usesCustomSettingsAncSelector(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3))
         assertFalse(usesCustomSettingsAncSelector(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
+    }
+
+    @Test
+    fun `RecyclerView whole item collapse rejects grouped adjacent settings`() {
+        assertTrue(
+            shouldCollapseSettingsRecyclerItem(
+                itemInteractive = true,
+                topLevelInteractiveDescendantCount = 0,
+            ),
+        )
+        assertTrue(
+            shouldCollapseSettingsRecyclerItem(
+                itemInteractive = false,
+                topLevelInteractiveDescendantCount = 1,
+            ),
+        )
+        assertFalse(
+            shouldCollapseSettingsRecyclerItem(
+                itemInteractive = false,
+                topLevelInteractiveDescendantCount = 0,
+            ),
+        )
+        assertFalse(
+            shouldCollapseSettingsRecyclerItem(
+                itemInteractive = true,
+                topLevelInteractiveDescendantCount = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun `RecyclerView collapsed layout is reversible and preserves non vertical fields`() {
+        val original = SettingsRowLayoutState(
+            height = -2,
+            topMargin = 12,
+            bottomMargin = 18,
+            minimumHeight = 144,
+        )
+
+        assertEquals(
+            SettingsRowLayoutState(
+                height = 0,
+                topMargin = 0,
+                bottomMargin = 0,
+                minimumHeight = 0,
+            ),
+            original.collapsed(),
+        )
+        assertEquals(-2, original.height)
+        assertEquals(12, original.topMargin)
+        assertEquals(18, original.bottomMargin)
+        assertEquals(144, original.minimumHeight)
+
+        assertEquals(
+            SettingsRowLayoutState(null, null, null, 0),
+            SettingsRowLayoutState(null, null, null, 96).collapsed(),
+        )
     }
 }

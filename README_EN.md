@@ -12,6 +12,8 @@
 
 **English** | **[Simplified Chinese](README.md)**
 
+[Documentation](https://huaweipods.npiter.de/) · [Support the project](docs/sponsor/index.md) · [Report an issue](https://github.com/Nshpiter/HuaweiPods/issues)
+
 </div>
 
 HuaweiPods is an Xposed module for Xiaomi HyperOS. It integrates supported Huawei audio devices with the system headset popup, Super Island, Fusion Device Center, and Bluetooth detail page.
@@ -47,7 +49,7 @@ The unified build supports the 11 models below in one APK. Model-specific test A
 - **Manual model binding** by Bluetooth address when a device has been renamed or cannot be identified automatically.
 - **First-run setup guide** and in-app GitHub release checks.
 - **Post-update scope restart prompt** after installing a newer APK.
-- **Official model images** downloaded from Huawei's CDN only after Smart Audio reports an exact device and color identity; manual and built-in images remain available as fallbacks.
+- **Official model images** downloaded from Huawei's CDN after modern devices report an exact model and color identity over Bluetooth; manual and built-in images remain available as fallbacks.
 
 ## Requirements
 
@@ -63,11 +65,12 @@ The unified build supports the 11 models below in one APK. Model-specific test A
 3. Select the recommended scopes:
    - `com.android.bluetooth`
    - `com.android.settings`
-   - `com.huawei.smartaudio`
    - `com.milink.service`
    - `com.xiaomi.bluetooth`
 4. Reboot the phone, or restart the scoped apps from HuaweiPods.
-5. Connect a supported device and view its integrated capabilities in HuaweiPods, Super Island, Fusion Device Center, or the system Bluetooth detail page. If a renamed device is not identified, select its actual model manually in HuaweiPods.
+5. Connect a supported device and view its integrated capabilities in HuaweiPods, Super Island, Fusion Device Center, or the system Bluetooth detail page. Modern models are identified from their protocol identity; if a renamed or legacy device is not identified, select its actual model once in HuaweiPods.
+
+The release build no longer needs to install, run, or hook HUAWEI AI Life Audio for official images. Modern models provide the model and color identity over Bluetooth; legacy models can browse the verified Huawei color catalog in the image settings and ask the user to confirm once. Failures always fall back to cached or bundled images and never guess the default color.
 
 For model-specific retesting and protocol capture, join QQ group `1022359908`.
 

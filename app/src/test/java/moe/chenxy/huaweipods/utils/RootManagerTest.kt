@@ -11,7 +11,6 @@ class RootManagerTest {
         val ordered = RootManager.orderedRestartTargets(
             listOf(
                 "com.android.bluetooth",
-                "com.huawei.smartaudio",
                 "com.xiaomi.bluetooth",
                 "com.android.settings",
                 "com.milink.service",
@@ -20,7 +19,6 @@ class RootManagerTest {
 
         assertEquals(
             listOf(
-                "com.huawei.smartaudio",
                 "com.android.settings",
                 "com.milink.service",
                 "com.xiaomi.bluetooth",

@@ -4,6 +4,13 @@ package moe.chenxy.huaweipods.pods
 internal object HuaweiAncPackets {
     private val huaweiBatteryQuery =
         packet(0x5A, 0x00, 0x09, 0x00, 0x01, 0x08, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0xFB, 0xB9)
+    private val huaweiDeviceInfoQuery = packet(
+        0x5A, 0x00, 0x21, 0x00, 0x01, 0x07,
+        0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00, 0x05, 0x00,
+        0x06, 0x00, 0x07, 0x00, 0x08, 0x00, 0x09, 0x00, 0x0A, 0x00,
+        0x0B, 0x00, 0x0C, 0x00, 0x0F, 0x00, 0x18, 0x00, 0x19, 0x00,
+        0xDF, 0xF3,
+    )
     private val modernFreeBudsCurrentStateQuery =
         packet(0x5A, 0x00, 0x05, 0x00, 0x2B, 0x2A, 0x01, 0x00, 0x42, 0x7E)
 
@@ -86,6 +93,12 @@ internal object HuaweiAncPackets {
 
     fun batteryQuery(route: HuaweiDeviceRoute): ByteArray? =
         huaweiBatteryQuery.takeIf { route.supportsRfcommBattery }?.copyOf()
+
+    fun deviceInfoQuery(route: HuaweiDeviceRoute): ByteArray? =
+        huaweiDeviceInfoQuery.takeIf { route.supportsRfcommBattery }?.copyOf()
+
+    /** 用户点选未知设备时的 route-free 身份查询；响应仍必须经过严格 DeviceInfo 解析与白名单映射。 */
+    fun routeFreeDeviceInfoQuery(): ByteArray = huaweiDeviceInfoQuery.copyOf()
 
     fun currentStateQuery(route: HuaweiDeviceRoute): ByteArray? =
         modernFreeBudsCurrentStateQuery.takeIf { route.supportsAncStateReadback }?.copyOf()

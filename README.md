@@ -12,7 +12,8 @@
 [![License](https://img.shields.io/github/license/Nshpiter/HuaweiPods?style=flat-square)](LICENSE)
 
 [下载安装](https://github.com/Nshpiter/HuaweiPods/releases) ·
-[使用文档](docs/guide/getting-started.md) ·
+[使用文档](https://huaweipods.npiter.de/) ·
+[赞助支持](docs/sponsor/index.md) ·
 [问题反馈](https://github.com/Nshpiter/HuaweiPods/issues) ·
 QQ群 `1022359908`
 
@@ -51,7 +52,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 - 接入融合设备中心，并支持已配对设备间流转
 - 显示左右耳、充电盒或眼镜左右镜腿电量
 - 按机型提供主动降噪、通透模式、降噪等级和手势设置
-- 从华为智慧音频读取当前设备的精确资源身份，并从华为官方 CDN 校验、缓存对应机型与配色图片
+- 直接从蓝牙协议读取现代型号的精确资源身份，并从华为官方 CDN 校验、缓存对应机型与配色图片
 - 耳机名称被修改或无法自动识别时，可按蓝牙地址手动选择型号
 - 首次启动提供设置引导，并可在应用内检查 GitHub 更新
 - 覆盖安装新版本后提示重启作用域，无需直接重启手机
@@ -71,12 +72,13 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 
    - `com.android.bluetooth`
    - `com.android.settings`
-   - `com.huawei.smartaudio`
    - `com.milink.service`
    - `com.xiaomi.bluetooth`
 
 4. 在 HuaweiPods 内重启相关作用域，或重启手机。
-5. 连接设备后，即可在 HuaweiPods、蓝牙详情页、超级岛或融合设备中心查看已接入能力。若改过蓝牙名称而未识别，请在 HuaweiPods 中手动选择真实型号。
+5. 连接设备后，即可在 HuaweiPods、蓝牙详情页、超级岛或融合设备中心查看已接入能力。现代型号会直接读取设备标识；改名设备或旧协议型号识别失败时，再在 HuaweiPods 中选择一次真实型号。
+
+正式版不需要安装或运行华为智慧音频来获取图片：现代型号由蓝牙协议直接确认机型与配色，旧协议型号可在图片设置中检索华为官方配色并手动确认。下载失败时始终回退到已有缓存或内置图，不会猜测默认配色。
 
 更完整的安装说明见 [快速开始](docs/guide/getting-started.md)。
 
@@ -100,7 +102,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 ./gradlew :app:assembleDebug
 ```
 
-`release` 只在华为智慧音频中读取当前设备的资源身份，用于下载官方机型图片，不采集协议；`debug` 另外包含协议采集功能。两者使用相同应用 ID，无法同时安装。
+`release` 不注入华为智慧音频，直接从系统蓝牙协议读取现代型号的资源身份；`debug` 另外包含面向适配工作的智慧音频协议采集功能。两者使用相同应用 ID，无法同时安装。
 
 ## 致谢
 

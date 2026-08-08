@@ -21,10 +21,11 @@ class PodImageProviderAccessPolicyTest {
     }
 
     @Test
-    fun `only module and Smart Audio may submit an identity`() {
-        assertTrue(PodImageProviderAccessPolicy.maySubmitSmartAudioIdentity("moe.chenxy.huaweipods"))
-        assertTrue(PodImageProviderAccessPolicy.maySubmitSmartAudioIdentity("com.huawei.smartaudio"))
-        assertFalse(PodImageProviderAccessPolicy.maySubmitSmartAudioIdentity("com.android.settings"))
-        assertFalse(PodImageProviderAccessPolicy.maySubmitSmartAudioIdentity("com.example.thirdparty"))
+    fun `only trusted identity producers may submit an identity`() {
+        assertTrue(PodImageProviderAccessPolicy.maySubmitOfficialImageIdentity("moe.chenxy.huaweipods"))
+        assertTrue(PodImageProviderAccessPolicy.maySubmitOfficialImageIdentity("com.android.bluetooth"))
+        assertFalse(PodImageProviderAccessPolicy.maySubmitOfficialImageIdentity("com.huawei.smartaudio"))
+        assertFalse(PodImageProviderAccessPolicy.maySubmitOfficialImageIdentity("com.android.settings"))
+        assertFalse(PodImageProviderAccessPolicy.maySubmitOfficialImageIdentity("com.example.thirdparty"))
     }
 }

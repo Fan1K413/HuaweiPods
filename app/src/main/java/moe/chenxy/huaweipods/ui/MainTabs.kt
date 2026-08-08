@@ -38,9 +38,11 @@ import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.ui.dialogs.RestartScope
 import moe.chenxy.huaweipods.ui.dialogs.RestartScopeDialog
 import moe.chenxy.huaweipods.ui.dialogs.PodImageConfigDialog
+import moe.chenxy.huaweipods.ui.dialogs.processLegacyOfficialImagePromptGate
 import moe.chenxy.huaweipods.ui.pages.EarphonesTabPage
 import moe.chenxy.huaweipods.ui.pages.HomePage
 import moe.chenxy.huaweipods.ui.pages.SettingsPage
+import moe.chenxy.huaweipods.ui.components.AppIcons
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -84,6 +86,7 @@ internal fun MainTabsScaffold(
     huaweiAncLevel: Int,
     onHuaweiAncLevelChange: (Int) -> Unit,
     earphonePrefs: List<EarphonePref>,
+    deviceRoute: HuaweiDeviceRoute,
     connectedDeviceAddress: String,
     connectingDeviceAddress: String?,
     showConnectErrorDialog: Boolean,
@@ -108,6 +111,8 @@ internal fun MainTabsScaffold(
     onFakeDeviceIdChange: (String) -> Unit,
     onOpenTheme: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenDocumentation: () -> Unit,
+    onOpenSponsor: () -> Unit,
     showRestartScopeDialog: Boolean,
     restartingScopes: Boolean,
     onShowRestartScopeDialog: () -> Unit,
@@ -132,6 +137,38 @@ internal fun MainTabsScaffold(
         it.address.equals(connectedDeviceAddress, ignoreCase = true)
     }
     var showPodImageDialog by remember { mutableStateOf(false) }
+    var autoOpenOfficialOptions by remember { mutableStateOf(false) }
+
+    fun openPodImageDialogManually() {
+        autoOpenOfficialOptions = false
+        showPodImageDialog = true
+    }
+
+    fun dismissPodImageDialog() {
+        autoOpenOfficialOptions = false
+        showPodImageDialog = false
+    }
+
+    LaunchedEffect(
+        showEarphoneDetail,
+        deviceRoute,
+        connectedDeviceAddress,
+        currentEarphonePref?.boxImagePath,
+        currentEarphonePref?.cloudBoxImagePath,
+    ) {
+        if (
+            processLegacyOfficialImagePromptGate.claimIfEligible(
+                detailVisible = showEarphoneDetail,
+                deviceRoute = deviceRoute,
+                connectedAddress = connectedDeviceAddress,
+                manualBoxImagePath = currentEarphonePref?.boxImagePath,
+                cloudBoxImagePath = currentEarphonePref?.cloudBoxImagePath,
+            )
+        ) {
+            autoOpenOfficialOptions = true
+            showPodImageDialog = true
+        }
+    }
 
     LaunchedEffect(selectedTab) {
         val targetPage = selectedTab.ordinal
@@ -190,6 +227,8 @@ internal fun MainTabsScaffold(
                         onPairedBluetoothClick = onPairedBluetoothClick,
                         pageBottomContentPadding = pageBottomContentPadding,
                         restartingScopes = restartingScopes,
+                        onOpenDocumentation = onOpenDocumentation,
+                        onOpenSponsor = onOpenSponsor,
                         onShowRestartScopeDialog = onShowRestartScopeDialog,
                     )
 
@@ -212,7 +251,7 @@ internal fun MainTabsScaffold(
                         onConnectedDeviceClick = onConnectedDeviceClick,
                         onDismissConnectError = onDismissConnectError,
                         onBackToDevicePicker = onBackToDevicePicker,
-                        onOpenPodImageConfig = { showPodImageDialog = true },
+                        onOpenPodImageConfig = ::openPodImageDialogManually,
                         onOpenSystemHeadsetSettings = onOpenSystemHeadsetSettings,
                     )
 
@@ -243,7 +282,7 @@ internal fun MainTabsScaffold(
             if (isLandscapeDetail) {
                 LandscapeDetailActions(
                     onBackToDevicePicker = onBackToDevicePicker,
-                    onOpenPodImageConfig = { showPodImageDialog = true },
+                    onOpenPodImageConfig = ::openPodImageDialogManually,
                     onOpenSystemHeadsetSettings = onOpenSystemHeadsetSettings,
                 )
             }
@@ -262,10 +301,12 @@ internal fun MainTabsScaffold(
             earphones = earphonePrefs,
             currentAddress = connectedDeviceAddress,
             currentName = displayTitle,
-            onDismissRequest = { showPodImageDialog = false },
+            deviceRoute = deviceRoute,
+            autoOpenOfficialOptions = autoOpenOfficialOptions,
+            onDismissRequest = ::dismissPodImageDialog,
             onSave = { address, name, images, clearedImages ->
                 onSavePodImages(address, name, images, clearedImages)
-                showPodImageDialog = false
+                dismissPodImageDialog()
             },
         )
 
@@ -282,6 +323,8 @@ private fun ModuleTabPage(
     onPairedBluetoothClick: () -> Unit,
     pageBottomContentPadding: Dp,
     restartingScopes: Boolean,
+    onOpenDocumentation: () -> Unit,
+    onOpenSponsor: () -> Unit,
     onShowRestartScopeDialog: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
@@ -292,7 +335,20 @@ private fun ModuleTabPage(
                 largeTitle = stringResource(R.string.app_name),
                 scrollBehavior = scrollBehavior,
                 actions = {
-
+                    IconButton(onClick = onOpenDocumentation) {
+                        Icon(
+                            imageVector = AppIcons.Documentation,
+                            contentDescription = stringResource(R.string.documentation_title),
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                    IconButton(onClick = onOpenSponsor) {
+                        Icon(
+                            imageVector = AppIcons.Support,
+                            contentDescription = stringResource(R.string.sponsor_title),
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
                     IconButton(
                         onClick = {
                             if (!restartingScopes) onShowRestartScopeDialog()
@@ -522,7 +578,6 @@ private fun EarphoneDetailActions(
 private val restartScopeOptions = listOf(
     RestartScope("com.android.bluetooth", R.string.restart_scope_bluetooth_service),
     RestartScope("com.android.settings", R.string.restart_scope_settings),
-    RestartScope("com.huawei.smartaudio", R.string.restart_scope_smart_audio),
     RestartScope("com.milink.service", R.string.restart_scope_milink_service),
     RestartScope("com.xiaomi.bluetooth", R.string.restart_scope_mi_bluetooth),
 )

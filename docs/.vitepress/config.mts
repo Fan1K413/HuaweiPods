@@ -23,6 +23,7 @@ export default defineConfig({
     nav: [
       { text: '快速开始', link: '/guide/getting-started' },
       { text: '支持状态', link: '/support/' },
+      { text: '赞助支持', link: '/sponsor/' },
       { text: 'GitHub', link: repositoryUrl }
     ],
     sidebar: [
@@ -30,7 +31,8 @@ export default defineConfig({
         text: 'HuaweiPods',
         items: [
           { text: '快速开始', link: '/guide/getting-started' },
-          { text: '支持状态', link: '/support/' }
+          { text: '支持状态', link: '/support/' },
+          { text: '赞助支持', link: '/sponsor/' }
         ]
       }
     ],

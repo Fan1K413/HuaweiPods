@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import android.widget.Toast
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -69,11 +72,14 @@ import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
 import moe.chenxy.huaweipods.pods.supportsGestureConfiguration
 import moe.chenxy.huaweipods.pods.supportsTransparency
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private const val GESTURE_TAG = "HuaweiPods-Gesture"
+private const val POD_DETAIL_IMAGE_MAX_PIXELS = 1024
 
 @Composable
 fun PodDetailPage(
@@ -221,21 +227,46 @@ fun PodDetailPage(
     }
 }
 @Composable
-private fun rememberPodImagePainter(path: String?, route: HuaweiDeviceRoute) = remember(path, route) {
-    path?.let {
-        runCatching { BitmapFactory.decodeFile(it) }
-            .getOrNull()
-            ?.let { bitmap -> BitmapPainter(bitmap.asImageBitmap()) }
-    }
-} ?: painterResource(
-    when (route) {
+private fun rememberPodImagePainter(path: String?, route: HuaweiDeviceRoute): Painter {
+    val fallback = painterResource(
+        when (route) {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> R.drawable.img_freebuds5_box
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> R.drawable.img_freebuds6i_box
         HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> R.drawable.img_freeclip2_box
         HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> R.drawable.img_eyewear2_box
         else -> R.drawable.img_box
-    },
-)
+        },
+    )
+    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = path) {
+        value = withContext(Dispatchers.IO) {
+            path?.let(::decodePodDetailImage)
+        }
+    }
+    return bitmap?.let { loaded ->
+        remember(loaded) { BitmapPainter(loaded.asImageBitmap()) }
+    } ?: fallback
+}
+
+private fun decodePodDetailImage(path: String): Bitmap? = runCatching {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+
+    var sampleSize = 1
+    while (
+        bounds.outWidth / sampleSize > POD_DETAIL_IMAGE_MAX_PIXELS ||
+        bounds.outHeight / sampleSize > POD_DETAIL_IMAGE_MAX_PIXELS
+    ) {
+        sampleSize *= 2
+    }
+    BitmapFactory.decodeFile(
+        path,
+        BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        },
+    )
+}.getOrNull()
 
 private fun LazyListScope.podControlItems(
     batteryParams: BatteryParams,

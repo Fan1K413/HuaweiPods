@@ -9,6 +9,7 @@ import moe.chenxy.huaweipods.pods.isHuaweiDeviceRouteEnabled
 object DeviceRoutePrefs {
     private const val PREF_KEY_PREFIX = "device_route_v1_"
     private val bluetoothAddressPattern = Regex("^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$")
+    private val bindingLock = Any()
 
     fun find(prefs: SharedPreferences, address: String?): HuaweiDeviceRoute? {
         val key = bindingKey(address) ?: return null
@@ -32,13 +33,52 @@ object DeviceRoutePrefs {
         address: String,
         route: HuaweiDeviceRoute,
     ) {
-        bind(prefs, address, route)
-        service
-            ?.getRemotePreferences(ConfigManager.PREFS_NAME)
-            ?.let { bind(it, address, route) }
+        synchronized(bindingLock) {
+            bindLocked(prefs, address, route)
+            runCatching {
+                service
+                    ?.getRemotePreferences(ConfigManager.PREFS_NAME)
+                    ?.let { bindLocked(it, address, route) }
+            }
+        }
     }
 
     fun bind(
+        prefs: SharedPreferences,
+        address: String,
+        route: HuaweiDeviceRoute,
+    ): Boolean = synchronized(bindingLock) {
+        bindLocked(prefs, address, route)
+    }
+
+    /**
+     * 自动识别只允许填补空绑定或确认同一路由，绝不覆盖用户已经手选的不同路由。
+     * 本地与远程写入和手动 bind 共用一把进程锁，封住 watchdog 后迟到 Binder 的竞态。
+     */
+    fun bindIfAbsent(
+        prefs: SharedPreferences,
+        service: XposedService?,
+        address: String,
+        route: HuaweiDeviceRoute,
+    ): Boolean = synchronized(bindingLock) {
+        if (!bindIfAbsentLocked(prefs, address, route)) return@synchronized false
+        runCatching {
+            service
+                ?.getRemotePreferences(ConfigManager.PREFS_NAME)
+                ?.let { bindIfAbsentLocked(it, address, route) }
+        }
+        true
+    }
+
+    internal fun bindIfAbsent(
+        prefs: SharedPreferences,
+        address: String,
+        route: HuaweiDeviceRoute,
+    ): Boolean = synchronized(bindingLock) {
+        bindIfAbsentLocked(prefs, address, route)
+    }
+
+    private fun bindLocked(
         prefs: SharedPreferences,
         address: String,
         route: HuaweiDeviceRoute,
@@ -54,24 +94,39 @@ object DeviceRoutePrefs {
         }.getOrDefault(false)
     }
 
+    private fun bindIfAbsentLocked(
+        prefs: SharedPreferences,
+        address: String,
+        route: HuaweiDeviceRoute,
+    ): Boolean {
+        val key = bindingKey(address) ?: return false
+        if (!isHuaweiDeviceRouteEnabled(route)) return false
+        val existingRoute = prefs.getString(key, null)?.let(::routeFromStorage)
+        if (existingRoute != null) return existingRoute == route
+        return bindLocked(prefs, address, route)
+    }
+
     fun syncWithRemote(
         prefs: SharedPreferences,
         service: XposedService?,
     ) {
-        val remotePrefs = service?.getRemotePreferences(ConfigManager.PREFS_NAME) ?: return
-        val localBindings = validBindings(prefs)
-        val remoteBindings = validBindings(remotePrefs)
+        synchronized(bindingLock) {
+            val remotePrefs = service?.getRemotePreferences(ConfigManager.PREFS_NAME)
+                ?: return@synchronized
+            val localBindings = validBindings(prefs)
+            val remoteBindings = validBindings(remotePrefs)
 
-        if (localBindings.isNotEmpty()) {
-            val remoteEditor = remotePrefs.edit()
-            localBindings.forEach(remoteEditor::putString)
-            remoteEditor.commit()
-        }
-        val missingLocalBindings = remoteBindings.filterKeys { it !in localBindings }
-        if (missingLocalBindings.isNotEmpty()) {
-            val localEditor = prefs.edit()
-            missingLocalBindings.forEach(localEditor::putString)
-            localEditor.commit()
+            if (localBindings.isNotEmpty()) {
+                val remoteEditor = remotePrefs.edit()
+                localBindings.forEach(remoteEditor::putString)
+                remoteEditor.commit()
+            }
+            val missingLocalBindings = remoteBindings.filterKeys { it !in localBindings }
+            if (missingLocalBindings.isNotEmpty()) {
+                val localEditor = prefs.edit()
+                missingLocalBindings.forEach(localEditor::putString)
+                localEditor.commit()
+            }
         }
     }
 

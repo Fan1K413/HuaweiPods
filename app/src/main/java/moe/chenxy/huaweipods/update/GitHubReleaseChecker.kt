@@ -37,12 +37,15 @@ internal data class ReleaseTag(
 object GitHubReleaseChecker {
     const val LATEST_RELEASE_API =
         "https://api.github.com/repos/Nshpiter/HuaweiPods/releases/latest"
+    const val LATEST_RELEASE_PAGE =
+        "https://github.com/Nshpiter/HuaweiPods/releases/latest"
 
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 10_000
     private const val MAX_RESPONSE_CHARS = 1_048_576
     internal const val MAX_CHANGELOG_CHARS = 32_768
     private const val RELEASE_PATH_PREFIX = "/Nshpiter/HuaweiPods/releases/"
+    private const val RELEASE_TAG_PATH_PREFIX = "${RELEASE_PATH_PREFIX}tag/"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -82,6 +85,35 @@ object GitHubReleaseChecker {
         )
     }
 
+    /**
+     * GitHub's public /releases/latest page redirects to the latest release tag. This provides a
+     * small fallback for networks where github.com works but api.github.com is unavailable.
+     */
+    internal fun parseLatestReleaseRedirect(location: String): Result<GitHubRelease> = runCatching {
+        val releaseUrl = location.trim()
+        require(isTrustedReleaseUrl(releaseUrl)) { "Untrusted GitHub release redirect" }
+
+        val uri = URI(releaseUrl)
+        require(uri.query == null && uri.fragment == null) { "Unexpected release redirect suffix" }
+        val path = uri.path
+        require(path.startsWith(RELEASE_TAG_PATH_PREFIX, ignoreCase = true)) {
+            "Invalid GitHub release redirect"
+        }
+        val tag = path.substring(RELEASE_TAG_PATH_PREFIX.length)
+        require(tag.isNotBlank() && tag == tag.trim() && '/' !in tag) {
+            "Invalid GitHub release tag"
+        }
+        val releaseTag = requireNotNull(parseTag(tag)) { "Invalid release tag: $tag" }
+
+        GitHubRelease(
+            tag = tag,
+            versionCode = releaseTag.versionCode,
+            versionName = releaseTag.versionName,
+            releaseUrl = releaseUrl,
+            changelog = "",
+        )
+    }
+
     internal fun isTrustedReleaseUrl(value: String): Boolean {
         val uri = runCatching { URI(value) }.getOrNull() ?: return false
         if (!uri.scheme.equals("https", ignoreCase = true)) return false
@@ -94,67 +126,108 @@ object GitHubReleaseChecker {
         currentVersionCode: Long,
         currentVersionName: String,
     ): UpdateCheckResult {
-        val connection = try {
-            (URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                instanceFollowRedirects = false
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-                setRequestProperty("User-Agent", "HuaweiPods/${currentVersionName.ifBlank { "unknown" }}")
-            }
-        } catch (error: Exception) {
-            return UpdateCheckResult.Failure(error.safeMessage("Unable to create update request"))
+        val userAgent = "HuaweiPods/${currentVersionName.ifBlank { "unknown" }}"
+        val apiResult = requestLatestReleaseFromApi(userAgent)
+        val release = apiResult.getOrElse { apiError ->
+            return requestLatestReleaseFromPage(userAgent).fold(
+                onSuccess = { fallbackRelease ->
+                    classify(fallbackRelease, currentVersionCode)
+                },
+                onFailure = { pageError ->
+                    UpdateCheckResult.Failure(
+                        message = buildString {
+                            append(apiError.safeMessage("GitHub API request failed"))
+                            append("; ")
+                            append(pageError.safeMessage("GitHub release page request failed"))
+                        },
+                        statusCode = (apiError as? GitHubHttpStatusException)?.statusCode
+                            ?: (pageError as? GitHubHttpStatusException)?.statusCode,
+                    )
+                },
+            )
         }
+        return classify(release, currentVersionCode)
+    }
 
-        return try {
+    private fun requestLatestReleaseFromApi(userAgent: String): Result<GitHubRelease> = runCatching {
+        val connection = openConnection(LATEST_RELEASE_API, userAgent).apply {
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        }
+        try {
             val statusCode = connection.responseCode
             if (statusCode != HttpURLConnection.HTTP_OK) {
-                UpdateCheckResult.Failure(
-                    message = "GitHub update check failed with HTTP $statusCode",
-                    statusCode = statusCode,
-                )
-            } else {
-                val payload = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                    buildString {
-                        val buffer = CharArray(DEFAULT_BUFFER_SIZE)
-                        while (true) {
-                            val count = reader.read(buffer)
-                            if (count < 0) break
-                            if (length + count > MAX_RESPONSE_CHARS) {
-                                throw IOException("GitHub release response is too large")
-                            }
-                            append(buffer, 0, count)
-                        }
-                    }
-                }
-                parseReleaseResponse(payload).fold(
-                    onSuccess = { release ->
-                        if (isNewer(ReleaseTag(release.versionCode, release.versionName), currentVersionCode)) {
-                            UpdateCheckResult.Available(release)
-                        } else {
-                            UpdateCheckResult.UpToDate(release)
-                        }
-                    },
-                    onFailure = { error ->
-                        UpdateCheckResult.Failure(error.safeMessage("Invalid GitHub release response"))
-                    },
-                )
+                throw GitHubHttpStatusException("GitHub API", statusCode)
             }
-        } catch (error: Exception) {
-            UpdateCheckResult.Failure(error.safeMessage("Unable to check for updates"))
+            parseReleaseResponse(readLimitedResponse(connection)).getOrThrow()
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun requestLatestReleaseFromPage(userAgent: String): Result<GitHubRelease> = runCatching {
+        val connection = openConnection(LATEST_RELEASE_PAGE, userAgent)
+        try {
+            val statusCode = connection.responseCode
+            if (statusCode !in REDIRECT_STATUS_CODES) {
+                throw GitHubHttpStatusException("GitHub release page", statusCode)
+            }
+            val location = connection.getHeaderField("Location").orEmpty()
+            parseLatestReleaseRedirect(location).getOrThrow()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun openConnection(url: String, userAgent: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = false
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("User-Agent", userAgent)
+        }
+
+    private fun readLimitedResponse(connection: HttpURLConnection): String =
+        connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+            buildString {
+                val buffer = CharArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = reader.read(buffer)
+                    if (count < 0) break
+                    if (length + count > MAX_RESPONSE_CHARS) {
+                        throw IOException("GitHub release response is too large")
+                    }
+                    append(buffer, 0, count)
+                }
+            }
+        }
+
+    private fun classify(release: GitHubRelease, currentVersionCode: Long): UpdateCheckResult =
+        if (isNewer(ReleaseTag(release.versionCode, release.versionName), currentVersionCode)) {
+            UpdateCheckResult.Available(release)
+        } else {
+            UpdateCheckResult.UpToDate(release)
+        }
 
     private fun Throwable.safeMessage(fallback: String): String =
         message?.takeIf { it.isNotBlank() } ?: fallback
 
     private val TAG_PATTERN = Regex("^(\\d+)-(.+)$")
     private val VERSION_NAME_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._+\\-]*$")
+    private val REDIRECT_STATUS_CODES = setOf(
+        HttpURLConnection.HTTP_MOVED_PERM,
+        HttpURLConnection.HTTP_MOVED_TEMP,
+        HttpURLConnection.HTTP_SEE_OTHER,
+        307,
+        308,
+    )
 }
+
+private class GitHubHttpStatusException(
+    endpoint: String,
+    val statusCode: Int,
+) : IOException("$endpoint returned HTTP $statusCode")
 
 @Serializable
 private data class GitHubReleaseResponse(

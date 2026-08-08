@@ -88,6 +88,39 @@ class GitHubReleaseCheckerTest {
     }
 
     @Test
+    fun `parses trusted latest release redirect without release notes`() {
+        val result = GitHubReleaseChecker.parseLatestReleaseRedirect(
+            "https://github.com/Nshpiter/HuaweiPods/releases/tag/6-1.3.1",
+        )
+
+        assertEquals(
+            GitHubRelease(
+                tag = "6-1.3.1",
+                versionCode = 6L,
+                versionName = "1.3.1",
+                releaseUrl = "https://github.com/Nshpiter/HuaweiPods/releases/tag/6-1.3.1",
+                changelog = "",
+            ),
+            result.getOrNull(),
+        )
+    }
+
+    @Test
+    fun `rejects malformed or untrusted latest release redirects`() {
+        listOf(
+            "https://github.com/other/HuaweiPods/releases/tag/6-1.3.1",
+            "https://github.com/Nshpiter/HuaweiPods/releases/latest",
+            "https://github.com/Nshpiter/HuaweiPods/releases/tag/v1.3.1",
+            "https://github.com/Nshpiter/HuaweiPods/releases/tag/6-1.3.1/extra",
+            "https://github.com/Nshpiter/HuaweiPods/releases/tag/6-1.3.1?download=1",
+            "https://github.com/Nshpiter/HuaweiPods/releases/tag/6-1.3.1%20",
+            "https://github.com/Nshpiter/HuaweiPods/releases/tag/6-1.3.1%09",
+        ).forEach { location ->
+            assertTrue(location, GitHubReleaseChecker.parseLatestReleaseRedirect(location).isFailure)
+        }
+    }
+
+    @Test
     fun `rejects a release response with an untrusted URL`() {
         val result = GitHubReleaseChecker.parseReleaseResponse(
             """
