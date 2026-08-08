@@ -39,6 +39,34 @@ class PodImageLoaderTest {
     }
 
     @Test
+    fun `FreeBuds 5 uses its dedicated fallback images`() {
+        assertEquals(
+            R.drawable.img_freebuds5_box,
+            PodImageLoader.modelFallbackResId(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+                PodImageResource.BOX,
+                R.drawable.img_box,
+            ),
+        )
+        assertEquals(
+            R.drawable.img_freebuds5_left,
+            PodImageLoader.modelFallbackResId(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+                PodImageResource.LEFT,
+                R.drawable.img_left,
+            ),
+        )
+        assertEquals(
+            R.drawable.img_freebuds5_right,
+            PodImageLoader.modelFallbackResId(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+                PodImageResource.RIGHT,
+                R.drawable.img_right,
+            ),
+        )
+    }
+
+    @Test
     fun `FreeBuds 6i uses its dedicated fallback images`() {
         assertEquals(
             R.drawable.img_freebuds6i_box,
@@ -95,17 +123,43 @@ class PodImageLoaderTest {
     }
 
     @Test
+    fun `Eyewear 2 uses its device image without duplicating it in the island`() {
+        assertEquals(
+            R.drawable.img_eyewear2_box,
+            PodImageLoader.modelFallbackResId(
+                HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+                PodImageResource.BOX,
+                R.drawable.img_box,
+            ),
+        )
+        assertEquals(
+            R.drawable.img_left,
+            PodImageLoader.modelFallbackResId(
+                HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+                PodImageResource.LEFT,
+                R.drawable.img_left,
+            ),
+        )
+        assertEquals(
+            R.drawable.img_right,
+            PodImageLoader.modelFallbackResId(
+                HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
+                PodImageResource.RIGHT,
+                R.drawable.img_right,
+            ),
+        )
+    }
+
+    @Test
     fun `models without dedicated images keep every global fallback`() {
         val routesWithoutDedicatedImages = listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
             HuaweiDeviceRoute.HUAWEI_FREECLIP,
             HuaweiDeviceRoute.HUAWEI_EYEWEAR,
-            HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
         )
         val globalFallbacks = mapOf(
             PodImageResource.BOX to R.drawable.img_box,

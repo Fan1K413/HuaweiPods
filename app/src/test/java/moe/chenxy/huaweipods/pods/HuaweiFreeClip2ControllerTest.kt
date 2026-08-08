@@ -1,7 +1,9 @@
 package moe.chenxy.huaweipods.pods
 
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class HuaweiFreeClip2ControllerTest {
@@ -38,9 +40,117 @@ class HuaweiFreeClip2ControllerTest {
 
     @Test
     fun `sound effect presets match the guided capture`() {
-        assertPacket("5A0006002B4901010A9E71", FreeClip2SoundEffect.PRESET_1.packet())
-        assertPacket("5A0006002B490101030F58", FreeClip2SoundEffect.PRESET_2.packet())
-        assertPacket("5A0006002B49010109AE12", FreeClip2SoundEffect.PRESET_3.packet())
+        assertPacket("5A0006002B490101012F1A", FreeClip2SoundEffect.DEFAULT.packet())
+        assertPacket("5A0006002B4901010A9E71", FreeClip2SoundEffect.SPORT_ENHANCE.packet())
+        assertPacket("5A0006002B490101030F58", FreeClip2SoundEffect.TREBLE_ENHANCE.packet())
+        assertPacket("5A0006002B49010109AE12", FreeClip2SoundEffect.CLEAR_VOICE.packet())
+    }
+
+    @Test
+    fun `state query packets match the captured protocol`() {
+        assertPacket(
+            "5A000A002BB4010118020003009B3F",
+            HuaweiFreeClip2Controller.spatialAudioStateQueryPacket(),
+        )
+        assertPacket(
+            "5A0005002B4A02008C46",
+            HuaweiFreeClip2Controller.soundEffectStateQueryPacket(),
+        )
+    }
+
+    @Test
+    fun `parses latest spatial state from a concatenated RFCOMM read`() {
+        val unrelated = hex("5A0006002B040201003171")
+        val older = hex("5A000C002BB4010118020100030100D72A")
+        val latest = hex("5A000C002BB40101180201020301030A21")
+
+        val state = HuaweiFreeClip2Controller.parseSpatialAudioState(
+            byteArrayOf(0x01, 0x02) + unrelated + older + latest,
+        )
+
+        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, state?.mode)
+        assertEquals(FreeClip2SpatialScene.CONCERT_HALL, state?.scene)
+        assertNull(state?.effect)
+    }
+
+    @Test
+    fun `parses latest built-in sound effect from a concatenated RFCOMM read`() {
+        val sport = hex("5A0014002B4A01010102010A0304010A0309040101080074C0")
+        val clearVoice = hex("5A0014002B4A0101010201090304010A03090401010800715F")
+
+        val state = HuaweiFreeClip2Controller.parseSoundEffectState(sport + clearVoice)
+
+        assertEquals(FreeClip2SoundEffect.CLEAR_VOICE, state?.effect)
+        assertNull(state?.mode)
+        assertNull(state?.scene)
+    }
+
+    @Test
+    fun `combines spatial and sound effect state from one RFCOMM read`() {
+        val spatial = hex("5A000C002BB401011802010103010281DC")
+        val effect = hex("5A0014002B4A0101010201010304010A030904010108006AF7")
+
+        val state = HuaweiFreeClip2Controller.parseAudioState(spatial + effect)
+
+        assertEquals(FreeClip2SpatialAudioMode.FIXED, state?.mode)
+        assertEquals(FreeClip2SpatialScene.CINEMA, state?.scene)
+        assertEquals(FreeClip2SoundEffect.DEFAULT, state?.effect)
+    }
+
+    @Test
+    fun `rejects unknown or truncated audio state frames`() {
+        assertNull(
+            HuaweiFreeClip2Controller.parseSpatialAudioState(
+                frameWithCrc("5A000C002BB401011802017F030100"),
+            ),
+        )
+        assertNull(
+            HuaweiFreeClip2Controller.parseSoundEffectState(
+                frameWithCrc("5A0014002B4A01010102017F0304010A03090401010800"),
+            ),
+        )
+        assertNull(
+            HuaweiFreeClip2Controller.parseSpatialAudioState(
+                hex("5A000C002BB4010118020102"),
+            ),
+        )
+    }
+
+    @Test
+    fun `rejects structurally valid state frames with bad CRC`() {
+        val spatial = hex("5A000C002BB40101180201020301030A21").also {
+            it[it.lastIndex] = (it.last().toInt() xor 0x01).toByte()
+        }
+        val effect = hex("5A0014002B4A0101010201090304010A03090401010800715F").also {
+            it[it.lastIndex - 1] = (it[it.lastIndex - 1].toInt() xor 0x01).toByte()
+        }
+
+        assertNull(HuaweiFreeClip2Controller.parseSpatialAudioState(spatial))
+        assertNull(HuaweiFreeClip2Controller.parseSoundEffectState(effect))
+    }
+
+    @Test
+    fun `skips bad CRC frame and resynchronizes to following verified frame`() {
+        val corrupt = hex("5A000C002BB40101180201010301028100")
+        val verified = hex("5A000C002BB40101180201020301030A21")
+
+        val state = HuaweiFreeClip2Controller.parseSpatialAudioState(corrupt + verified)
+
+        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, state?.mode)
+        assertEquals(FreeClip2SpatialScene.CONCERT_HALL, state?.scene)
+    }
+
+    @Test
+    fun `enum extra values round trip for broadcasts`() {
+        FreeClip2SpatialAudioMode.entries.forEach {
+            assertEquals(it, FreeClip2SpatialAudioMode.fromExtraValue(it.extraValue))
+        }
+        FreeClip2SpatialScene.entries.forEach {
+            assertEquals(it, FreeClip2SpatialScene.fromExtraValue(it.extraValue))
+        }
+        FreeClip2SoundEffect.entries.forEach {
+            assertEquals(it, FreeClip2SoundEffect.fromExtraValue(it.extraValue))
+        }
     }
 
     @Test
@@ -53,6 +163,27 @@ class HuaweiFreeClip2ControllerTest {
     }
 
     private fun assertPacket(expected: String, actual: ByteArray) {
-        assertArrayEquals(expected.chunked(2).map { it.toInt(16).toByte() }.toByteArray(), actual)
+        assertArrayEquals(hex(expected), actual)
     }
+
+    private fun frameWithCrc(withoutCrc: String): ByteArray {
+        val payload = hex(withoutCrc)
+        var crc = 0
+        payload.forEach { byte ->
+            crc = crc xor ((byte.toInt() and 0xFF) shl 8)
+            repeat(8) {
+                crc = if ((crc and 0x8000) != 0) {
+                    (crc shl 1) xor 0x1021
+                } else {
+                    crc shl 1
+                }
+                crc = crc and 0xFFFF
+            }
+        }
+        return payload + byteArrayOf((crc shr 8).toByte(), crc.toByte())
+    }
+
+    private fun hex(value: String): ByteArray = value.chunked(2)
+        .map { it.toInt(16).toByte() }
+        .toByteArray()
 }

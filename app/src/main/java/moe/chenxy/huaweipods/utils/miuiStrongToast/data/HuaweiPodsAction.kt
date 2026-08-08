@@ -6,6 +6,18 @@ object HuaweiPodsAction {
     private const val PREFIX = "chen.action.huaweipods"
 
     const val EXTRA_DEVICE_ROUTE = "device_route"
+    const val EXTRA_FREECLIP2_AUDIO_KIND = "freeclip2_audio_kind"
+    const val EXTRA_FREECLIP2_AUDIO_VALUE = "freeclip2_audio_value"
+    const val EXTRA_FREECLIP2_SPATIAL_MODE = "spatial_mode"
+    const val EXTRA_FREECLIP2_SPATIAL_SCENE = "spatial_scene"
+    const val EXTRA_FREECLIP2_SOUND_EFFECT = "sound_effect"
+    const val EXTRA_FREECLIP2_AUDIO_CONFIRMED = "freeclip2_audio_confirmed"
+    const val EXTRA_MODULE_BUILD_ID = "module_build_id"
+    const val EXTRA_RESTORE_NOTIFICATION = "restore_notification"
+
+    const val FREECLIP2_AUDIO_KIND_SPATIAL_MODE = "spatial_mode"
+    const val FREECLIP2_AUDIO_KIND_SPATIAL_SCENE = "spatial_scene"
+    const val FREECLIP2_AUDIO_KIND_SOUND_EFFECT = "sound_effect"
 
     const val ACTION_SHOW_PODS_UI = PREFIX + ".show_pods_ui"
     const val ACTION_SEND_STRONG_TOAST = PREFIX + ".sendstrongtoast"
@@ -15,6 +27,8 @@ object HuaweiPodsAction {
     const val ACTION_PODS_UI_INIT = PREFIX + ".ui_init"
     const val ACTION_PODS_UI_CLOSED = PREFIX + ".ui_closed"
     const val ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE = PREFIX + ".module_bluetooth_service_alive"
+    const val ACTION_MODULE_MI_BLUETOOTH_SERVICE_ALIVE =
+        PREFIX + ".module_mi_bluetooth_service_alive"
     const val ACTION_PODS_CONNECTED = PREFIX + ".pods_connected"
     const val ACTION_PODS_DISCONNECTED = PREFIX + ".pods_disconnected"
     const val ACTION_CONNECT_POD_REQUEST = PREFIX + ".connect_pod_request"
@@ -34,6 +48,10 @@ object HuaweiPodsAction {
     const val ACTION_HUAWEI_GESTURE_SET = PREFIX + ".huawei_gesture_set"
     const val ACTION_HUAWEI_GESTURE_REFRESH = PREFIX + ".huawei_gesture_refresh"
     const val ACTION_HUAWEI_GESTURE_CHANGED = PREFIX + ".huawei_gesture_changed"
+    const val ACTION_FREECLIP2_AUDIO_SET = PREFIX + ".freeclip2_audio_set"
+    const val ACTION_FREECLIP2_AUDIO_REFRESH = PREFIX + ".freeclip2_audio_refresh"
+    const val ACTION_FREECLIP2_AUDIO_CHANGED = PREFIX + ".freeclip2_audio_changed"
+    const val ACTION_POD_IMAGES_CHANGED = PREFIX + ".pod_images_changed"
     const val ACTION_CONFIG_CHANGED = PREFIX + ".config_changed"
 
     fun canonical(action: String?): String? = action

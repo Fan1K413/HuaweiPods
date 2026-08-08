@@ -3,7 +3,6 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <queries>
-        <package android:name="com.huawei.smarthome" />
         <package android:name="com.huawei.smartaudio" />
     </queries>
 

@@ -52,17 +52,30 @@ class DeviceCapabilitiesTest {
         assertFalse(HuaweiDeviceRoute.HUAWEI_FREEBUDS3.supportsTransparency)
 
         listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         ).forEach { route ->
-            assertTrue(route.displayName, route.supportsTransparency)
             assertTrue(route.displayName, route.supportsAncStateReadback)
             assertTrue(route.displayName, route.supportsDiscreteAncLevels)
         }
+        assertFalse(HuaweiDeviceRoute.HUAWEI_FREEBUDS5.supportsTransparency)
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        ).forEach { route -> assertTrue(route.displayName, route.supportsTransparency) }
 
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5.supportsTransparency)
         assertTrue(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5.supportsAncStateReadback)
         assertFalse(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5.supportsDiscreteAncLevels)
+
+        enabledHuaweiDeviceRoutes().forEach { route ->
+            assertEquals(
+                route.displayName,
+                route.supportsDiscreteAncLevels,
+                route.ancLevelOptions.isNotEmpty(),
+            )
+        }
     }
 
     @Test

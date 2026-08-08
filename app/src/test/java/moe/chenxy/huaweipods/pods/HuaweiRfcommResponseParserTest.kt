@@ -7,6 +7,23 @@ import org.junit.Test
 
 class HuaweiRfcommResponseParserTest {
     @Test
+    fun `parses every captured FreeBuds 5 ANC state response`() {
+        val states = listOf(
+            "5A0007002B2A010200001531" to HuaweiAncState(NoiseControlMode.OFF),
+            "5A0007002B2A010203015043" to
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x03),
+            "5A0007002B2A010201013621" to
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x01),
+            "5A0007002B2A010200010510" to
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x00),
+        )
+
+        states.forEach { (frame, expected) ->
+            assertEquals(frame, expected, HuaweiRfcommResponseParser.parseAncState(hex(frame)))
+        }
+    }
+
+    @Test
     fun `parses FreeBuds Pro 3 ANC main mode from captured state responses`() {
         assertEquals(1, HuaweiRfcommResponseParser.parseAncStatus(hex("5A0007002B2A010200001531")))
         assertEquals(2, HuaweiRfcommResponseParser.parseAncStatus(hex("5A0007002B2A010203015043")))

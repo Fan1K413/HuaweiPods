@@ -16,7 +16,7 @@ class CaptureEventReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != CaptureContract.ACTION_CAPTURE_EVENT) return
         val senderPackage = sentFromPackage
-        if (senderPackage !in ALLOWED_SENDERS) {
+        if (!SmartAudioCaptureTarget.isAllowedSender(senderPackage)) {
             Log.w(TAG, "忽略非官方应用发送的 Debug 抓包事件：$senderPackage")
             return
         }
@@ -45,6 +45,92 @@ class CaptureEventReceiver : BroadcastReceiver() {
             return
         }
 
+        if (
+            intent.getStringExtra(CaptureContract.EXTRA_EVENT_TYPE) ==
+            CaptureContract.EVENT_TYPE_SMART_AUDIO_DEVICE_IDENTITY
+        ) {
+            val identity = smartAudioCurrentDeviceIdentity(
+                modelId = intent.getStringExtra(CaptureContract.EXTRA_RESOURCE_MODEL_ID),
+                subModelId = intent.getStringExtra(CaptureContract.EXTRA_RESOURCE_SUB_MODEL_ID),
+            ) ?: return
+            val identitySource = intent.getStringExtra(CaptureContract.EXTRA_IDENTITY_SOURCE)
+                ?.takeIf { it == "current_device_bus" }
+                ?: return
+            val pendingResult = goAsync()
+            try {
+                executor.execute {
+                    try {
+                        CaptureStore.recordSmartAudioDeviceIdentity(
+                            context = context.applicationContext,
+                            sourcePackage = senderPackage,
+                            identity = identity,
+                            sourceProcess = intent.getStringExtra(
+                                CaptureContract.EXTRA_SOURCE_PROCESS,
+                            ),
+                            deviceAddress = intent.getStringExtra(
+                                CaptureContract.EXTRA_DEVICE_ADDRESS,
+                            ),
+                            observedAtEpochMs = intent.getLongExtra(
+                                CaptureContract.EXTRA_TIMESTAMP_EPOCH_MS,
+                                0L,
+                            ),
+                            identitySource = identitySource,
+                        )
+                    } catch (throwable: Throwable) {
+                        Log.e(TAG, "保存智慧音频当前设备身份失败", throwable)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            } catch (_: RejectedExecutionException) {
+                droppedReceiverEvents.incrementAndGet()
+                pendingResult.finish()
+            }
+            return
+        }
+
+        if (
+            intent.getStringExtra(CaptureContract.EXTRA_EVENT_TYPE) ==
+            CaptureContract.EVENT_TYPE_SMART_AUDIO_RESOURCE
+        ) {
+            val pendingResult = goAsync()
+            try {
+                executor.execute {
+                    try {
+                        CaptureStore.recordSmartAudioResourceCandidate(
+                            context = context.applicationContext,
+                            sourcePackage = senderPackage,
+                            originWireName = intent.getStringExtra(
+                                CaptureContract.EXTRA_RESOURCE_ORIGIN,
+                            ),
+                            modelId = intent.getStringExtra(
+                                CaptureContract.EXTRA_RESOURCE_MODEL_ID,
+                            ),
+                            subModelId = intent.getStringExtra(
+                                CaptureContract.EXTRA_RESOURCE_SUB_MODEL_ID,
+                            ),
+                            resourceKind = intent.getStringExtra(
+                                CaptureContract.EXTRA_RESOURCE_KIND,
+                            ),
+                            sourceProcess = intent.getStringExtra(
+                                CaptureContract.EXTRA_SOURCE_PROCESS,
+                            ),
+                            observedAtEpochMs = intent
+                                .getLongExtra(CaptureContract.EXTRA_TIMESTAMP_EPOCH_MS, 0L),
+                        )
+                    } catch (throwable: Throwable) {
+                        Log.e(TAG, "保存智慧音频资源定位信息失败", throwable)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            } catch (_: RejectedExecutionException) {
+                droppedReceiverEvents.incrementAndGet()
+                pendingResult.finish()
+            }
+            return
+        }
+
         val event = CapturedProtocolEvent(
             eventType = intent.getStringExtra(CaptureContract.EXTRA_EVENT_TYPE),
             direction = intent.getStringExtra(CaptureContract.EXTRA_DIRECTION),
@@ -63,7 +149,25 @@ class CaptureEventReceiver : BroadcastReceiver() {
         try {
             executor.execute {
                 try {
-                    CaptureStore.appendProtocolEvent(context.applicationContext, event)
+                    if (event.direction == "rx" && event.channel == "rfcomm") {
+                        SmartAudioDeviceInfoIdentity.parse(event.payloadHex)?.let { identity ->
+                            CaptureStore.recordSmartAudioDeviceIdentity(
+                                context = context.applicationContext,
+                                sourcePackage = senderPackage,
+                                identity = identity,
+                                sourceProcess = event.sourceProcess,
+                                deviceAddress = event.deviceAddress,
+                                observedAtEpochMs = event.timestampEpochMs
+                                    ?.takeIf { it > 0L }
+                                    ?: System.currentTimeMillis(),
+                            )
+                        }
+                    }
+                    CaptureStore.appendProtocolEvent(
+                        context = context.applicationContext,
+                        event = event,
+                        sourcePackage = senderPackage,
+                    )
                 } catch (throwable: Throwable) {
                     Log.e(TAG, "保存 Debug 抓包事件失败", throwable)
                 } finally {
@@ -80,11 +184,6 @@ class CaptureEventReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "HuaweiPods-Capture"
         private const val MAX_PENDING_EVENTS = 512
-        private val ALLOWED_SENDERS = setOf(
-            "com.huawei.smarthome",
-            "com.huawei.smartaudio",
-        )
-
         private val droppedReceiverEvents = AtomicLong(0L)
         private val executor = ThreadPoolExecutor(
             1,

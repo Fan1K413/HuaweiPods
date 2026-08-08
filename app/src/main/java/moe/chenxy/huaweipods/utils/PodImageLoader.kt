@@ -14,6 +14,7 @@ import moe.chenxy.huaweipods.config.DeviceRoutePrefs
 import moe.chenxy.huaweipods.config.EarphonePref
 import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.config.PodImageResource
+import moe.chenxy.huaweipods.config.cloudImageUri
 import moe.chenxy.huaweipods.config.imageUri
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 
@@ -35,6 +36,10 @@ object PodImageLoader {
             //android.util.Log.d("HuaweiPods-PodImage", "loaded custom $resource for ${earphone?.address}")
             return custom
         }
+        val cloud = runCatching {
+            earphone?.cloudImageUri(resource)?.let { uri -> decodeUri(context, uri) }
+        }.getOrNull()
+        if (cloud != null) return cloud
 
         val moduleContext = runCatching {
             context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
@@ -65,6 +70,10 @@ object PodImageLoader {
             //android.util.Log.d("HuaweiPods-PodImage", "loaded custom $resource for ${earphone?.address}")
             return custom
         }
+        val cloud = runCatching {
+            earphone?.cloudImageUri(resource)?.let { uri -> decodeUri(context, uri) }
+        }.getOrNull()
+        if (cloud != null) return cloud
 
         val moduleContext = runCatching {
             context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
@@ -90,6 +99,12 @@ object PodImageLoader {
         resource: PodImageResource,
         globalFallbackResId: Int,
     ): Int = when (route) {
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> when (resource) {
+            PodImageResource.BOX -> R.drawable.img_freebuds5_box
+            PodImageResource.LEFT -> R.drawable.img_freebuds5_left
+            PodImageResource.RIGHT -> R.drawable.img_freebuds5_right
+        }
+
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> when (resource) {
             PodImageResource.BOX -> R.drawable.img_freebuds6i_box
             PodImageResource.LEFT -> R.drawable.img_freebuds6i_left
@@ -100,6 +115,11 @@ object PodImageLoader {
             PodImageResource.BOX -> R.drawable.img_freeclip2_box
             PodImageResource.LEFT -> R.drawable.img_freeclip2_left
             PodImageResource.RIGHT -> R.drawable.img_freeclip2_right
+        }
+
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> when (resource) {
+            PodImageResource.BOX -> R.drawable.img_eyewear2_box
+            PodImageResource.LEFT, PodImageResource.RIGHT -> globalFallbackResId
         }
 
         else -> globalFallbackResId

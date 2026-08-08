@@ -15,6 +15,7 @@ import android.graphics.drawable.Icon
 import android.os.Bundle
 import com.xzakota.hyper.notification.focus.FocusNotification
 import moe.chenxy.huaweipods.utils.FocusIslandUtil
+import moe.chenxy.huaweipods.utils.ModuleResourceResolver
 import moe.chenxy.huaweipods.utils.PodImageLoader
 import moe.chenxy.huaweipods.utils.SystemApisUtils
 import moe.chenxy.huaweipods.utils.SystemApisUtils.cancelAsUser
@@ -71,6 +72,21 @@ object MiBluetoothToastHook : HookContext() {
                     alias = bluetoothDevice.name
                 }
                 val deviceName = alias ?: bluetoothDevice.name.orEmpty()
+                val moduleContext = ModuleResourceResolver.createModuleContext(context) ?: run {
+                    Log.w("HuaweiPods", "skip notification: module context unavailable")
+                    return
+                }
+                if (!ModuleResourceResolver.isCurrentModuleBuild(moduleContext)) {
+                    (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                        .cancelAsUser(
+                            "BTHeadset$address",
+                            10003,
+                            SystemApisUtils.getUserAllUserHandle(),
+                        )
+                    Log.w("HuaweiPods", "skip notification: stale Hook build")
+                    FocusIslandUtil.cancelBatteryIsland(context)
+                    return
+                }
                 val deviceRoute = DeviceRoutePrefs.resolve(prefs, address, deviceName)
                 val offerAncAction = shouldOfferNotificationAncAction(deviceRoute)
 
@@ -115,9 +131,6 @@ object MiBluetoothToastHook : HookContext() {
                         intent,
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                     )
-                )
-                val moduleContext = context.createPackageContext(
-                    BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY
                 )
                 val ancLabel = moduleContext.getString(R.string.cycle_anc)
                 val ancAction = if (offerAncAction) {
@@ -279,9 +292,34 @@ object MiBluetoothToastHook : HookContext() {
                         runCatching {
                             val intent = receivedIntent ?: return@runCatching
                             when (HuaweiPodsAction.canonical(intent.action)) {
+                                HuaweiPodsAction.ACTION_PODS_UI_INIT -> {
+                                    val moduleContext = ModuleResourceResolver.createModuleContext(context)
+                                        ?: return@runCatching
+                                    if (!ModuleResourceResolver.isCurrentModuleBuild(moduleContext)) {
+                                        Log.w("HuaweiPods", "skip ready signal: stale Hook build")
+                                        return@runCatching
+                                    }
+                                    context.sendBroadcast(
+                                        Intent(HuaweiPodsAction.ACTION_MODULE_MI_BLUETOOTH_SERVICE_ALIVE).apply {
+                                            setPackage(BuildConfig.APPLICATION_ID)
+                                            putExtra(
+                                                HuaweiPodsAction.EXTRA_MODULE_BUILD_ID,
+                                                BuildConfig.MODULE_BUILD_ID,
+                                            )
+                                            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                                        },
+                                    )
+                                }
                                 HuaweiPodsAction.ACTION_SEND_STRONG_TOAST -> {
                                     if (ConfigManager.islandMode() != ConfigManager.ISLAND_MODE_MODULE) {
                                         Log.d("HuaweiPods", "skip module island mode=${ConfigManager.islandMode()}")
+                                        return@runCatching
+                                    }
+                                    val moduleContext = ModuleResourceResolver.createModuleContext(context)
+                                        ?: return@runCatching
+                                    if (!ModuleResourceResolver.isCurrentModuleBuild(moduleContext)) {
+                                        Log.w("HuaweiPods", "skip focus island: stale Hook build")
+                                        FocusIslandUtil.cancelBatteryIsland(context)
                                         return@runCatching
                                     }
                                     val batteryParams = intent.getParcelableExtra(
@@ -311,6 +349,7 @@ object MiBluetoothToastHook : HookContext() {
                 }
 
                 val intentFilter = IntentFilter().apply {
+                    addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_UI_INIT)
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_SEND_STRONG_TOAST)
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_UPDATE_PODS_NOTIFICATION)
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_CANCEL_PODS_NOTIFICATION)

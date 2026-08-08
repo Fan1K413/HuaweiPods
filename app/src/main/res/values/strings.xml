@@ -100,10 +100,13 @@
     <string name="notification_btn_disconnect">Disconnect</string>
     <string name="restart_scope_title">Restart Scope</string>
     <string name="restart_scope_summary">Select apps to restart with root.</string>
-    <string name="restart_scope_success">Scope restarted</string>
+    <string name="restart_scope_running">Restarting scopes. This usually takes only a few seconds…</string>
+    <string name="restart_scope_success">Scope fully restarted</string>
+    <string name="restart_scope_incomplete">Scope processes stopped, but the new hooks are not ready</string>
     <string name="restart_scope_failed">Root restart failed</string>
     <string name="restart_scope_bluetooth_service">Bluetooth</string>
     <string name="restart_scope_settings">Settings</string>
+    <string name="restart_scope_smart_audio">Huawei AI Life Audio</string>
     <string name="restart_scope_milink_service">Interconnectivity Service</string>
     <string name="restart_scope_mi_bluetooth">Mi Bluetooth</string>
     <string name="about_version_summary">Version %1$s</string>

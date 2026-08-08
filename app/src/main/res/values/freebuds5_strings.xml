@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="freebuds5_smart_features">Smart features</string>
+    <string name="freebuds5_wear_detection">Wear detection</string>
+    <string name="freebuds5_sound_and_connection">Sound and connection</string>
+    <string name="freebuds5_sound_effect">Sound effect</string>
+    <string name="freebuds5_sound_effect_default">Default</string>
+    <string name="freebuds5_sound_effect_bass">Bass boost</string>
+    <string name="freebuds5_sound_effect_treble">Treble boost</string>
+    <string name="freebuds5_sound_effect_clear_voice">Clear voice</string>
+    <string name="freebuds5_high_quality_audio">High-quality audio</string>
+    <string name="freebuds5_low_latency">Low latency mode</string>
+    <string name="freebuds5_state_unknown">Waiting for device state</string>
+    <string name="freebuds5_state_hint">Wear detection, sound effect and high-quality audio are read from the earbuds. Low latency only reflects the last value set by this module.</string>
+</resources>

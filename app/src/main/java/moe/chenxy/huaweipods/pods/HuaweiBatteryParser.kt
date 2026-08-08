@@ -6,7 +6,7 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailabi
 
 object HuaweiBatteryParser {
     private val batteryPattern = Regex(
-        """(?:AT)?\+?HUAWEIBATTERY\s*[=:]\s*([0-9,\s]+)""",
+        """(?:AT)?\+?(?:UPDATE)?HUAWEIBATTERY\s*[=:]\s*([0-9,\s]+)""",
         RegexOption.IGNORE_CASE
     )
 

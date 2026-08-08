@@ -43,6 +43,8 @@ private val routeCapabilities = linkedMapOf(
         displayName = "HUAWEI FreeBuds 5",
         aliases = setOf("huaweifreebuds5", "freebuds5"),
         supportsAnc = true,
+        supportsAncStateReadback = true,
+        supportsDiscreteAncLevels = true,
         supportsRfcommBattery = true,
         hasChargingCase = true,
     ),

@@ -32,6 +32,7 @@ import io.github.libxposed.service.XposedService
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.EarphonePref
 import moe.chenxy.huaweipods.config.PodImageResource
+import moe.chenxy.huaweipods.config.preferredImagePath
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.ui.dialogs.RestartScope
@@ -203,7 +204,7 @@ internal fun MainTabsScaffold(
                         onAncModeChange = onAncModeChange,
                         huaweiAncLevel = huaweiAncLevel,
                         onHuaweiAncLevelChange = onHuaweiAncLevelChange,
-                        boxImagePath = currentEarphonePref?.boxImagePath,
+                        boxImagePath = currentEarphonePref?.preferredImagePath(PodImageResource.BOX),
                         connectedDeviceAddress = connectedDeviceAddress,
                         connectingDeviceAddress = connectingDeviceAddress,
                         showConnectErrorDialog = showConnectErrorDialog,
@@ -252,6 +253,7 @@ internal fun MainTabsScaffold(
 
         RestartScopeDialog(
             show = showRestartScopeDialog,
+            restarting = restartingScopes,
             scopes = restartScopeOptions,
             onDismissRequest = { if (!restartingScopes) onDismissRestartScopeDialog() },
             onConfirm = onRestartScopes,
@@ -524,6 +526,7 @@ private fun EarphoneDetailActions(
 private val restartScopeOptions = listOf(
     RestartScope("com.android.bluetooth", R.string.restart_scope_bluetooth_service),
     RestartScope("com.android.settings", R.string.restart_scope_settings),
+    RestartScope("com.huawei.smartaudio", R.string.restart_scope_smart_audio),
     RestartScope("com.milink.service", R.string.restart_scope_milink_service),
     RestartScope("com.xiaomi.bluetooth", R.string.restart_scope_mi_bluetooth),
 )

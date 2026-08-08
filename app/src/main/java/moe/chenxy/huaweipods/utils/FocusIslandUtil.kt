@@ -136,6 +136,14 @@ object FocusIslandUtil {
         }
     }
 
+    fun cancelBatteryIsland(context: Context) {
+        runCatching {
+            val notificationManager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(NOTIFICATION_ID)
+        }
+    }
+
     @Synchronized
     private fun scheduleDismiss(notificationManager: NotificationManager) {
         dismissRunnable?.let(mainHandler::removeCallbacks)

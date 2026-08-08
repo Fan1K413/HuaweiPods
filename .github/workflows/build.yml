@@ -30,7 +30,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Verify and build release APK
-        run: ./gradlew :app:lintDebug :app:assembleRelease
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
 
       - name: Sign release APK
         id: sign

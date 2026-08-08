@@ -10,6 +10,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.hook.HookContext
 import moe.chenxy.huaweipods.hook.Log
@@ -17,19 +19,24 @@ import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Debug-only observer for Huawei AI Life Bluetooth traffic.
+ * Debug-only observer for Huawei Smart Audio Bluetooth traffic.
  *
  * The hooks run after the platform call. Capture failures are isolated from the
  * caller. The explicit broadcast only schedules delivery; all disk work remains
  * in HuaweiPods' receiver process and never runs on the official app's thread.
  */
 object AiLifeCaptureHook : HookContext() {
-    private const val TAG = "HuaweiPods-AiLifeCapture"
+    private const val TAG = "HuaweiPods-SmartAudioCapture"
     private const val MAX_PAYLOAD_BYTES = 4 * 1024
     private const val MAX_SUMMARY_CHARS = 512
+    private const val CURRENT_IDENTITY_SETTLE_DELAY_MS = 50L
 
     private val installed = AtomicBoolean(false)
     private val probeReceiverRegistered = AtomicBoolean(false)
+    private val currentIdentityBroadcastScheduled = AtomicBoolean(false)
+    private val mainHandler by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Handler(Looper.getMainLooper())
+    }
 
     @Volatile
     private var probeReceiver: BroadcastReceiver? = null
@@ -37,13 +44,18 @@ object AiLifeCaptureHook : HookContext() {
     @Volatile
     private var applicationContext: Context? = null
 
+    @Volatile
+    private var lastObservedResource: SmartAudioObservedResource? = null
+
     override fun onHook() {
         if (!BuildConfig.DEBUG || !installed.compareAndSet(false, true)) return
 
         hookGattTraffic()
         hookBluetoothSocketIo()
+        hookSmartAudioResourceRequests()
+        hookSmartAudioCurrentDeviceIdentityUpdates()
         installProbeBridge()
-        Log.i(TAG, "Bluetooth protocol capture enabled for package=$packageName")
+        Log.i(TAG, "Bluetooth protocol and official resource capture enabled for package=$packageName")
     }
 
     private fun installProbeBridge() {
@@ -71,17 +83,26 @@ object AiLifeCaptureHook : HookContext() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context, intent: Intent) {
                 if (intent.action == CaptureContract.ACTION_HOOK_PROBE) {
-                    broadcastHookReady(receiverContext.applicationContext ?: receiverContext)
+                    val context = receiverContext.applicationContext ?: receiverContext
+                    broadcastHookReady(context)
+                    broadcastCurrentSmartAudioDeviceIdentity(context)
+                    lastObservedResource?.let {
+                        broadcastSmartAudioResource(
+                            context,
+                            it,
+                        )
+                    }
                 }
             }
         }
         runCatching {
             val filter = IntentFilter(CaptureContract.ACTION_HOOK_PROBE)
             // The probe originates from the HuaweiPods debug app and is received
-            // inside the hooked AI Life process, so this receiver must be exported.
+            // inside the hooked Smart Audio process, so this receiver must be exported.
             appContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
             probeReceiver = receiver
             broadcastHookReady(appContext)
+            broadcastCurrentSmartAudioDeviceIdentity(appContext)
         }.onFailure {
             probeReceiverRegistered.set(false)
             Log.w(TAG, "Unable to register capture probe receiver", it)
@@ -97,6 +118,177 @@ object AiLifeCaptureHook : HookContext() {
         }
         sendCaptureBroadcast(context, intent)
     }
+
+    /**
+     * 智慧音频最终会把设备资源交给这个 OkHttp 入口。这里只观察 URL，
+     * 且解析器仅接受已知华为 CDN 的固定路径；请求头和响应正文都不会离开官方进程。
+     */
+    private fun hookSmartAudioResourceRequests() {
+        val okHttpUtilClass = runCatching {
+            findClass("com.huawei.audiodevicekit.net.okhttp.OkHttpUtil")
+        }.onFailure {
+            Log.w(TAG, "Smart Audio resource request class unavailable", it)
+        }.getOrNull() ?: return
+        val requestMethods = okHttpUtilClass.declaredMethods.filter { method ->
+            method.name == "asyncGetRequest" &&
+                method.parameterTypes.firstOrNull() == String::class.java
+        }
+        if (requestMethods.isEmpty()) {
+            Log.w(TAG, "Smart Audio resource request methods unavailable")
+        }
+        requestMethods.forEach { method ->
+            runCatching {
+                method.isAccessible = true
+                hookBefore(method) {
+                    val observed = SmartAudioResourceLocator.parseObservedUrl(
+                        args.firstOrNull() as? String,
+                    )?.copy(observedAtEpochMs = System.currentTimeMillis())
+                        ?: return@hookBefore
+                    lastObservedResource = preferCurrentResource(lastObservedResource, observed)
+                    resolveApplicationContext()?.let { context ->
+                        broadcastSmartAudioResource(context, observed)
+                    }
+                }
+            }.onFailure { Log.w(TAG, "Unable to hook Smart Audio resource request", it) }
+        }
+    }
+
+    private fun preferCurrentResource(
+        previous: SmartAudioObservedResource?,
+        observed: SmartAudioObservedResource,
+    ): SmartAudioObservedResource = when {
+        previous == null -> observed
+        observed.subModelId != null -> observed
+        previous.modelId == observed.modelId && previous.subModelId != null -> previous
+        else -> observed
+    }
+
+    private fun broadcastSmartAudioResource(
+        context: Context,
+        resource: SmartAudioObservedResource,
+    ) {
+        val intent = Intent(CaptureContract.ACTION_CAPTURE_EVENT).apply {
+            setPackage(BuildConfig.APPLICATION_ID)
+            putExtra(
+                CaptureContract.EXTRA_EVENT_TYPE,
+                CaptureContract.EVENT_TYPE_SMART_AUDIO_RESOURCE,
+            )
+            putExtra(CaptureContract.EXTRA_RESOURCE_ORIGIN, resource.origin.wireName)
+            putExtra(CaptureContract.EXTRA_RESOURCE_MODEL_ID, resource.modelId)
+            resource.subModelId?.let {
+                putExtra(CaptureContract.EXTRA_RESOURCE_SUB_MODEL_ID, it)
+            }
+            putExtra(CaptureContract.EXTRA_RESOURCE_KIND, resource.kind.name.lowercase())
+            putExtra(CaptureContract.EXTRA_SOURCE_PROCESS, sourceProcessName())
+            putExtra(CaptureContract.EXTRA_TIMESTAMP_EPOCH_MS, resource.observedAtEpochMs)
+        }
+        sendCaptureBroadcast(context, intent)
+    }
+
+    /**
+     * 当前设备总线可能在最初的 Hook 探针之后才填入身份，尤其是旧协议机型或
+     * 资源已命中缓存时。只观察 modelId、subModelId 和完整 DeviceInfo 写入口，
+     * 并在短暂合并窗口后重读完整快照；不从单个参数拼接身份。MAC 写入口不单独
+     * 触发，避免设备切换期间把上一副耳机的身份错误绑定到新地址。
+     */
+    private fun hookSmartAudioCurrentDeviceIdentityUpdates() {
+        val adapterClass = runCatching {
+            findClass("com.huawei.audiodevicekit.devicerouter.DefaultCurrentDeviceBusAdapter")
+        }.onFailure {
+            Log.w(TAG, "Smart Audio current-device adapter unavailable", it)
+        }.getOrNull() ?: return
+        val updateMethods = adapterClass.declaredMethods.filter { method ->
+            isSmartAudioCurrentDeviceIdentityMutation(
+                methodName = method.name,
+                parameterTypeNames = method.parameterTypes.map { it.name },
+            )
+        }
+        if (updateMethods.isEmpty()) {
+            Log.w(TAG, "Smart Audio current-device identity update methods unavailable")
+            return
+        }
+        updateMethods.forEach { method ->
+            runCatching {
+                method.isAccessible = true
+                hookAfter(method) {
+                    scheduleCurrentSmartAudioDeviceIdentityBroadcast()
+                }
+            }.onFailure {
+                Log.w(TAG, "Unable to hook Smart Audio current-device identity update", it)
+            }
+        }
+    }
+
+    private fun scheduleCurrentSmartAudioDeviceIdentityBroadcast() {
+        if (!currentIdentityBroadcastScheduled.compareAndSet(false, true)) return
+        mainHandler.postDelayed(
+            {
+                currentIdentityBroadcastScheduled.set(false)
+                resolveApplicationContext()?.let(::broadcastCurrentSmartAudioDeviceIdentity)
+            },
+            CURRENT_IDENTITY_SETTLE_DELAY_MS,
+        )
+    }
+
+    /**
+     * 从智慧音频自己的“当前设备”总线读取资源身份。
+     *
+     * 这条路径主要覆盖 FreeBuds 3 等旧协议机型，以及资源已经命中官方应用
+     * 本地缓存、不会再次经过 OkHttp 的场景。广播仍携带真实蓝牙地址，模块侧
+     * 会与用户本次明确选择的耳机地址再次比对，避免串到后台缓存的其他设备。
+     */
+    private fun broadcastCurrentSmartAudioDeviceIdentity(context: Context) {
+        runCatching {
+            val pluginClass = findClass("com.huawei.audiodevicekit.kitutils.plugin.Plugin")
+            val currentDeviceBusClass = findClass("q7.a")
+            val getPlugin = pluginClass.declaredMethods.firstOrNull { method ->
+                method.name == "get" &&
+                    method.parameterTypes.contentEquals(arrayOf(Class::class.java))
+            } ?: return@runCatching
+            getPlugin.isAccessible = true
+            val currentDeviceBus = getPlugin.invoke(null, currentDeviceBusClass)
+                ?: return@runCatching
+            val deviceInfo = invokeNoArg(currentDeviceBus, "getDeviceInfo")
+            val address = invokeString(currentDeviceBus, "T0")
+                ?: deviceInfo?.let { invokeString(it, "c") }
+                ?: return@runCatching
+            val modelId = invokeString(currentDeviceBus, "c1")
+                ?: deviceInfo?.let { invokeString(it, "g") }
+            val subModelId = invokeString(currentDeviceBus, "Z0")
+                ?: deviceInfo?.let { invokeString(it, "o") }
+            val identity = smartAudioCurrentDeviceIdentity(modelId, subModelId)
+                ?: return@runCatching
+
+            val intent = Intent(CaptureContract.ACTION_CAPTURE_EVENT).apply {
+                setPackage(BuildConfig.APPLICATION_ID)
+                putExtra(
+                    CaptureContract.EXTRA_EVENT_TYPE,
+                    CaptureContract.EVENT_TYPE_SMART_AUDIO_DEVICE_IDENTITY,
+                )
+                putExtra(CaptureContract.EXTRA_DEVICE_ADDRESS, address)
+                putExtra(CaptureContract.EXTRA_RESOURCE_MODEL_ID, identity.modelId)
+                putExtra(CaptureContract.EXTRA_RESOURCE_SUB_MODEL_ID, identity.subModelId)
+                putExtra(CaptureContract.EXTRA_IDENTITY_SOURCE, "current_device_bus")
+                putExtra(CaptureContract.EXTRA_SOURCE_PROCESS, sourceProcessName())
+                putExtra(CaptureContract.EXTRA_TIMESTAMP_EPOCH_MS, System.currentTimeMillis())
+            }
+            sendCaptureBroadcast(context, intent)
+        }.onFailure {
+            // 智慧音频内部类在不同版本可能变化；失败时保留 DeviceInfo/URL 路径。
+            Log.d(TAG, "Current Smart Audio device identity unavailable: ${it.javaClass.simpleName}")
+        }
+    }
+
+    private fun invokeNoArg(target: Any, methodName: String): Any? = runCatching {
+        target.javaClass.methods.firstOrNull { method ->
+            method.name == methodName && method.parameterTypes.isEmpty()
+        }?.invoke(target)
+    }.getOrNull()
+
+    private fun invokeString(target: Any, methodName: String): String? =
+        (invokeNoArg(target, methodName) as? String)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
 
     private fun hookGattTraffic() {
         val gattClass = runCatching { findClass("android.bluetooth.BluetoothGatt") }

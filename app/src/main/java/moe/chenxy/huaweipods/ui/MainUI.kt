@@ -55,11 +55,14 @@ import moe.chenxy.huaweipods.config.PodImageResource
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.NoiseControlMode
+import moe.chenxy.huaweipods.pods.decodeHuaweiDeviceRouteFromBroadcast
+import moe.chenxy.huaweipods.pods.defaultAncSubMode
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.pods.isKnown
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsAncStateReadback
+import moe.chenxy.huaweipods.pods.supportsAncSubMode
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
 import moe.chenxy.huaweipods.pods.supportsTransparency
 import moe.chenxy.huaweipods.ui.dialogs.AvailableUpdateDialog
@@ -145,6 +148,7 @@ fun MainUI(
     var hookConnectionState by remember { mutableStateOf("disconnected") }
     var pendingOpenEarphonesAfterPickerLoaded by remember { mutableStateOf(false) }
     var lastBluetoothServiceAliveMs by remember { mutableStateOf(0L) }
+    var lastMiBluetoothServiceAliveMs by remember { mutableStateOf(0L) }
     var bluetoothServiceResponsive by remember { mutableStateOf(false) }
     val backgroundColor = appBackground()
     val overlayBottomBar = floatingBottomBar.value || blurBottomBar.value
@@ -314,7 +318,7 @@ fun MainUI(
                             ?.let { subMode ->
                                 when (reportedMode) {
                                     NoiseControlMode.NOISE_CANCELLATION ->
-                                        if (HuaweiAncLevel.fromProtocolValue(subMode) != null) {
+                                        if (route.supportsAncSubMode(subMode)) {
                                             huaweiAncLevel.value = subMode
                                             hasHuaweiAncLevel.value = true
                                         }
@@ -333,11 +337,10 @@ fun MainUI(
                         val level = intent.getIntExtra("level", huaweiAncLevel.value)
                         when {
                             route.supportsAncDirectionDial -> huaweiAncLevel.value = level.coerceIn(0, 8)
-                            route.supportsDiscreteAncLevels ->
-                                HuaweiAncLevel.fromProtocolValue(level)?.let {
-                                    huaweiAncLevel.value = it.protocolValue
-                                    hasHuaweiAncLevel.value = true
-                                }
+                            route.supportsDiscreteAncLevels && route.supportsAncSubMode(level) -> {
+                                huaweiAncLevel.value = level
+                                hasHuaweiAncLevel.value = true
+                            }
                         }
                     }
 
@@ -349,9 +352,28 @@ fun MainUI(
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
                         val deviceName = intent.getStringExtra("device_name")
                         val shouldOpenEarphones = connectingDeviceAddress != null || !hasAppliedDefaultTab
-                        connectedDeviceAddress = resolvedConnectedAddress(intent.getStringExtra("address"), connectingDeviceAddress, connectedDeviceAddress)
+                        val previousAddress = connectedDeviceAddress
+                        val previousRoute = currentDeviceRoute()
+                        connectedDeviceAddress = resolvedConnectedAddress(
+                            intent.getStringExtra("address"),
+                            connectingDeviceAddress,
+                            connectedDeviceAddress,
+                        )
                         connectingDeviceAddress = null
                         mainTitle.value = deviceName ?: ""
+                        val route = decodeHuaweiDeviceRouteFromBroadcast(
+                            intent.getStringExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE),
+                        ) ?: currentDeviceRoute()
+                        if (
+                            !previousAddress.equals(connectedDeviceAddress, ignoreCase = true) ||
+                            previousRoute != route
+                        ) {
+                            ancMode.value = NoiseControlMode.UNKNOWN
+                            huaweiAncLevel.value = route.defaultAncSubMode
+                                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+                            hasHuaweiAncLevel.value = false
+                            huaweiTransparencySubMode.value = -1
+                        }
                         earphonePrefs.value = PodImagePrefs.upsertConnected(
                             prefs = prefs,
                             service = xposedService,
@@ -373,11 +395,13 @@ fun MainUI(
                     HuaweiPodsAction.ACTION_PODS_CONNECTION_STATE_CHANGED -> {
                         hookConnectionState = intent.getStringExtra("state") ?: hookConnectionState
                         if (hookConnectionState == "disconnected") {
+                            val route = currentDeviceRoute()
                             connectedDeviceAddress = ""
                             mainTitle.value = ""
                             batteryParams.value = BatteryParams()
                             ancMode.value = NoiseControlMode.UNKNOWN
-                            huaweiAncLevel.value = HuaweiAncLevel.ADAPTIVE.protocolValue
+                            huaweiAncLevel.value = route.defaultAncSubMode
+                                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
                             hasHuaweiAncLevel.value = false
                             huaweiTransparencySubMode.value = -1
                             hookConnected.value = false
@@ -386,11 +410,17 @@ fun MainUI(
                             if (!incomingAddress.isNullOrBlank() &&
                                 !incomingAddress.equals(connectedDeviceAddress, ignoreCase = true)
                             ) {
+                                val route = DeviceRoutePrefs.resolve(
+                                    prefs = prefs,
+                                    address = incomingAddress,
+                                    deviceName = null,
+                                )
                                 connectedDeviceAddress = ""
                                 mainTitle.value = ""
                                 batteryParams.value = BatteryParams()
                                 ancMode.value = NoiseControlMode.UNKNOWN
-                                huaweiAncLevel.value = HuaweiAncLevel.ADAPTIVE.protocolValue
+                                huaweiAncLevel.value = route.defaultAncSubMode
+                                    ?: HuaweiAncLevel.ADAPTIVE.protocolValue
                                 hasHuaweiAncLevel.value = false
                                 huaweiTransparencySubMode.value = -1
                                 hookConnected.value = false
@@ -405,11 +435,13 @@ fun MainUI(
                     }
 
                     HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
+                        val route = currentDeviceRoute()
                         mainTitle.value = ""
                         connectedDeviceAddress = ""
                         batteryParams.value = BatteryParams()
                         ancMode.value = NoiseControlMode.UNKNOWN
-                        huaweiAncLevel.value = HuaweiAncLevel.ADAPTIVE.protocolValue
+                        huaweiAncLevel.value = route.defaultAncSubMode
+                            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
                         hasHuaweiAncLevel.value = false
                         huaweiTransparencySubMode.value = -1
                         hookConnectionState = "disconnected"
@@ -417,8 +449,22 @@ fun MainUI(
                     }
 
                     HuaweiPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE -> {
-                        lastBluetoothServiceAliveMs = SystemClock.elapsedRealtime()
-                        bluetoothServiceResponsive = true
+                        if (
+                            intent.getStringExtra(HuaweiPodsAction.EXTRA_MODULE_BUILD_ID) ==
+                            BuildConfig.MODULE_BUILD_ID
+                        ) {
+                            lastBluetoothServiceAliveMs = SystemClock.elapsedRealtime()
+                            bluetoothServiceResponsive = true
+                        }
+                    }
+
+                    HuaweiPodsAction.ACTION_MODULE_MI_BLUETOOTH_SERVICE_ALIVE -> {
+                        if (
+                            intent.getStringExtra(HuaweiPodsAction.EXTRA_MODULE_BUILD_ID) ==
+                            BuildConfig.MODULE_BUILD_ID
+                        ) {
+                            lastMiBluetoothServiceAliveMs = SystemClock.elapsedRealtime()
+                        }
                     }
 
                     BluetoothAdapter.ACTION_STATE_CHANGED,
@@ -426,6 +472,15 @@ fun MainUI(
                         bluetoothState = readBluetoothState(context)
                     }
                 }
+            }
+        }
+    }
+
+    val podImagesChangedReceiver = remember {
+        object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context?, intent: Intent?) {
+                if (intent?.action != HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED) return
+                earphonePrefs.value = PodImagePrefs.load(prefs)
             }
         }
     }
@@ -444,9 +499,15 @@ fun MainUI(
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_CONNECTION_STATE_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_DISCONNECTED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_MODULE_MI_BLUETOOTH_SERVICE_ALIVE)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         }, Context.RECEIVER_EXPORTED)
+        context.registerReceiver(
+            podImagesChangedReceiver,
+            IntentFilter(HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED),
+            Context.RECEIVER_NOT_EXPORTED,
+        )
 
         sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_PODS_UI_INIT)
 
@@ -455,6 +516,9 @@ fun MainUI(
             try {
                 context.unregisterReceiver(broadcastReceiver)
             } catch (_: Exception) {}
+            try {
+                context.unregisterReceiver(podImagesChangedReceiver)
+            } catch (_: Exception) {}
             HuaweiPodsApp.removeServiceListener(serviceListener)
         }
     }
@@ -462,14 +526,16 @@ fun MainUI(
     LaunchedEffect(Unit) {
         while (true) {
             sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_PODS_UI_INIT)
-            sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_REFRESH_STATUS)
+            if (!restartingScopes) {
+                sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_REFRESH_STATUS)
+            }
             delay(if (hookConnected.value) 10_000L else 30_000L)
         }
     }
 
     LaunchedEffect(selectedTab, hookConnected.value) {
         sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_PODS_UI_INIT)
-        if (selectedTab == MainTab.Module || hookConnected.value) {
+        if (!restartingScopes && (selectedTab == MainTab.Module || hookConnected.value)) {
             sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_REFRESH_STATUS)
         }
     }
@@ -503,7 +569,7 @@ fun MainUI(
                 val subMode = when (normalizedMode) {
                     NoiseControlMode.NOISE_CANCELLATION ->
                         huaweiAncLevel.value.takeIf {
-                            hasHuaweiAncLevel.value && HuaweiAncLevel.fromProtocolValue(it) != null
+                            hasHuaweiAncLevel.value && route.supportsAncSubMode(it)
                         }
                     NoiseControlMode.TRANSPARENCY -> {
                         huaweiTransparencySubMode.value
@@ -526,7 +592,7 @@ fun MainUI(
         val safeLevel = when {
             route.supportsAncDirectionDial -> level.coerceIn(0, 8)
             route.supportsDiscreteAncLevels && ancMode.value == NoiseControlMode.NOISE_CANCELLATION ->
-                level.takeIf { HuaweiAncLevel.fromProtocolValue(it) != null } ?: return
+                level.takeIf(route::supportsAncSubMode) ?: return
             route.supportsTransparency && ancMode.value == NoiseControlMode.TRANSPARENCY ->
                 level.takeIf { it in supportedTransparencySubModes(route) } ?: return
             else -> return
@@ -551,13 +617,15 @@ fun MainUI(
     }
 
     fun clearPodConnectionState() {
+        val route = currentDeviceRoute()
         connectingDeviceAddress = null
         pendingOpenEarphonesAfterPickerLoaded = false
         connectedDeviceAddress = ""
         mainTitle.value = ""
         batteryParams.value = BatteryParams()
         ancMode.value = NoiseControlMode.UNKNOWN
-        huaweiAncLevel.value = HuaweiAncLevel.ADAPTIVE.protocolValue
+        huaweiAncLevel.value = route.defaultAncSubMode
+            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
         hasHuaweiAncLevel.value = false
         huaweiTransparencySubMode.value = -1
         hookConnected.value = false
@@ -575,6 +643,11 @@ fun MainUI(
             route = route,
         )
         connectingDeviceAddress = device.address
+        ancMode.value = NoiseControlMode.UNKNOWN
+        huaweiAncLevel.value = route.defaultAncSubMode
+            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+        hasHuaweiAncLevel.value = false
+        huaweiTransparencySubMode.value = -1
         pendingOpenEarphonesAfterPickerLoaded = false
         showConnectErrorDialog = false
         showDevicePicker = true
@@ -592,13 +665,15 @@ fun MainUI(
         connectingDeviceAddress = null
         pendingOpenEarphonesAfterPickerLoaded = false
         if (device.address == connectedDeviceAddress) {
+            val route = currentDeviceRoute()
             hookConnected.value = false
             hookConnectionState = "disconnected"
             connectedDeviceAddress = ""
             mainTitle.value = ""
             batteryParams.value = BatteryParams()
             ancMode.value = NoiseControlMode.UNKNOWN
-            huaweiAncLevel.value = HuaweiAncLevel.ADAPTIVE.protocolValue
+            huaweiAncLevel.value = route.defaultAncSubMode
+                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
             hasHuaweiAncLevel.value = false
             huaweiTransparencySubMode.value = -1
         }
@@ -686,17 +761,54 @@ fun MainUI(
         if (packages.isEmpty() || restartingScopes) return
         restartingScopes = true
         coroutineScope.launch {
-            val success = withContext(Dispatchers.IO) {
-                RootManager.restartPackages(packages)
-            }
-            restartingScopes = false
-            showRestartScopeDialog = false
-            if (success && "com.android.bluetooth" in packages) {
-                clearPodConnectionState()
+            var commandSucceeded = false
+            var success = false
+            try {
+                commandSucceeded = withContext(Dispatchers.IO) {
+                    RootManager.restartPackages(packages)
+                }
+                val waitForBluetooth = "com.android.bluetooth" in packages
+                val observeMiBluetooth = "com.xiaomi.bluetooth" in packages
+                success = commandSucceeded
+
+                if (commandSucceeded && waitForBluetooth) {
+                    lastBluetoothServiceAliveMs = 0L
+                    bluetoothServiceResponsive = false
+                }
+                if (commandSucceeded && observeMiBluetooth) {
+                    // 通知进程可能按需启动，心跳仅用于观察，不阻断核心蓝牙重启。
+                    lastMiBluetoothServiceAliveMs = 0L
+                }
+
+                if (commandSucceeded && waitForBluetooth) {
+                    for (attempt in 0 until 20) {
+                        // 探活不请求业务状态，避免重启期间触发失效 Binder 或 HFP 查询。
+                        sendBluetoothModuleBroadcast(context, HuaweiPodsAction.ACTION_PODS_UI_INIT)
+                        delay(500L)
+                        if (lastBluetoothServiceAliveMs > 0L) break
+                    }
+                    success = lastBluetoothServiceAliveMs > 0L
+                }
+
+                if (success && (waitForBluetooth || observeMiBluetooth)) {
+                    // 新 Hook 就绪后只恢复一次；重启期间保留界面上最后一份有效状态。
+                    context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_REFRESH_STATUS).apply {
+                        setPackage("com.android.bluetooth")
+                        putExtra(HuaweiPodsAction.EXTRA_RESTORE_NOTIFICATION, true)
+                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                    })
+                }
+            } finally {
+                restartingScopes = false
+                showRestartScopeDialog = false
             }
             Toast.makeText(
                 context,
-                if (success) R.string.restart_scope_success else R.string.restart_scope_failed,
+                when {
+                    success -> R.string.restart_scope_success
+                    commandSucceeded -> R.string.restart_scope_incomplete
+                    else -> R.string.restart_scope_failed
+                },
                 Toast.LENGTH_SHORT,
             ).show()
         }

@@ -17,13 +17,13 @@ internal object HuaweiAncPackets {
     )
     private val modernAncLevels = mapOf(
         0xFF to modernFreeBudsEnabled.getValue(true),
-        HuaweiAncLevel.ADAPTIVE.protocolValue to
+        0x01 to
             packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x01, 0xF1, 0x3D),
-        HuaweiAncLevel.LIGHT.protocolValue to
+        0x00 to
             packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x00, 0xE1, 0x1C),
-        HuaweiAncLevel.BALANCED.protocolValue to
+        0x02 to
             packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x02, 0xC1, 0x5E),
-        HuaweiAncLevel.DEEP.protocolValue to
+        0x03 to
             packet(0x5A, 0x00, 0x07, 0x00, 0x2B, 0x04, 0x01, 0x02, 0x01, 0x03, 0xD1, 0x7F),
     )
     private val transparencyModes = mapOf(
@@ -62,8 +62,11 @@ internal object HuaweiAncPackets {
             NoiseControlMode.UNKNOWN -> null
         }
         mode == NoiseControlMode.OFF -> modernFreeBudsEnabled[false]
-        mode == NoiseControlMode.NOISE_CANCELLATION && route.supportsDiscreteAncLevels ->
-            modernAncLevels[subMode ?: HuaweiAncLevel.ADAPTIVE.protocolValue]
+        mode == NoiseControlMode.NOISE_CANCELLATION && route.supportsDiscreteAncLevels -> {
+            (subMode ?: route.defaultAncSubMode)
+                ?.takeIf(route::supportsAncSubMode)
+                ?.let(modernAncLevels::get)
+        }
         mode == NoiseControlMode.NOISE_CANCELLATION -> modernFreeBudsEnabled[true]
         mode == NoiseControlMode.TRANSPARENCY && route.supportsTransparency -> {
             val defaultSubMode = when (route) {

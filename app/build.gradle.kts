@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+val moduleBuildTimestamp = System.currentTimeMillis()
+val moduleBuildIdBase = "b$moduleBuildTimestamp"
+
 android {
     namespace = "moe.chenxy.huaweipods"
     compileSdk = 37
@@ -15,13 +18,16 @@ android {
         applicationId = "moe.chenxy.huaweipods"
         minSdk = 35
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.2.0"
-        buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
+        versionCode = 5
+        versionName = "1.3.0"
+        buildConfigField("long", "BUILD_TIMESTAMP", moduleBuildTimestamp.toString())
     }
 
     buildTypes {
         debug {
+            val moduleBuildId = "$moduleBuildIdBase-debug"
+            buildConfigField("String", "MODULE_BUILD_ID", "\"$moduleBuildId\"")
+            manifestPlaceholders["moduleBuildId"] = moduleBuildId
             isDebuggable = true
             isMinifyEnabled = false
             versionNameSuffix = "-debug"
@@ -31,6 +37,9 @@ android {
             )
         }
         release {
+            val moduleBuildId = "$moduleBuildIdBase-release"
+            buildConfigField("String", "MODULE_BUILD_ID", "\"$moduleBuildId\"")
+            manifestPlaceholders["moduleBuildId"] = moduleBuildId
             isMinifyEnabled = true
             isShrinkResources = true
             isDebuggable = false

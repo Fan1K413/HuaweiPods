@@ -29,6 +29,7 @@ HuaweiPods 需要正常工作的 LSPosed 环境，并会修改系统蓝牙相关
 ```text
 com.android.bluetooth
 com.android.settings
+com.huawei.smartaudio
 com.milink.service
 com.xiaomi.bluetooth
 ```
@@ -38,6 +39,8 @@ com.xiaomi.bluetooth
 启用后可先在 HuaweiPods 中重启相关作用域；若系统组件没有重新加载模块，再完整重启手机。之后连接已配对的受支持设备。
 
 模块会按官方名称自动识别型号。如果耳机被改名或未自动识别，请进入 HuaweiPods 的设备选择页，按蓝牙地址为它选择真实型号。手动绑定只影响该设备，不会把同名设备的控制协议混用。
+
+华为智慧音频作用域只用于读取当前设备已经确认的机型与配色资源身份。HuaweiPods 会据此从华为官方 CDN 下载并校验图片；身份不完整、网络不可用或校验失败时会继续使用已有缓存或内置图片，不会猜测配色，也不会影响耳机控制。
 
 你可以依次检查：
 
@@ -54,7 +57,7 @@ FreeClip、FreeClip 2 和两代 Eyewear 不提供传统主动降噪，看不到�
 按下面顺序排查，通常不需要反复卸载：
 
 1. 确认 LSPosed 中 HuaweiPods 已启用，且 API 版本满足要求；
-2. 核对四个作用域是否全部勾选；
+2. 核对五个作用域是否全部勾选；
 3. 在 HuaweiPods 内重启相关作用域；仍无效时再重启手机；
 4. 在系统蓝牙中断开再连接耳机；
 5. 在设备选择页确认当前蓝牙地址绑定的是实际型号；

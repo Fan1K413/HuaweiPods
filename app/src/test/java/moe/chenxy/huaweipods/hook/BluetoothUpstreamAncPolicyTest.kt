@@ -51,7 +51,6 @@ class BluetoothUpstreamAncPolicyTest {
     fun `two-state routes reject transparency without converting it to off`() {
         listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
@@ -65,15 +64,56 @@ class BluetoothUpstreamAncPolicyTest {
     }
 
     @Test
-    fun `discrete ANC level round trips through MIUI payload`() {
-        val state = upstreamHuaweiAncStateForLevel(
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-            "0103",
-            off,
+    fun `discrete ANC levels translate between MIUI menu codes and Huawei protocol`() {
+        val cases = mapOf(
+            "0103" to HuaweiAncLevel.ADAPTIVE,
+            "0101" to HuaweiAncLevel.LIGHT,
+            "0100" to HuaweiAncLevel.BALANCED,
+            "0102" to HuaweiAncLevel.DEEP,
         )
 
-        assertEquals(HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, HuaweiAncLevel.DEEP.protocolValue), state)
-        assertEquals("0103", upstreamMiuiAncLevel(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, state!!))
-        assertNull(upstreamHuaweiAncStateForLevel(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, "0109", off))
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        ).forEach { route ->
+            cases.forEach { (miuiPayload, huaweiLevel) ->
+                val state = upstreamHuaweiAncStateForLevel(route, miuiPayload, off)
+
+                assertEquals(
+                    HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, huaweiLevel.protocolValue),
+                    state,
+                )
+                assertEquals(miuiPayload, upstreamMiuiAncLevel(route, state!!))
+            }
+            assertNull(upstreamHuaweiAncStateForLevel(route, "0109", off))
+        }
+    }
+
+    @Test
+    fun `FreeBuds 5 MIUI levels map to its captured three-level protocol`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS5
+        val cases = mapOf(
+            "0103" to 0x03,
+            "0101" to 0x01,
+            "0100" to 0x00,
+        )
+
+        cases.forEach { (miuiPayload, huaweiSubMode) ->
+            val state = upstreamHuaweiAncStateForLevel(route, miuiPayload, off)
+            assertEquals(
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, huaweiSubMode),
+                state,
+            )
+            assertEquals(miuiPayload, upstreamMiuiAncLevel(route, state!!))
+        }
+        assertNull(upstreamHuaweiAncStateForLevel(route, "0102", off))
+        assertNull(upstreamHuaweiAncStateForLevel(route, "02ff", off))
+        assertEquals(
+            "0000",
+            upstreamMiuiAncLevel(
+                route,
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x02),
+            ),
+        )
     }
 }

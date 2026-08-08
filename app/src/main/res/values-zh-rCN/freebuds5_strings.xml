@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="freebuds5_smart_features">智能功能</string>
+    <string name="freebuds5_wear_detection">佩戴检测</string>
+    <string name="freebuds5_sound_and_connection">音效与连接</string>
+    <string name="freebuds5_sound_effect">耳机音效</string>
+    <string name="freebuds5_sound_effect_default">默认</string>
+    <string name="freebuds5_sound_effect_bass">低音增强</string>
+    <string name="freebuds5_sound_effect_treble">高音增强</string>
+    <string name="freebuds5_sound_effect_clear_voice">清晰人声</string>
+    <string name="freebuds5_high_quality_audio">高清音质</string>
+    <string name="freebuds5_low_latency">低时延模式</string>
+    <string name="freebuds5_state_unknown">正在读取耳机状态</string>
+    <string name="freebuds5_state_hint">佩戴检测、耳机音效和高清音质会从耳机读取；低时延仅显示本模块最后一次设置。</string>
+</resources>

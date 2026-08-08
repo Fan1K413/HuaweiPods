@@ -38,6 +38,7 @@ import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.decodeHuaweiDeviceRouteFromBroadcast
+import moe.chenxy.huaweipods.pods.defaultAncSubMode
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.pods.hasChargingCase
 import moe.chenxy.huaweipods.pods.isSupported
@@ -45,6 +46,7 @@ import moe.chenxy.huaweipods.pods.isKnown
 import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsAncStateReadback
+import moe.chenxy.huaweipods.pods.supportsAncSubMode
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
 import moe.chenxy.huaweipods.pods.supportsTransparency
 import moe.chenxy.huaweipods.config.ConfigManager
@@ -188,7 +190,9 @@ private fun PopupContent(
 
     val batteryParams = remember { mutableStateOf(BatteryParams()) }
     val ancMode = remember { mutableStateOf(NoiseControlMode.UNKNOWN) }
-    val ancLevel = remember { mutableStateOf(HuaweiAncLevel.ADAPTIVE.protocolValue) }
+    val ancLevel = remember(target.route) {
+        mutableStateOf(target.route.defaultAncSubMode ?: HuaweiAncLevel.ADAPTIVE.protocolValue)
+    }
     val hasAncLevel = remember { mutableStateOf(false) }
     val transparencySubMode = remember { mutableStateOf(-1) }
 
@@ -215,7 +219,7 @@ private fun PopupContent(
                             ?.let { subMode ->
                                 when (reportedMode) {
                                     NoiseControlMode.NOISE_CANCELLATION ->
-                                        if (HuaweiAncLevel.fromProtocolValue(subMode) != null) {
+                                        if (target.route.supportsAncSubMode(subMode)) {
                                             ancLevel.value = subMode
                                             hasAncLevel.value = true
                                         }
@@ -232,11 +236,10 @@ private fun PopupContent(
                         val level = intent.getIntExtra("level", ancLevel.value)
                         when {
                             target.route.supportsAncDirectionDial -> ancLevel.value = level.coerceIn(0, 8)
-                            target.route.supportsDiscreteAncLevels ->
-                                HuaweiAncLevel.fromProtocolValue(level)?.let {
-                                    ancLevel.value = it.protocolValue
-                                    hasAncLevel.value = true
-                                }
+                            target.route.supportsDiscreteAncLevels && target.route.supportsAncSubMode(level) -> {
+                                ancLevel.value = level
+                                hasAncLevel.value = true
+                            }
                         }
                     }
                     HuaweiPodsAction.ACTION_PODS_BATTERY_CHANGED -> {
@@ -316,7 +319,7 @@ private fun PopupContent(
                 val subMode = when (targetMode) {
                     NoiseControlMode.NOISE_CANCELLATION ->
                         ancLevel.value.takeIf {
-                            hasAncLevel.value && HuaweiAncLevel.fromProtocolValue(it) != null
+                            hasAncLevel.value && route.supportsAncSubMode(it)
                         }
                     NoiseControlMode.TRANSPARENCY -> {
                         transparencySubMode.value
@@ -339,7 +342,7 @@ private fun PopupContent(
         val safeLevel = when {
             route.supportsAncDirectionDial -> level.coerceIn(0, 8)
             route.supportsDiscreteAncLevels && ancMode.value == NoiseControlMode.NOISE_CANCELLATION ->
-                level.takeIf { HuaweiAncLevel.fromProtocolValue(it) != null } ?: return
+                level.takeIf(route::supportsAncSubMode) ?: return
             route.supportsTransparency && ancMode.value == NoiseControlMode.TRANSPARENCY ->
                 level.takeIf { it in popupTransparencySubModes(route) } ?: return
             else -> return

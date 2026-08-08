@@ -77,6 +77,40 @@ class HuaweiHfpAncStateTest {
     }
 
     @Test
+    fun `FreeBuds 5 accepts only its captured three ANC submodes`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS5
+        listOf(0x03, 0x01, 0x00).forEach { level ->
+            assertEquals(
+                level,
+                normalizeHuaweiAncSubMode(
+                    route,
+                    NoiseControlMode.NOISE_CANCELLATION,
+                    level,
+                    offState,
+                ),
+            )
+        }
+        assertEquals(
+            0x03,
+            normalizeHuaweiAncSubMode(
+                route,
+                NoiseControlMode.NOISE_CANCELLATION,
+                0x02,
+                offState,
+            ),
+        )
+        assertEquals(
+            0x01,
+            normalizeHuaweiAncSubMode(
+                route,
+                NoiseControlMode.NOISE_CANCELLATION,
+                0x02,
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x01),
+            ),
+        )
+    }
+
+    @Test
     fun `invalid FreeBuds 6i submodes fall back to previous valid state then model default`() {
         assertEquals(
             HuaweiAncLevel.DEEP.protocolValue,

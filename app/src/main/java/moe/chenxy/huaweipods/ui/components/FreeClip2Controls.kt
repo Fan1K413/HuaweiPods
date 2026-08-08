@@ -3,7 +3,10 @@ package moe.chenxy.huaweipods.ui.components
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -14,9 +17,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +38,9 @@ import moe.chenxy.huaweipods.pods.FreeClip2SoundEffect
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialScene
 import moe.chenxy.huaweipods.pods.HuaweiFreeClip2Controller
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -44,6 +52,45 @@ fun FreeClip2Controls(address: String) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE) }
     val keyPrefix = remember(address) { "freeclip2_${address.uppercase().ifBlank { "unknown" }}_" }
+    var spatialMode by remember(address) {
+        mutableStateOf(
+            enumPreference(
+                prefs.getString(keyPrefix + "spatial_mode", null),
+                FreeClip2SpatialAudioMode.OFF,
+            ),
+        )
+    }
+    var spatialScene by remember(address) {
+        mutableStateOf(
+            enumPreference(
+                prefs.getString(keyPrefix + "spatial_scene", null),
+                FreeClip2SpatialScene.DEFAULT,
+            ),
+        )
+    }
+    var soundEffect by remember(address) {
+        mutableStateOf(
+            enumPreference(
+                prefs.getString(keyPrefix + "sound_effect", null),
+                FreeClip2SoundEffect.DEFAULT,
+            ),
+        )
+    }
+
+    FreeClip2AudioReadbackEffect(address) { mode, scene, effect ->
+        mode?.let {
+            spatialMode = it
+            prefs.edit().putString(keyPrefix + "spatial_mode", it.name).apply()
+        }
+        scene?.let {
+            spatialScene = it
+            prefs.edit().putString(keyPrefix + "spatial_scene", it.name).apply()
+        }
+        effect?.let {
+            soundEffect = it
+            prefs.edit().putString(keyPrefix + "sound_effect", it.name).apply()
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         SectionTitle(R.string.freeclip2_smart_features)
@@ -66,14 +113,6 @@ fun FreeClip2Controls(address: String) {
         }
 
         SectionTitle(R.string.freeclip2_spatial_audio)
-        var spatialMode by remember(address) {
-            mutableStateOf(
-                enumPreference(
-                    prefs.getString(keyPrefix + "spatial_mode", null),
-                    FreeClip2SpatialAudioMode.OFF,
-                ),
-            )
-        }
         EnumPreference(
             title = stringResource(R.string.freeclip2_spatial_mode),
             selected = spatialMode,
@@ -81,24 +120,12 @@ fun FreeClip2Controls(address: String) {
             label = { mode -> stringResource(mode.labelRes()) },
             onSelected = { mode, complete ->
                 context.setFreeClip2SpatialMode(address, mode) { success ->
-                    if (success) {
-                        spatialMode = mode
-                        prefs.edit().putString(keyPrefix + "spatial_mode", mode.name).apply()
-                    }
                     complete(success)
                 }
             },
         )
 
         if (spatialMode != FreeClip2SpatialAudioMode.OFF) {
-            var spatialScene by remember(address) {
-                mutableStateOf(
-                    enumPreference(
-                        prefs.getString(keyPrefix + "spatial_scene", null),
-                        FreeClip2SpatialScene.DEFAULT,
-                    ),
-                )
-            }
             EnumPreference(
                 title = stringResource(R.string.freeclip2_spatial_scene),
                 selected = spatialScene,
@@ -106,10 +133,6 @@ fun FreeClip2Controls(address: String) {
                 label = { scene -> stringResource(scene.labelRes()) },
                 onSelected = { scene, complete ->
                     context.setFreeClip2SpatialScene(address, scene) { success ->
-                        if (success) {
-                            spatialScene = scene
-                            prefs.edit().putString(keyPrefix + "spatial_scene", scene.name).apply()
-                        }
                         complete(success)
                     }
                 },
@@ -117,14 +140,6 @@ fun FreeClip2Controls(address: String) {
         }
 
         SectionTitle(R.string.freeclip2_sound_and_connection)
-        var soundEffect by remember(address) {
-            mutableStateOf(
-                enumPreference(
-                    prefs.getString(keyPrefix + "sound_effect", null),
-                    FreeClip2SoundEffect.PRESET_1,
-                ),
-            )
-        }
         EnumPreference(
             title = stringResource(R.string.freeclip2_sound_effect),
             selected = soundEffect,
@@ -132,10 +147,6 @@ fun FreeClip2Controls(address: String) {
             label = { effect -> stringResource(effect.labelRes()) },
             onSelected = { effect, complete ->
                 context.setFreeClip2SoundEffect(address, effect) { success ->
-                    if (success) {
-                        soundEffect = effect
-                        prefs.edit().putString(keyPrefix + "sound_effect", effect.name).apply()
-                    }
                     complete(success)
                 }
             },
@@ -304,8 +315,7 @@ private fun Context.setFreeClip2SpatialMode(
     value: FreeClip2SpatialAudioMode,
     complete: (Boolean) -> Unit,
 ) {
-    val device = freeClip2Device(address) ?: return complete(false)
-    HuaweiFreeClip2Controller.setSpatialAudioMode(this, device, value, complete)
+    complete(sendFreeClip2AudioSetting(address, HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE, value.extraValue))
 }
 
 private fun Context.setFreeClip2SpatialScene(
@@ -313,8 +323,7 @@ private fun Context.setFreeClip2SpatialScene(
     value: FreeClip2SpatialScene,
     complete: (Boolean) -> Unit,
 ) {
-    val device = freeClip2Device(address) ?: return complete(false)
-    HuaweiFreeClip2Controller.setSpatialScene(this, device, value, complete)
+    complete(sendFreeClip2AudioSetting(address, HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_SCENE, value.extraValue))
 }
 
 private fun Context.setFreeClip2SoundEffect(
@@ -322,8 +331,84 @@ private fun Context.setFreeClip2SoundEffect(
     value: FreeClip2SoundEffect,
     complete: (Boolean) -> Unit,
 ) {
-    val device = freeClip2Device(address) ?: return complete(false)
-    HuaweiFreeClip2Controller.setSoundEffect(this, device, value, complete)
+    complete(sendFreeClip2AudioSetting(address, HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SOUND_EFFECT, value.extraValue))
+}
+
+private fun Context.sendFreeClip2AudioSetting(address: String, kind: String, value: String): Boolean {
+    if (!BluetoothAdapter.checkBluetoothAddress(address)) return false
+    return runCatching {
+        (applicationContext ?: this).sendBroadcast(Intent(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_SET).apply {
+            putExtra("address", address)
+            encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
+            putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_AUDIO_KIND, kind)
+            putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_AUDIO_VALUE, value)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+        })
+    }.isSuccess
+}
+
+@Composable
+private fun FreeClip2AudioReadbackEffect(
+    address: String,
+    onReadback: (
+        FreeClip2SpatialAudioMode?,
+        FreeClip2SpatialScene?,
+        FreeClip2SoundEffect?,
+    ) -> Unit,
+) {
+    val context = LocalContext.current
+    val currentOnReadback by rememberUpdatedState(onReadback)
+    DisposableEffect(address, context) {
+        if (!BluetoothAdapter.checkBluetoothAddress(address)) {
+            return@DisposableEffect onDispose { }
+        }
+        val receiverContext = context.applicationContext ?: context
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val receivedIntent = intent ?: return
+                if (receivedIntent.action != HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED) return
+                if (!receivedIntent.getStringExtra("address").equals(address, ignoreCase = true)) return
+                if (!receivedIntent.getBooleanExtra(
+                        HuaweiPodsAction.EXTRA_FREECLIP2_AUDIO_CONFIRMED,
+                        false,
+                    )
+                ) {
+                    return
+                }
+                currentOnReadback(
+                    FreeClip2SpatialAudioMode.fromExtraValue(
+                        receivedIntent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_SPATIAL_MODE),
+                    ),
+                    FreeClip2SpatialScene.fromExtraValue(
+                        receivedIntent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_SPATIAL_SCENE),
+                    ),
+                    FreeClip2SoundEffect.fromExtraValue(
+                        receivedIntent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_SOUND_EFFECT),
+                    ),
+                )
+            }
+        }
+        receiverContext.registerReceiver(
+            receiver,
+            IntentFilter(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED),
+            Context.RECEIVER_EXPORTED,
+        )
+        receiverContext.sendBroadcast(Intent(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_REFRESH).apply {
+            putExtra("address", address)
+            encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
+            putExtra("force", true)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+        })
+        onDispose {
+            runCatching { receiverContext.unregisterReceiver(receiver) }
+        }
+    }
 }
 
 private inline fun <reified T : Enum<T>> enumPreference(value: String?, fallback: T): T =
@@ -343,7 +428,8 @@ private fun FreeClip2SpatialScene.labelRes(): Int = when (this) {
 }
 
 private fun FreeClip2SoundEffect.labelRes(): Int = when (this) {
-    FreeClip2SoundEffect.PRESET_1 -> R.string.freeclip2_sound_effect_1
-    FreeClip2SoundEffect.PRESET_2 -> R.string.freeclip2_sound_effect_2
-    FreeClip2SoundEffect.PRESET_3 -> R.string.freeclip2_sound_effect_3
+    FreeClip2SoundEffect.DEFAULT -> R.string.freeclip2_sound_effect_default
+    FreeClip2SoundEffect.SPORT_ENHANCE -> R.string.freeclip2_sound_effect_sport
+    FreeClip2SoundEffect.TREBLE_ENHANCE -> R.string.freeclip2_sound_effect_treble
+    FreeClip2SoundEffect.CLEAR_VOICE -> R.string.freeclip2_sound_effect_clear_voice
 }

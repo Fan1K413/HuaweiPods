@@ -54,6 +54,7 @@ import moe.chenxy.huaweipods.pods.HuaweiGestureAction
 import moe.chenxy.huaweipods.pods.HuaweiGestureController
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
 import moe.chenxy.huaweipods.ui.components.AncSwitch
+import moe.chenxy.huaweipods.ui.components.FreeBuds5Controls
 import moe.chenxy.huaweipods.ui.components.FreeClip2Controls
 import moe.chenxy.huaweipods.ui.components.HuaweiGestureControls
 import moe.chenxy.huaweipods.ui.components.PodStatus
@@ -228,8 +229,10 @@ private fun rememberPodImagePainter(path: String?, route: HuaweiDeviceRoute) = r
     }
 } ?: painterResource(
     when (route) {
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> R.drawable.img_freebuds5_box
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> R.drawable.img_freebuds6i_box
         HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> R.drawable.img_freeclip2_box
+        HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> R.drawable.img_eyewear2_box
         else -> R.drawable.img_box
     },
 )
@@ -282,6 +285,16 @@ private fun LazyListScope.podControlItems(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
             ) {
                 FreeClip2Controls(address = connectedDeviceAddress)
+            }
+        }
+    }
+
+    if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS5) {
+        item {
+            Card(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                FreeBuds5Controls(address = connectedDeviceAddress)
             }
         }
     }

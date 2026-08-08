@@ -8,6 +8,7 @@
     <queries>
         <package android:name="com.android.bluetooth" />
         <package android:name="com.android.settings" />
+        <package android:name="com.huawei.smartaudio" />
         <package android:name="com.milink.service" />
         <package android:name="com.xiaomi.bluetooth" />
     </queries>
@@ -21,6 +22,10 @@
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.HuaweiPods">
+
+        <meta-data
+            android:name="moe.chenxy.huaweipods.MODULE_BUILD_ID"
+            android:value="${moduleBuildId}" />
 
         <activity-alias
             android:name=".LauncherActivity"
@@ -60,6 +65,10 @@
             android:authorities="${applicationId}.podimages"
             android:exported="true"
             android:grantUriPermissions="false" />
+        <service
+            android:name=".smartaudio.SmartAudioImageDownloadJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 
 </manifest>

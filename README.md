@@ -29,7 +29,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 | 型号 | 状态 | 当前能力 |
 | --- | --- | --- |
 | HUAWEI FreeBuds 3 | 稳定 | 电量、降噪开关、9 档降噪空间方向、双击手势与系统界面集成 |
-| HUAWEI FreeBuds 5 | 基础支持 | 电量、降噪 / 关闭两态控制；暂不支持降噪状态回读与手势设置 |
+| HUAWEI FreeBuds 5 | 扩展支持 | 电量、降噪 / 关闭与状态回读、智慧动态 / 轻度 / 均衡三档降噪、佩戴检测、4 种官方音效、高清音质与低时延控制；手势设置待补充 |
 | HUAWEI FreeBuds 6i | 扩展支持 | 电量、通透 / 降噪 / 关闭、4 档降噪、通透人声模式、双击 / 三击手势与专属图片 |
 | HUAWEI FreeBuds Pro 3 | 扩展支持 | 电量、三态控制与状态回读、4 档降噪、通透人声模式、长按 / 捏合 / 滑动手势 |
 | HUAWEI FreeBuds Pro 4 | 基础支持 | 电量、降噪 / 关闭两态控制；暂不支持降噪状态回读与手势设置 |
@@ -51,6 +51,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 - 接入融合设备中心，并支持已配对设备间流转
 - 显示左右耳、充电盒或眼镜左右镜腿电量
 - 按机型提供主动降噪、通透模式、降噪等级和手势设置
+- 从华为智慧音频读取当前设备的精确资源身份，并从华为官方 CDN 校验、缓存对应机型与配色图片
 - 耳机名称被修改或无法自动识别时，可按蓝牙地址手动选择型号
 - 首次启动提供设置引导，并可在应用内检查 GitHub 更新
 - 覆盖安装新版本后提示重启作用域，无需直接重启手机
@@ -70,6 +71,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 
    - `com.android.bluetooth`
    - `com.android.settings`
+   - `com.huawei.smartaudio`
    - `com.milink.service`
    - `com.xiaomi.bluetooth`
 
@@ -80,11 +82,13 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 
 ## 适配新型号
 
-未支持型号需要先采集官方智慧音频与耳机之间的真实通信数据。通用协议采集版只负责引导和记录，不代表该型号已经适配。
+未支持型号需要先采集华为智慧音频（`com.huawei.smartaudio`）与耳机之间的真实通信数据。通用协议采集版只负责引导和记录，不代表该型号已经适配。
 
 请勿直接公开包含设备地址、账号或其他个人信息的原始采集文件。提交前请检查并脱敏，完整流程见 [华为耳机协议采集指南](docs/DEBUG_CAPTURE_GUIDE.md)。
 
-建议优先加入 QQ 群 `1022359908` 参与对应型号测试交流；GitHub则提交至 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)。
+采集停止时，Debug 向导会在当前蓝牙设备的 DeviceInfo 已确认 `modelId/subModelId` 后，从固定的华为官方 CDN 路径自动下载、校验并附加当前子型号配置与图片 ZIP；不会按默认配色猜测。自动附加失败时，才用 MT 管理器进入智慧音频应用目录 1，搜索 `iv_device_logo.png` 或 `device_icon.png` 定位资源，并手动选择同目录的原始 `<modelId>_<subModel>.zip`。不要打包整个应用数据目录。
+
+建议优先加入 QQ 群 `1022359908` 参与对应型号测试交流；可复现问题也可提交至 [GitHub Issues](https://github.com/Nshpiter/HuaweiPods/issues)。
 
 ## 构建
 
@@ -96,7 +100,7 @@ HuaweiPods 是一个面向小米 / Redmi HyperOS 设备的 Xposed 模块，将�
 ./gradlew :app:assembleDebug
 ```
 
-`release` 不注入华为官方应用；`debug` 包含协议采集功能。两者使用相同应用 ID，无法同时安装。
+`release` 只在华为智慧音频中读取当前设备的资源身份，用于下载官方机型图片，不采集协议；`debug` 另外包含协议采集功能。两者使用相同应用 ID，无法同时安装。
 
 ## 致谢
 

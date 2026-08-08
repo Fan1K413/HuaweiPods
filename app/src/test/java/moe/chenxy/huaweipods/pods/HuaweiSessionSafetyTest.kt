@@ -85,6 +85,53 @@ class HuaweiSessionSafetyTest {
     }
 
     @Test
+    fun `FreeClip 2 audio commands require exact address and FreeClip 2 route`() {
+        val address = "00:11:22:33:44:55"
+        val route = HuaweiDeviceRoute.HUAWEI_FREECLIP2
+
+        assertTrue(
+            matchesFreeClip2AudioSessionTarget(
+                activeAddress = address,
+                activeRoute = route,
+                requestedAddress = address.lowercase(),
+                requestedRoute = route,
+            ),
+        )
+        assertFalse(
+            matchesFreeClip2AudioSessionTarget(
+                activeAddress = address,
+                activeRoute = route,
+                requestedAddress = null,
+                requestedRoute = route,
+            ),
+        )
+        assertFalse(
+            matchesFreeClip2AudioSessionTarget(
+                activeAddress = address,
+                activeRoute = route,
+                requestedAddress = "00:11:22:33:44:66",
+                requestedRoute = route,
+            ),
+        )
+        assertFalse(
+            matchesFreeClip2AudioSessionTarget(
+                activeAddress = address,
+                activeRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+                requestedAddress = address,
+                requestedRoute = route,
+            ),
+        )
+        assertFalse(
+            matchesFreeClip2AudioSessionTarget(
+                activeAddress = address,
+                activeRoute = route,
+                requestedAddress = address,
+                requestedRoute = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            ),
+        )
+    }
+
+    @Test
     fun `Pro 5 preserves protocol reported zero percent availability`() {
         val reportedBattery = BatteryParams(
             left = PodParams(battery = 0, isConnected = true, rawStatus = 1),

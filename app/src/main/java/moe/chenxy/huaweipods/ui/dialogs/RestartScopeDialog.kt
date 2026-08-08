@@ -41,6 +41,7 @@ data class RestartScope(
 @Composable
 fun RestartScopeDialog(
     show: Boolean,
+    restarting: Boolean,
     scopes: List<RestartScope>,
     onDismissRequest: () -> Unit,
     onConfirm: (List<String>) -> Unit,
@@ -52,7 +53,9 @@ fun RestartScopeDialog(
     OverlayDialog(
         modifier = responsiveOverlayDialogModifier(),
         title = stringResource(R.string.restart_scope_title),
-        summary = stringResource(R.string.restart_scope_summary),
+        summary = stringResource(
+            if (restarting) R.string.restart_scope_running else R.string.restart_scope_summary,
+        ),
         show = show,
         onDismissRequest = onDismissRequest,
     ) {
@@ -65,6 +68,7 @@ fun RestartScopeDialog(
                 RestartScopeRow(
                     scope = scope,
                     checked = checked,
+                    enabled = !restarting,
                     onClick = {
                         selectedPackages = if (checked) {
                             selectedPackages - scope.packageName
@@ -85,6 +89,7 @@ fun RestartScopeDialog(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp),
+                enabled = !restarting,
             )
             TextButton(
                 text = stringResource(R.string.confirm),
@@ -92,7 +97,7 @@ fun RestartScopeDialog(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp),
-                enabled = selectedPackages.isNotEmpty(),
+                enabled = selectedPackages.isNotEmpty() && !restarting,
                 colors = ButtonDefaults.textButtonColorsPrimary(),
             )
         }
@@ -103,6 +108,7 @@ fun RestartScopeDialog(
 private fun RestartScopeRow(
     scope: RestartScope,
     checked: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -115,7 +121,7 @@ private fun RestartScopeRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Checkbox, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Checkbox, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -129,7 +135,7 @@ private fun RestartScopeRow(
         Spacer(Modifier.width(12.dp))
         Checkbox(
             state = ToggleableState(checked),
-            onClick = onClick,
+            onClick = { if (enabled) onClick() },
         )
     }
 }

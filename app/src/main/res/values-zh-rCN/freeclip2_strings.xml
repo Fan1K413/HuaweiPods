@@ -16,9 +16,10 @@
     <string name="freeclip2_spatial_scene_concert">音乐厅</string>
     <string name="freeclip2_sound_and_connection">音效与连接</string>
     <string name="freeclip2_sound_effect">耳机音效</string>
-    <string name="freeclip2_sound_effect_1">官方预设 1</string>
-    <string name="freeclip2_sound_effect_2">官方预设 2</string>
-    <string name="freeclip2_sound_effect_3">官方预设 3</string>
+    <string name="freeclip2_sound_effect_default">默认</string>
+    <string name="freeclip2_sound_effect_sport">运动增效</string>
+    <string name="freeclip2_sound_effect_treble">高音增强</string>
+    <string name="freeclip2_sound_effect_clear_voice">清晰人声</string>
     <string name="freeclip2_sound_quality_priority">声音质量优先</string>
     <string name="freeclip2_low_latency">低时延模式</string>
     <string name="freeclip2_dual_device">双设备连接</string>

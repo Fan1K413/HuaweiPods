@@ -5,6 +5,8 @@ import android.util.Log
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.concurrent.CopyOnWriteArraySet
+import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.PodImagePrefs
 
 class HuaweiPodsApp : Application(), XposedServiceHelper.OnServiceListener {
     override fun onCreate() {
@@ -15,6 +17,14 @@ class HuaweiPodsApp : Application(), XposedServiceHelper.OnServiceListener {
     override fun onServiceBind(service: XposedService) {
         Log.d(TAG, "LSPosed service bound api=${service.apiVersion} framework=${service.frameworkName}/${service.frameworkVersionCode}")
         xposedService = service
+        runCatching {
+            PodImagePrefs.syncSnapshotToRemote(
+                prefs = getSharedPreferences(ConfigManager.PREFS_NAME, MODE_PRIVATE),
+                service = service,
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to synchronize local pod images to remote preferences", error)
+        }
         notifyListeners(service)
     }
 

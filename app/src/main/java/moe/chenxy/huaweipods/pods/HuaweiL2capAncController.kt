@@ -136,13 +136,15 @@ object HuaweiL2capAncController {
             description = "anc-state-query",
             responseWindowMs = 1_500L,
             responseComplete = { response ->
-                HuaweiRfcommResponseParser.parseAncState(response) != null
+                HuaweiRfcommResponseParser.parseAncState(response)
+                    ?.let(route::validateAncState) != null
             },
             onComplete = { success ->
                 if (!success) onResult(null)
             },
             onResponse = { response ->
                 val state = HuaweiRfcommResponseParser.parseAncState(response)
+                    ?.let(route::validateAncState)
                 RfcommLog.d(
                     context.applicationContext ?: context,
                     "RFCOMM/RX",

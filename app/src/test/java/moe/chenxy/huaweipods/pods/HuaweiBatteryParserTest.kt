@@ -35,4 +35,21 @@ class HuaweiBatteryParserTest {
         assertEquals(true, result?.battery?.left?.isCharging)
         assertEquals(true, result?.battery?.case?.isConnected)
     }
+
+    @Test
+    fun `update report replaces stale charging snapshot`() {
+        val initial = HuaweiBatteryParser.parse(
+            "+HUAWEIBATTERY=6,2,100,3,1,4,100,5,1,6,55,7,0",
+        )
+        val updated = HuaweiBatteryParser.parse(
+            "AT+UPDATEHUAWEIBATTERY=6,2,99,3,0,4,98,5,0,6,55,7,0",
+        )
+
+        assertEquals(100, initial?.battery?.left?.battery)
+        assertEquals(true, initial?.battery?.left?.isCharging)
+        assertEquals(99, updated?.battery?.left?.battery)
+        assertEquals(98, updated?.battery?.right?.battery)
+        assertEquals(false, updated?.battery?.left?.isCharging)
+        assertEquals(false, updated?.battery?.right?.isCharging)
+    }
 }

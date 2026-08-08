@@ -23,7 +23,7 @@ The unified build supports the 11 models below in one APK. Model-specific test A
 | Model | Status | Integrated capabilities |
 | --- | --- | --- |
 | HUAWEI FreeBuds 3 | Stable | Battery, ANC on/off, nine-position spatial ANC dial, double-tap gestures, and system UI integration |
-| HUAWEI FreeBuds 5 | Basic support | Battery and ANC/off; no verified ANC state readback or gesture settings |
+| HUAWEI FreeBuds 5 | Extended support | Battery, ANC/off readback, Smart/Light/Balanced ANC levels, wear detection, four official sound presets, high-quality audio and low-latency controls; gesture settings remain pending |
 | HUAWEI FreeBuds 6i | Extended support | Battery, transparency/ANC/off, four ANC levels, voice transparency, double/triple-tap gestures, and dedicated images |
 | HUAWEI FreeBuds Pro 3 | Extended support | Battery, three-mode control and readback, four ANC levels, voice transparency, long-press/pinch/swipe gestures |
 | HUAWEI FreeBuds Pro 4 | Basic support | Battery and ANC/off; no verified ANC state readback or gesture settings |
@@ -47,6 +47,7 @@ The unified build supports the 11 models below in one APK. Model-specific test A
 - **Manual model binding** by Bluetooth address when a device has been renamed or cannot be identified automatically.
 - **First-run setup guide** and in-app GitHub release checks.
 - **Post-update scope restart prompt** after installing a newer APK.
+- **Official model images** downloaded from Huawei's CDN only after Smart Audio reports an exact device and color identity; manual and built-in images remain available as fallbacks.
 
 ## Requirements
 
@@ -62,6 +63,7 @@ The unified build supports the 11 models below in one APK. Model-specific test A
 3. Select the recommended scopes:
    - `com.android.bluetooth`
    - `com.android.settings`
+   - `com.huawei.smartaudio`
    - `com.milink.service`
    - `com.xiaomi.bluetooth`
 4. Reboot the phone, or restart the scoped apps from HuaweiPods.

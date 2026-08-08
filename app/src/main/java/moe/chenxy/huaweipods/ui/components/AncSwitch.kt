@@ -36,6 +36,7 @@ import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.NoiseControlMode
+import moe.chenxy.huaweipods.pods.ancLevelOptions
 import moe.chenxy.huaweipods.pods.isNoiseCancellation
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
@@ -96,12 +97,15 @@ fun AncSwitch(
         ) {
             HuaweiAncSubModeSelector(
                 title = stringResource(R.string.anc_level_title),
-                values = listOf(
-                    HuaweiAncLevel.ADAPTIVE.protocolValue to stringResource(R.string.anc_level_adaptive),
-                    HuaweiAncLevel.LIGHT.protocolValue to stringResource(R.string.anc_level_light),
-                    HuaweiAncLevel.BALANCED.protocolValue to stringResource(R.string.anc_level_balanced),
-                    HuaweiAncLevel.DEEP.protocolValue to stringResource(R.string.anc_level_deep),
-                ),
+                values = deviceRoute.ancLevelOptions.map { option ->
+                    val label = when (option.level) {
+                        HuaweiAncLevel.ADAPTIVE -> stringResource(R.string.anc_level_adaptive)
+                        HuaweiAncLevel.LIGHT -> stringResource(R.string.anc_level_light)
+                        HuaweiAncLevel.BALANCED -> stringResource(R.string.anc_level_balanced)
+                        HuaweiAncLevel.DEEP -> stringResource(R.string.anc_level_deep)
+                    }
+                    option.protocolValue to label
+                },
                 selectedValue = huaweiAncLevel,
                 onValueChange = onHuaweiAncLevelChange,
                 compact = compact,

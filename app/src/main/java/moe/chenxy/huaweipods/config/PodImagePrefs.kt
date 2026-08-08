@@ -22,6 +22,11 @@ data class EarphonePref(
     val boxImagePath: String? = null,
     val leftImagePath: String? = null,
     val rightImagePath: String? = null,
+    val cloudModelId: String? = null,
+    val cloudSubModelId: String? = null,
+    val cloudBoxImagePath: String? = null,
+    val cloudLeftImagePath: String? = null,
+    val cloudRightImagePath: String? = null,
     val lastConnectedAt: Long = System.currentTimeMillis(),
 ) {
     fun imagePath(resource: PodImageResource): String? = when (resource) {
@@ -29,12 +34,30 @@ data class EarphonePref(
         PodImageResource.LEFT -> leftImagePath
         PodImageResource.RIGHT -> rightImagePath
     }
+
+    fun cloudImagePath(resource: PodImageResource): String? = when (resource) {
+        PodImageResource.BOX -> cloudBoxImagePath
+        PodImageResource.LEFT -> cloudLeftImagePath
+        PodImageResource.RIGHT -> cloudRightImagePath
+    }
 }
+
+@Serializable
+private data class CloudImageIdentityPref(
+    val address: String,
+    val modelId: String,
+    val subModelId: String,
+)
 
 object PodImagePrefs {
     const val AUTHORITY = "moe.chenxy.huaweipods.podimages"
     private const val PREF_KEY_EARPHONES = "earphone_prefs_json"
+    private const val PREF_KEY_CLOUD_IDENTITIES = "cloud_image_identities_json"
     private const val IMAGE_DIR = "pod_images"
+
+    private val mutationLock = Any()
+    private val remoteSyncLock = Any()
+    private var mutationRevision = 0L
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -66,15 +89,16 @@ object PodImagePrefs {
         name: String,
     ): List<EarphonePref> {
         if (address.isBlank()) return load(prefs)
-        val current = load(prefs)
-        val existing = current.firstOrNull { it.address.equals(address, ignoreCase = true) }
-        val updated = (existing ?: EarphonePref(address = address, name = name)).copy(
-            name = name.ifBlank { existing?.name.orEmpty() },
-            lastConnectedAt = System.currentTimeMillis(),
-        )
-        val normalized = listOf(updated) + current.filterNot { it.address.equals(address, ignoreCase = true) }
-        service?.getRemotePreferences(ConfigManager.PREFS_NAME)?.let { save(it, normalized) }
-        return save(prefs, normalized)
+        val mutation = mutate(prefs) { current ->
+            val existing = current.firstOrNull { it.address.equals(address, ignoreCase = true) }
+            val updated = (existing ?: EarphonePref(address = address, name = name)).copy(
+                name = name.ifBlank { existing?.name.orEmpty() },
+                lastConnectedAt = System.currentTimeMillis(),
+            )
+            listOf(updated) + current.filterNot { it.address.equals(address, ignoreCase = true) }
+        }
+        syncRemote(service, mutation)
+        return mutation.earphones
     }
 
     fun saveImages(
@@ -87,33 +111,197 @@ object PodImagePrefs {
         clearedImages: Set<PodImageResource> = emptySet(),
     ): List<EarphonePref> {
         if (address.isBlank()) return load(prefs)
-        val current = load(prefs)
-        val existing = current.firstOrNull { it.address.equals(address, ignoreCase = true) }
-        var updated = existing ?: EarphonePref(address = address, name = name)
-        clearedImages.forEach { resource ->
-            updated = updated.withImagePath(resource, null)
+        // ContentResolver I/O 不占用偏好锁；锁只覆盖原子 read-modify-write。
+        val selectedPaths = selectedImages.mapNotNull { (resource, uri) ->
+            uri?.let { resource to copyImage(context, address, resource, it) }
+        }.toMap()
+        val mutation = mutate(prefs) { current ->
+            val existing = current.firstOrNull { it.address.equals(address, ignoreCase = true) }
+            var updated = existing ?: EarphonePref(address = address, name = name)
+            clearedImages.forEach { resource -> updated = updated.withImagePath(resource, null) }
+            selectedPaths.forEach { (resource, path) -> updated = updated.withImagePath(resource, path) }
+            updated = updated.copy(
+                name = name.ifBlank { updated.name },
+                lastConnectedAt = System.currentTimeMillis(),
+            )
+            listOf(updated) + current.filterNot { it.address.equals(address, ignoreCase = true) }
         }
-        selectedImages.forEach { (resource, uri) ->
-            if (uri != null) {
-                updated = updated.withImagePath(resource, copyImage(context, address, resource, uri))
-            }
-        }
-        updated = updated.copy(
-            name = name.ifBlank { updated.name },
-            lastConnectedAt = System.currentTimeMillis(),
-        )
-        val normalized = listOf(updated) + current.filterNot { it.address.equals(address, ignoreCase = true) }
-        service?.getRemotePreferences(ConfigManager.PREFS_NAME)?.let { save(it, normalized) }
-        return save(prefs, normalized)
+        syncRemote(service, mutation)
+        return mutation.earphones
     }
 
-    private fun save(prefs: SharedPreferences, earphones: List<EarphonePref>): List<EarphonePref> {
+    /** 保存官方 CDN 图片到独立槽位，不覆盖用户手动选择的图片。 */
+    fun saveCloudImages(
+        prefs: SharedPreferences,
+        service: XposedService? = null,
+        address: String,
+        modelId: String,
+        subModelId: String,
+        imagePaths: Map<PodImageResource, String>,
+    ): List<EarphonePref> {
+        if (address.isBlank() || imagePaths[PodImageResource.BOX].isNullOrBlank()) return load(prefs)
+        val mutation = mutate(prefs) { current ->
+            val existing = current.firstOrNull { it.address.equals(address, ignoreCase = true) }
+            val updated = (existing ?: EarphonePref(address = address, name = "")).copy(
+                cloudModelId = modelId,
+                cloudSubModelId = subModelId,
+                cloudBoxImagePath = imagePaths[PodImageResource.BOX],
+                cloudLeftImagePath = imagePaths[PodImageResource.LEFT],
+                cloudRightImagePath = imagePaths[PodImageResource.RIGHT],
+                lastConnectedAt = System.currentTimeMillis(),
+            )
+            listOf(updated) + current.filterNot { it.address.equals(address, ignoreCase = true) }
+        }
+        syncRemote(service, mutation)
+        return mutation.earphones
+    }
+
+    /**
+     * 记录智慧音频刚确认的最新资源身份。必须在调度下载前持久化，供跨进程重启后的 Job 校验。
+     */
+    fun recordLatestCloudIdentity(
+        prefs: SharedPreferences,
+        address: String,
+        modelId: String,
+        subModelId: String,
+    ): Boolean {
+        if (address.isBlank() || modelId.isBlank() || subModelId.isBlank()) return false
+        return synchronized(mutationLock) {
+            val updated = CloudImageIdentityPref(address, modelId, subModelId)
+            val identities = listOf(updated) + loadCloudIdentities(prefs).filterNot {
+                it.address.equals(address, ignoreCase = true)
+            }
+            prefs.edit()
+                .putString(
+                    PREF_KEY_CLOUD_IDENTITIES,
+                    json.encodeToString(ListSerializer(CloudImageIdentityPref.serializer()), identities),
+                )
+                .commit()
+        }
+    }
+
+    internal fun isLatestCloudIdentity(
+        prefs: SharedPreferences,
+        address: String,
+        modelId: String,
+        subModelId: String,
+    ): Boolean = synchronized(mutationLock) {
+        loadCloudIdentities(prefs).firstOrNull {
+            it.address.equals(address, ignoreCase = true)
+        }?.let { it.modelId == modelId && it.subModelId == subModelId } == true
+    }
+
+    /**
+     * 仅当下载身份仍是该地址的最新身份时写入云图。身份比较与偏好写入共享同一把锁，
+     * 因此旧 Job 即使晚于新 Job 完成，也不能覆盖新型号/配色。
+     */
+    fun saveCloudImagesIfLatest(
+        prefs: SharedPreferences,
+        service: XposedService? = null,
+        address: String,
+        modelId: String,
+        subModelId: String,
+        imagePaths: Map<PodImageResource, String>,
+    ): Boolean {
+        if (address.isBlank() || imagePaths[PodImageResource.BOX].isNullOrBlank()) return false
+        val mutation = synchronized(mutationLock) {
+            val latest = loadCloudIdentities(prefs).firstOrNull {
+                it.address.equals(address, ignoreCase = true)
+            }
+            if (latest?.modelId != modelId || latest.subModelId != subModelId) {
+                null
+            } else {
+                mutateLocked(prefs) { current ->
+                    val existing = current.firstOrNull { it.address.equals(address, ignoreCase = true) }
+                    val updated = (existing ?: EarphonePref(address = address, name = "")).copy(
+                        cloudModelId = modelId,
+                        cloudSubModelId = subModelId,
+                        cloudBoxImagePath = imagePaths[PodImageResource.BOX],
+                        cloudLeftImagePath = imagePaths[PodImageResource.LEFT],
+                        cloudRightImagePath = imagePaths[PodImageResource.RIGHT],
+                        lastConnectedAt = System.currentTimeMillis(),
+                    )
+                    listOf(updated) + current.filterNot { it.address.equals(address, ignoreCase = true) }
+                }
+            }
+        } ?: return false
+        syncRemote(service, mutation)
+        return true
+    }
+
+    /** 冷启动绑定 LSPosed 服务后，把最新本地快照完整补写到远程偏好。 */
+    fun syncSnapshotToRemote(
+        prefs: SharedPreferences,
+        service: XposedService,
+    ): List<EarphonePref> = syncSnapshotToRemote(
+        prefs = prefs,
+        remotePrefs = service.getRemotePreferences(ConfigManager.PREFS_NAME),
+    )
+
+    /** 测试入口；远程 IPC 全程不持有 mutationLock。 */
+    internal fun syncSnapshotToRemote(
+        prefs: SharedPreferences,
+        remotePrefs: SharedPreferences,
+    ): List<EarphonePref> = synchronized(remoteSyncLock) {
+        while (true) {
+            val snapshot = synchronized(mutationLock) {
+                PreferenceMutation(load(prefs), mutationRevision)
+            }
+            writeSnapshot(remotePrefs, snapshot.earphones)
+            val stillLatest = synchronized(mutationLock) { snapshot.revision == mutationRevision }
+            if (stillLatest) return@synchronized snapshot.earphones
+        }
+        @Suppress("UNREACHABLE_CODE")
+        emptyList()
+    }
+
+    private fun mutate(
+        prefs: SharedPreferences,
+        transform: (List<EarphonePref>) -> List<EarphonePref>,
+    ): PreferenceMutation = synchronized(mutationLock) {
+        mutateLocked(prefs, transform)
+    }
+
+    private fun mutateLocked(
+        prefs: SharedPreferences,
+        transform: (List<EarphonePref>) -> List<EarphonePref>,
+    ): PreferenceMutation {
+        val normalized = writeSnapshot(prefs, transform(load(prefs)))
+        mutationRevision++
+        return PreferenceMutation(normalized, mutationRevision)
+    }
+
+    /** 远程偏好 IPC 不持有 mutationLock；较旧快照会在发送前被丢弃。 */
+    private fun syncRemote(service: XposedService?, mutation: PreferenceMutation) {
+        val remotePrefs = service?.getRemotePreferences(ConfigManager.PREFS_NAME) ?: return
+        synchronized(remoteSyncLock) {
+            val stillLatest = synchronized(mutationLock) { mutation.revision == mutationRevision }
+            if (stillLatest) writeSnapshot(remotePrefs, mutation.earphones)
+        }
+    }
+
+    private fun writeSnapshot(
+        prefs: SharedPreferences,
+        earphones: List<EarphonePref>,
+    ): List<EarphonePref> {
         val normalized = earphones.distinctBy { it.address.uppercase() }
         prefs.edit()
             .putString(PREF_KEY_EARPHONES, json.encodeToString(ListSerializer(EarphonePref.serializer()), normalized))
             .apply()
         return normalized
     }
+
+    private fun loadCloudIdentities(prefs: SharedPreferences): List<CloudImageIdentityPref> {
+        val raw = prefs.getString(PREF_KEY_CLOUD_IDENTITIES, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(CloudImageIdentityPref.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private data class PreferenceMutation(
+        val earphones: List<EarphonePref>,
+        val revision: Long,
+    )
 
     private fun copyImage(
         context: Context,
@@ -148,3 +336,17 @@ fun EarphonePref.imageUri(resource: PodImageResource): Uri? {
         .appendPath(fileName)
         .build()
 }
+
+fun EarphonePref.cloudImageUri(resource: PodImageResource): Uri? {
+    val path = cloudImagePath(resource) ?: return null
+    val fileName = File(path).name.takeIf { it.isNotBlank() } ?: return null
+    return Uri.Builder()
+        .scheme("content")
+        .authority(PodImagePrefs.AUTHORITY)
+        .appendPath(fileName)
+        .build()
+}
+
+/** 模块界面与 Hook 保持相同优先级：用户手动图优先，官方云图其次。 */
+fun EarphonePref.preferredImagePath(resource: PodImageResource): String? =
+    imagePath(resource) ?: cloudImagePath(resource)

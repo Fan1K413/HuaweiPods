@@ -95,6 +95,29 @@ class CaptureStoreTest {
         CaptureStore.requireNoActiveSession(null)
     }
 
+    @Test
+    fun requireConnectedHeadsetMetadata_rejectsMissingAddressAndManualSource() {
+        val valid = CaptureSessionMetadata(
+            headsetModel = "HUAWEI FreeBuds 3",
+            officialAppPackage = SmartAudioCaptureTarget.PACKAGE_NAME,
+            headsetAddress = "**:**:**:**:EE:FF",
+            headsetNameSource = CONNECTED_HEADSET_NAME_SOURCE,
+        )
+
+        CaptureStore.requireConnectedHeadsetMetadata(valid)
+        assertThrows(IllegalArgumentException::class.java) {
+            CaptureStore.requireConnectedHeadsetMetadata(valid.copy(headsetAddress = null))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CaptureStore.requireConnectedHeadsetMetadata(
+                valid.copy(headsetNameSource = DEFAULT_HEADSET_NAME_SOURCE),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CaptureStore.requireConnectedHeadsetMetadata(valid.copy(headsetAddress = ""))
+        }
+    }
+
     private fun baseValues(schemaVersion: Int) = CaptureStore.StoredSessionValues(
         schemaVersion = schemaVersion,
         id = "20260720-120000-000-test",

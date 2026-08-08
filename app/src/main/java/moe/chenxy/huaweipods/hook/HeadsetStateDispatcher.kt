@@ -79,6 +79,7 @@ object HeadsetStateDispatcher : HookContext() {
                             HuaweiPodsAction.ACTION_REFRESH_STATUS -> {
                                 context.sendBroadcast(Intent(HuaweiPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE).apply {
                                     setPackage(BuildConfig.APPLICATION_ID)
+                                    putExtra(HuaweiPodsAction.EXTRA_MODULE_BUILD_ID, BuildConfig.MODULE_BUILD_ID)
                                     addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
                                 })
                             }

@@ -13,6 +13,8 @@ object CaptureContract {
         "moe.chenxy.huaweipods.debugcapture.action.HOOK_PROBE"
 
     const val EVENT_TYPE_HOOK_READY = "hook_ready"
+    const val EVENT_TYPE_SMART_AUDIO_RESOURCE = "smart_audio_resource"
+    const val EVENT_TYPE_SMART_AUDIO_DEVICE_IDENTITY = "smart_audio_device_identity"
 
     const val EXTRA_EVENT_TYPE = "event_type"
     const val EXTRA_DIRECTION = "direction"
@@ -24,6 +26,11 @@ object CaptureContract {
     const val EXTRA_DEVICE_NAME = "device_name"
     const val EXTRA_DEVICE_ADDRESS = "device_address"
     const val EXTRA_TIMESTAMP_EPOCH_MS = "timestamp_epoch_ms"
+    const val EXTRA_RESOURCE_ORIGIN = "resource_origin"
+    const val EXTRA_RESOURCE_MODEL_ID = "resource_model_id"
+    const val EXTRA_RESOURCE_SUB_MODEL_ID = "resource_sub_model_id"
+    const val EXTRA_RESOURCE_KIND = "resource_kind"
+    const val EXTRA_IDENTITY_SOURCE = "identity_source"
 
     const val MIME_CAPTURE_ARCHIVE = "application/zip"
 
@@ -78,6 +85,7 @@ data class CaptureSession(
 }
 
 internal const val DEFAULT_HEADSET_NAME_SOURCE = "manual"
+internal const val CONNECTED_HEADSET_NAME_SOURCE = "connected_profile"
 internal const val DEFAULT_FEATURE_CATALOG_VERSION = "huawei-headset-v1"
 internal const val LEGACY_HEADSET_NAME_SOURCE = "legacy_model"
 internal const val LEGACY_FEATURE_CATALOG_VERSION = "legacy-v1"

@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
@@ -77,6 +78,9 @@ class DebugCaptureActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        runCatching {
+            CaptureStore.stopActiveSessionForDifferentTarget(this, SMART_AUDIO_PACKAGE)
+        }
         enableEdgeToEdge()
         setContent {
             AppTheme {
@@ -104,11 +108,9 @@ private const val PREF_OFFICIAL_PACKAGE = "official_package"
 private const val PREF_HANDLED_SESSION_ID = "handled_session_id"
 private const val STATUS_PREFIX = "status."
 private const val FEATURE_CATALOG_VERSION = "huawei-headset-v1"
-private const val NAME_SOURCE_CONNECTED = "connected_profile"
 private const val NAME_SOURCE_MANUAL = "manual"
 
-private const val AI_LIFE_PACKAGE = "com.huawei.smarthome"
-private const val SMART_AUDIO_PACKAGE = "com.huawei.smartaudio"
+private const val SMART_AUDIO_PACKAGE = SmartAudioCaptureTarget.PACKAGE_NAME
 
 private enum class StepStatus {
     PENDING,
@@ -130,12 +132,11 @@ private data class CaptureStep(
 )
 
 private val officialApps = listOf(
-    OfficialApp(AI_LIFE_PACKAGE, R.string.debug_capture_app_ai_life),
     OfficialApp(SMART_AUDIO_PACKAGE, R.string.debug_capture_app_smart_audio),
 )
 
 /**
- * 华为耳机通用能力目录。向导只记录官方 App 当前可见的项目，不据此猜测设备能力；
+ * 华为耳机通用能力目录。向导只记录智慧音频当前可见的项目，不据此猜测设备能力；
  * 任意设备缺少的项目都可以明确跳过。
  */
 private val allHuaweiHeadsetSteps = listOf(
@@ -170,10 +171,12 @@ private fun CaptureGuideScreen(
     onOpenMain: () -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
     val startFailedPrefix = stringResource(R.string.debug_capture_start_failed, "")
     val stopFailedPrefix = stringResource(R.string.debug_capture_stop_failed, "")
     val exportFailedPrefix = stringResource(R.string.debug_capture_export_failed, "")
+    val assetsImportFailedPrefix = stringResource(R.string.debug_capture_assets_import_failed, "")
     val prefs = remember { context.getSharedPreferences(GUIDE_PREFS, Context.MODE_PRIVATE) }
     val installedApps = remember(resumeToken) {
         officialApps.filter { context.isPackageInstalled(it.packageName) }
@@ -205,13 +208,6 @@ private fun CaptureGuideScreen(
     var selectedHeadsetAddress by rememberSaveable {
         mutableStateOf(initialActiveSession?.headsetAddress)
     }
-    var headsetNameManuallyEdited by rememberSaveable {
-        mutableStateOf(
-            initialActiveSession == null &&
-                storedHeadsetName.isNotBlank() &&
-                storedHeadsetNameSource == NAME_SOURCE_MANUAL,
-        )
-    }
     var activeHeadsetName by rememberSaveable {
         mutableStateOf(initialActiveSession?.headsetModel.orEmpty())
     }
@@ -229,6 +225,14 @@ private fun CaptureGuideScreen(
     var scopeChecked by rememberSaveable { mutableStateOf(false) }
     var privacyChecked by rememberSaveable { mutableStateOf(false) }
     var includeHciSnoop by rememberSaveable { mutableStateOf(false) }
+    var smartAudioAssetsAttached by rememberSaveable {
+        mutableStateOf(
+            CaptureStore.hasSmartAudioAssets(
+                context,
+                (initialActiveSession ?: initialStoreState?.latestSession)?.id,
+            ),
+        )
+    }
     var storageBusy by remember { mutableStateOf(false) }
     var captureActive by rememberSaveable {
         mutableStateOf(initialActiveSession != null)
@@ -243,7 +247,11 @@ private fun CaptureGuideScreen(
         val latest = initialStoreState?.latestSession
         val handledSessionId = prefs.getString(PREF_HANDLED_SESSION_ID, null)
         mutableStateOf(
-            !captureActive && latest != null && !latest.isActive && latest.id != handledSessionId,
+            !captureActive &&
+                latest != null &&
+                !latest.isActive &&
+                latest.officialAppPackage == SMART_AUDIO_PACKAGE &&
+                latest.id != handledSessionId,
         )
     }
     val statusByKey = remember {
@@ -267,6 +275,37 @@ private fun CaptureGuideScreen(
     ) { granted ->
         bluetoothPermissionGranted = granted
         if (granted) detectionRefreshToken++
+    }
+    val smartAudioAssetsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null || storageBusy) return@rememberLauncherForActivityResult
+        val targetSessionId = latestSessionId ?: return@rememberLauncherForActivityResult
+        storageBusy = true
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    CaptureStore.attachSmartAudioAssets(
+                        context = context,
+                        expectedSessionId = targetSessionId,
+                        sourceUri = uri,
+                    )
+                }
+            }.onSuccess { attachment ->
+                smartAudioAssetsAttached = true
+                context.toast(
+                    resources.getString(
+                        R.string.debug_capture_assets_imported,
+                        attachment.mainImageCount,
+                        attachment.leftImageCount,
+                        attachment.rightImageCount,
+                    ),
+                )
+            }.onFailure {
+                context.toast(assetsImportFailedPrefix + it.userMessage())
+            }
+            storageBusy = false
+        }
     }
 
     LaunchedEffect(installedApps, selectedOfficialPackage, captureActive) {
@@ -317,15 +356,23 @@ private fun CaptureGuideScreen(
         if (result is DetectionResult.PermissionRequired) {
             bluetoothPermissionGranted = false
         }
-        if (
-            result is DetectionResult.Success &&
-            result.devices.size == 1 &&
-            !headsetNameManuallyEdited
-        ) {
-            val device = result.devices.single()
+        val automaticTarget = CaptureHeadsetSelectionPolicy.automaticTarget(result)
+        if (automaticTarget != null) {
+            val device = automaticTarget
             headsetNameInput = device.displayName
             selectedHeadsetAddress = device.address
-            headsetNameSource = NAME_SOURCE_CONNECTED
+            headsetNameSource = CONNECTED_HEADSET_NAME_SOURCE
+        } else if (
+            result is DetectionResult.Success &&
+            selectedHeadsetAddress != null &&
+            CaptureHeadsetSelectionPolicy.selectedTarget(
+                result = result,
+                selectedAddress = selectedHeadsetAddress,
+                selectedFromConnection = headsetNameSource == CONNECTED_HEADSET_NAME_SOURCE,
+            ) == null
+        ) {
+            selectedHeadsetAddress = null
+            headsetNameSource = NAME_SOURCE_MANUAL
         }
     }
 
@@ -358,6 +405,10 @@ private fun CaptureGuideScreen(
         captureActive = activeSession != null
         activeSessionId = activeSession?.id
         latestSessionId = latestSession?.id
+        smartAudioAssetsAttached = CaptureStore.hasSmartAudioAssets(
+            context,
+            (activeSession ?: latestSession)?.id,
+        )
         currentProtocolEventCount = (activeSession ?: latestSession)?.protocolEventCount ?: 0L
         currentHookReadyCount = (activeSession ?: latestSession)?.hookReadyCount ?: 0L
 
@@ -376,12 +427,19 @@ private fun CaptureGuideScreen(
         captureFinished = activeSession == null &&
             latestSession != null &&
             !latestSession.isActive &&
+            latestSession.officialAppPackage == SMART_AUDIO_PACKAGE &&
             latestSession.id != prefs.getString(PREF_HANDLED_SESSION_ID, null)
     }
     val issueValid = isValidIssue(issueInput)
+    val selectedConnectedHeadset = CaptureHeadsetSelectionPolicy.selectedTarget(
+        result = detectionResult,
+        selectedAddress = selectedHeadsetAddress,
+        selectedFromConnection = headsetNameSource == CONNECTED_HEADSET_NAME_SOURCE,
+    )
     val canStart = installedApps.isNotEmpty() &&
-        selectedOfficialPackage != null &&
-        headsetNameInput.isNotBlank() &&
+        selectedOfficialPackage == SMART_AUDIO_PACKAGE &&
+        !detectingHeadsets &&
+        selectedConnectedHeadset != null &&
         onlyTargetChecked && officialAppChecked && scopeChecked && privacyChecked && issueValid
 
     val safeDrawing = WindowInsets.safeDrawing.asPaddingValues()
@@ -593,11 +651,17 @@ private fun CaptureGuideScreen(
                                                     )
                                                 }
                                             }
-                                            checkNotNull(CaptureStore.stopSession(context, reason = "user")) {
+                                            val stoppedSession = checkNotNull(
+                                                CaptureStore.stopSession(context, reason = "user"),
+                                            ) {
                                                 "当前没有活动的采集会话"
                                             }
+                                            stoppedSession to CaptureStore.autoAttachSmartAudioAssets(
+                                                context = context,
+                                                expectedSessionId = stoppedSession.id,
+                                            )
                                         }
-                                    }.onSuccess { stoppedSession ->
+                                    }.onSuccess { (stoppedSession, autoAssets) ->
                                         activeStep?.let { step ->
                                             updateStatus(
                                                 prefs,
@@ -612,6 +676,50 @@ private fun CaptureGuideScreen(
                                         latestSessionId = stoppedSession.id
                                         currentProtocolEventCount = stoppedSession.protocolEventCount
                                         currentHookReadyCount = stoppedSession.hookReadyCount
+                                        smartAudioAssetsAttached =
+                                            autoAssets.status == SmartAudioAutoAttachmentStatus.ATTACHED ||
+                                            autoAssets.status == SmartAudioAutoAttachmentStatus.ALREADY_ATTACHED ||
+                                            CaptureStore.hasSmartAudioAssets(context, stoppedSession.id)
+                                        when (autoAssets.status) {
+                                            SmartAudioAutoAttachmentStatus.ATTACHED -> context.toast(
+                                                resources.getString(
+                                                    R.string.debug_capture_assets_auto_imported,
+                                                    autoAssets.modelId,
+                                                    autoAssets.subModelId,
+                                                ),
+                                            )
+
+                                            SmartAudioAutoAttachmentStatus.NOT_OBSERVED -> context.toast(
+                                                R.string.debug_capture_assets_auto_not_observed,
+                                            )
+
+                                            SmartAudioAutoAttachmentStatus.NEEDS_DEVICE_IDENTITY -> context.toast(
+                                                resources.getString(
+                                                    R.string.debug_capture_assets_auto_needs_device_identity,
+                                                    autoAssets.modelId,
+                                                ),
+                                            )
+
+                                            SmartAudioAutoAttachmentStatus.NEEDS_SUBMODEL -> context.toast(
+                                                resources.getString(
+                                                    R.string.debug_capture_assets_auto_needs_submodel,
+                                                    autoAssets.modelId,
+                                                ),
+                                            )
+
+                                            SmartAudioAutoAttachmentStatus.AMBIGUOUS -> context.toast(
+                                                R.string.debug_capture_assets_auto_ambiguous,
+                                            )
+
+                                            SmartAudioAutoAttachmentStatus.FAILED -> context.toast(
+                                                resources.getString(
+                                                    R.string.debug_capture_assets_auto_failed,
+                                                    autoAssets.message.orEmpty(),
+                                                ),
+                                            )
+
+                                            SmartAudioAutoAttachmentStatus.ALREADY_ATTACHED -> Unit
+                                        }
                                     }
                                     .onFailure {
                                         context.toast(stopFailedPrefix + it.userMessage())
@@ -643,6 +751,36 @@ private fun CaptureGuideScreen(
                             )
                         }
                         Spacer(Modifier.height(12.dp))
+                        SummaryText(stringResource(R.string.debug_capture_assets_hint))
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(
+                            text = stringResource(
+                                if (smartAudioAssetsAttached) {
+                                    R.string.debug_capture_assets_replace
+                                } else {
+                                    R.string.debug_capture_assets_select
+                                },
+                            ),
+                            onClick = {
+                                if (!storageBusy) {
+                                    smartAudioAssetsLauncher.launch(
+                                        arrayOf(
+                                            "application/zip",
+                                            "application/x-zip-compressed",
+                                            "application/octet-stream",
+                                        ),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().alpha(if (storageBusy) 0.45f else 1f),
+                        )
+                        if (smartAudioAssetsAttached) {
+                            SummaryText(
+                                text = stringResource(R.string.debug_capture_assets_ready),
+                                color = Color(0xFF2E7D32),
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
                         ChecklistRow(
                             text = stringResource(R.string.debug_capture_include_hci),
                             checked = includeHciSnoop,
@@ -660,7 +798,11 @@ private fun CaptureGuideScreen(
                             onClick = exportCapture@{
                                 if (
                                     storageBusy ||
-                                    (currentProtocolEventCount == 0L && !includeHciSnoop)
+                                    (
+                                        currentProtocolEventCount == 0L &&
+                                            !includeHciSnoop &&
+                                            !smartAudioAssetsAttached
+                                    )
                                 ) return@exportCapture
                                 val includeHciForExport = includeHciSnoop
                                 storageBusy = true
@@ -686,7 +828,11 @@ private fun CaptureGuideScreen(
                             modifier = Modifier.fillMaxWidth().alpha(
                                 if (
                                     !storageBusy &&
-                                    (currentProtocolEventCount > 0L || includeHciSnoop)
+                                    (
+                                        currentProtocolEventCount > 0L ||
+                                            includeHciSnoop ||
+                                            smartAudioAssetsAttached
+                                    )
                                 ) 1f else 0.45f,
                             ),
                             colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -698,6 +844,7 @@ private fun CaptureGuideScreen(
                                 if (storageBusy) return@TextButton
                                 captureFinished = false
                                 includeHciSnoop = false
+                                smartAudioAssetsAttached = false
                                 latestSessionId?.let { handledSessionId ->
                                     prefs.edit()
                                         .putString(PREF_HANDLED_SESSION_ID, handledSessionId)
@@ -710,7 +857,6 @@ private fun CaptureGuideScreen(
                                 headsetNameInput = ""
                                 headsetNameSource = NAME_SOURCE_MANUAL
                                 selectedHeadsetAddress = null
-                                headsetNameManuallyEdited = false
                                 onlyTargetChecked = false
                                 officialAppChecked = false
                                 scopeChecked = false
@@ -727,11 +873,6 @@ private fun CaptureGuideScreen(
                 item {
                     PreparationCard(
                         installedApps = installedApps,
-                        selectedOfficialPackage = selectedOfficialPackage,
-                        onOfficialPackageSelected = {
-                            selectedOfficialPackage = it
-                            prefs.edit().putString(PREF_OFFICIAL_PACKAGE, it).apply()
-                        },
                         onlyTargetChecked = onlyTargetChecked,
                         onOnlyTargetChecked = { onlyTargetChecked = it },
                         officialAppChecked = officialAppChecked,
@@ -753,16 +894,15 @@ private fun CaptureGuideScreen(
                             result = detectionResult,
                             detecting = detectingHeadsets,
                             selectedAddress = selectedHeadsetAddress,
-                            selectedFromConnection = headsetNameSource == NAME_SOURCE_CONNECTED,
+                            selectedFromConnection = headsetNameSource == CONNECTED_HEADSET_NAME_SOURCE,
                             onGrantPermission = {
                                 permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
                             },
                             onRefresh = { detectionRefreshToken++ },
                             onSelect = { device ->
                                 headsetNameInput = device.displayName
-                                headsetNameSource = NAME_SOURCE_CONNECTED
+                                headsetNameSource = CONNECTED_HEADSET_NAME_SOURCE
                                 selectedHeadsetAddress = device.address
-                                headsetNameManuallyEdited = false
                             },
                         )
                         Spacer(Modifier.height(8.dp))
@@ -772,12 +912,17 @@ private fun CaptureGuideScreen(
                                 headsetNameInput = value.take(120)
                                 headsetNameSource = NAME_SOURCE_MANUAL
                                 selectedHeadsetAddress = null
-                                headsetNameManuallyEdited = true
                             },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         SummaryText(stringResource(R.string.debug_capture_model_hint))
                         SummaryText(stringResource(R.string.debug_capture_model_manual_hint))
+                        if (selectedConnectedHeadset == null) {
+                            SummaryText(
+                                text = stringResource(R.string.debug_capture_model_selection_required),
+                                color = Color(0xFFC62828),
+                            )
+                        }
                         Spacer(Modifier.height(12.dp))
                         Text(
                             text = stringResource(R.string.debug_capture_issue_title),
@@ -804,12 +949,13 @@ private fun CaptureGuideScreen(
                             text = stringResource(R.string.debug_capture_start),
                             onClick = startCapture@{
                                 if (!canStart || storageBusy) return@startCapture
+                                val captureTarget = selectedConnectedHeadset
                                 val sessionMetadata = CaptureSessionMetadata(
                                     issueId = issueInput.trim().ifBlank { null },
-                                    headsetModel = headsetNameInput.trim(),
+                                    headsetModel = captureTarget.displayName,
                                     officialAppPackage = selectedOfficialPackage,
-                                    headsetAddress = selectedHeadsetAddress,
-                                    headsetNameSource = headsetNameSource,
+                                    headsetAddress = captureTarget.address,
+                                    headsetNameSource = CONNECTED_HEADSET_NAME_SOURCE,
                                     featureCatalogVersion = FEATURE_CATALOG_VERSION,
                                     notes = null,
                                 )
@@ -835,10 +981,12 @@ private fun CaptureGuideScreen(
                                             selectedOfficialPackage = it
                                         }
                                         latestSessionId = startedSession.id
+                                        smartAudioAssetsAttached = false
                                         currentProtocolEventCount = 0L
                                         currentHookReadyCount = 0L
                                         captureActive = true
                                         captureFinished = false
+                                        CaptureContract.sendHookProbe(context, SMART_AUDIO_PACKAGE)
                                     }.onFailure {
                                         context.toast(startFailedPrefix + it.userMessage())
                                     }
@@ -846,6 +994,7 @@ private fun CaptureGuideScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().alpha(if (canStart && !storageBusy) 1f else 0.45f),
+                            enabled = canStart && !storageBusy,
                             colors = ButtonDefaults.textButtonColorsPrimary(),
                         )
                     }
@@ -900,8 +1049,6 @@ private fun PrivacyCard() {
 @Composable
 private fun PreparationCard(
     installedApps: List<OfficialApp>,
-    selectedOfficialPackage: String?,
-    onOfficialPackageSelected: (String) -> Unit,
     onlyTargetChecked: Boolean,
     onOnlyTargetChecked: (Boolean) -> Unit,
     officialAppChecked: Boolean,
@@ -943,18 +1090,6 @@ private fun PreparationCard(
         } else {
             val installedLabels = installedApps.map { stringResource(it.labelRes) }.joinToString("、")
             SummaryText(stringResource(R.string.debug_capture_official_detected, installedLabels))
-            if (installedApps.size > 1) {
-                Spacer(Modifier.height(6.dp))
-                SummaryText(stringResource(R.string.debug_capture_official_choose))
-                installedApps.forEach { app ->
-                    Spacer(Modifier.height(6.dp))
-                    SelectionRow(
-                        title = stringResource(app.labelRes),
-                        selected = selectedOfficialPackage == app.packageName,
-                        onClick = { onOfficialPackageSelected(app.packageName) },
-                    )
-                }
-            }
         }
     }
 }
