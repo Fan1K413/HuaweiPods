@@ -66,6 +66,11 @@ fun AvailableUpdateDialog(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.body2,
             )
+            Text(
+                text = stringResource(R.string.update_install_restart_hint),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                style = MiuixTheme.textStyles.body2,
+            )
         }
         UpdateDialogActions(
             primaryText = stringResource(R.string.update_go_to_release),

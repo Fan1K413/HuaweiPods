@@ -14,3 +14,10 @@ internal class UpdateCheckFeedbackGate {
         requested = false
     }
 }
+
+/** Prevents multiple Miuix overlay dialogs from competing for the same host. */
+internal fun shouldShowAvailableUpdateDialog(
+    hasAvailableUpdate: Boolean,
+    showUpdatedAppDialog: Boolean,
+    showRestartScopeDialog: Boolean,
+): Boolean = hasAvailableUpdate && !showUpdatedAppDialog && !showRestartScopeDialog

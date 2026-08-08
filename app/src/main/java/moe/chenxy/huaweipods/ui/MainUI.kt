@@ -76,6 +76,7 @@ import moe.chenxy.huaweipods.ui.pages.UpdateCheckSummary
 import moe.chenxy.huaweipods.update.GitHubRelease
 import moe.chenxy.huaweipods.update.GitHubReleaseChecker
 import moe.chenxy.huaweipods.update.UpdateCheckFeedbackGate
+import moe.chenxy.huaweipods.update.shouldShowAvailableUpdateDialog
 import moe.chenxy.huaweipods.update.UpdateCheckResult
 import moe.chenxy.huaweipods.utils.RootManager
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
@@ -199,9 +200,10 @@ fun MainUI(
             updateCheckSummary = null
         }
         if (checkingForUpdates) return
-        if (!manual) {
-            lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
-        }
+        Log.i(
+            "HuaweiPods-Update",
+            "Update check started: manual=$manual current=${BuildConfig.VERSION_CODE}-${BuildConfig.VERSION_NAME}",
+        )
         checkingForUpdates = true
         coroutineScope.launch {
             try {
@@ -212,8 +214,11 @@ fun MainUI(
                     )
                 ) {
                     is UpdateCheckResult.Available -> {
+                        Log.i(
+                            "HuaweiPods-Update",
+                            "Update available: ${result.release.tag}",
+                        )
                         if (updateFeedbackGate.shouldShow(manual)) {
-                            lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
                             updateCheckSummary = UpdateCheckSummary.Available(
                                 versionName = result.release.versionName,
                             )
@@ -222,8 +227,12 @@ fun MainUI(
                     }
 
                     is UpdateCheckResult.UpToDate -> {
+                        lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                        Log.i(
+                            "HuaweiPods-Update",
+                            "Already up to date: ${result.latest.tag}",
+                        )
                         if (updateFeedbackGate.shouldShow(manual)) {
-                            lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
                             updateCheckSummary = UpdateCheckSummary.UpToDate(
                                 versionName = result.latest.versionName,
                             )
@@ -232,7 +241,10 @@ fun MainUI(
                     }
 
                     is UpdateCheckResult.Failure -> {
-                        Log.w("HuaweiPods-Update", "Update check failed: ${result.message}")
+                        Log.w(
+                            "HuaweiPods-Update",
+                            "Update check failed: status=${result.statusCode} ${result.message}",
+                        )
                         if (updateFeedbackGate.shouldShow(manual)) {
                             updateCheckSummary = UpdateCheckSummary.Failure
                             Toast.makeText(context, R.string.update_check_failed, Toast.LENGTH_LONG).show()
@@ -1105,33 +1117,54 @@ fun MainUI(
     )
 
     val release = availableUpdate
-    AvailableUpdateDialog(
-        show = release != null,
-        currentVersion = BuildConfig.VERSION_NAME,
-        latestVersion = release?.versionName.orEmpty(),
-        releaseNotes = release?.changelog.orEmpty(),
-        onLater = { availableUpdate = null },
-        onOpenRelease = {
-            release?.let {
-                if (openExternalUrl(context, it.releaseUrl)) {
-                    availableUpdate = null
-                }
-            }
-        },
+    val showUpdatedAppDialog = showUpdatedDialogOnLaunch && !restartRequestedByUpdate
+    val showAvailableUpdateDialog = shouldShowAvailableUpdateDialog(
+        hasAvailableUpdate = release != null,
+        showUpdatedAppDialog = showUpdatedAppDialog,
+        showRestartScopeDialog = showRestartScopeDialog,
     )
 
-    UpdatedAppDialog(
-        show = showUpdatedDialogOnLaunch && !restartRequestedByUpdate,
-        versionName = BuildConfig.VERSION_NAME,
-        onLater = onUpdatedDialogHandled,
-        onRestartScope = {
-            while (backStack.size > 1) {
-                backStack.removeLast()
-            }
-            restartRequestedByUpdate = true
-            showRestartScopeDialog = true
-        },
-    )
+    LaunchedEffect(showAvailableUpdateDialog, release?.tag) {
+        if (showAvailableUpdateDialog && release != null) {
+            Log.i("HuaweiPods-Update", "Showing update dialog: ${release.tag}")
+        }
+    }
+
+    when {
+        showUpdatedAppDialog -> UpdatedAppDialog(
+            show = true,
+            versionName = BuildConfig.VERSION_NAME,
+            onLater = onUpdatedDialogHandled,
+            onRestartScope = {
+                while (backStack.size > 1) {
+                    backStack.removeLast()
+                }
+                restartRequestedByUpdate = true
+                showRestartScopeDialog = true
+            },
+        )
+
+        showAvailableUpdateDialog -> AvailableUpdateDialog(
+            show = true,
+            currentVersion = BuildConfig.VERSION_NAME,
+            latestVersion = release?.versionName.orEmpty(),
+            releaseNotes = release?.changelog.orEmpty(),
+            onLater = {
+                Log.i("HuaweiPods-Update", "Update dialog dismissed: ${release?.tag}")
+                lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                availableUpdate = null
+            },
+            onOpenRelease = {
+                release?.let {
+                    Log.i("HuaweiPods-Update", "Opening release page: ${it.tag}")
+                    if (openExternalUrl(context, it.releaseUrl)) {
+                        lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
+                        availableUpdate = null
+                    }
+                }
+            },
+        )
+    }
 }
 
 @Composable

@@ -50,6 +50,11 @@ fun shouldRunAutomaticUpdateCheck(
     return nowMillis - lastCheckAtMillis >= intervalMillis.coerceAtLeast(0L)
 }
 
+internal fun shouldResetAutomaticUpdateCheckAfterVersionChange(
+    previousVersionCode: Long?,
+    currentVersionCode: Long,
+): Boolean = previousVersionCode != null && currentVersionCode < previousVersionCode
+
 class AppLifecyclePrefs(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -111,6 +116,14 @@ class AppLifecyclePrefs(context: Context) {
         hasExistingInstallation: Boolean,
     ): LaunchDecision {
         val previousVersion = lastInstalledVersion()
+        if (
+            shouldResetAutomaticUpdateCheckAfterVersionChange(
+                previousVersionCode = previousVersion?.versionCode,
+                currentVersionCode = currentVersionCode,
+            )
+        ) {
+            prefs.edit { remove(KEY_LAST_CHECK_AT_MILLIS) }
+        }
         val decision = decideLaunch(
             snapshot = LaunchSnapshot(
                 onboardingCompleted = isOnboardingCompleted(),

@@ -141,4 +141,26 @@ class AppLifecyclePrefsTest {
             ),
         )
     }
+
+    @Test
+    fun `downgrade resets automatic update check throttle`() {
+        assertTrue(
+            shouldResetAutomaticUpdateCheckAfterVersionChange(
+                previousVersionCode = 7L,
+                currentVersionCode = 6L,
+            ),
+        )
+        assertFalse(
+            shouldResetAutomaticUpdateCheckAfterVersionChange(
+                previousVersionCode = 6L,
+                currentVersionCode = 7L,
+            ),
+        )
+        assertFalse(
+            shouldResetAutomaticUpdateCheckAfterVersionChange(
+                previousVersionCode = 7L,
+                currentVersionCode = 7L,
+            ),
+        )
+    }
 }

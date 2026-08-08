@@ -24,4 +24,29 @@ class UpdateCheckFeedbackGateTest {
         assertFalse(gate.shouldShow(startedManually = false))
         assertTrue(gate.shouldShow(startedManually = true))
     }
+
+    @Test
+    fun `available update waits for higher priority dialogs`() {
+        assertTrue(
+            shouldShowAvailableUpdateDialog(
+                hasAvailableUpdate = true,
+                showUpdatedAppDialog = false,
+                showRestartScopeDialog = false,
+            ),
+        )
+        assertFalse(
+            shouldShowAvailableUpdateDialog(
+                hasAvailableUpdate = true,
+                showUpdatedAppDialog = true,
+                showRestartScopeDialog = false,
+            ),
+        )
+        assertFalse(
+            shouldShowAvailableUpdateDialog(
+                hasAvailableUpdate = true,
+                showUpdatedAppDialog = false,
+                showRestartScopeDialog = true,
+            ),
+        )
+    }
 }

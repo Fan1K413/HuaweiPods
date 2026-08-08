@@ -2,6 +2,7 @@ package moe.chenxy.huaweipods.ui.pages
 
 import android.annotation.SuppressLint
 import android.net.http.SslError
+import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
@@ -96,6 +97,7 @@ fun DocumentationPage(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 WebView(context).apply {
+                    val navigationTracker = DocumentationNavigationTracker()
                     setBackgroundColor(surfaceColor)
                     settings.apply {
                         javaScriptEnabled = true
@@ -128,12 +130,15 @@ fun DocumentationPage(
                         }
 
                         override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                            navigationTracker.onPageStarted(url)
                             loadFailed = false
                             progress = 0f
                             updateNavigationState(view)
                         }
 
                         override fun onPageFinished(view: WebView, url: String?) {
+                            if (!navigationTracker.onPageFinished(url)) return
+                            loadFailed = false
                             progress = 1f
                             updateNavigationState(view)
                         }
@@ -143,7 +148,20 @@ fun DocumentationPage(
                             request: WebResourceRequest,
                             error: WebResourceError,
                         ) {
-                            if (request.isForMainFrame) loadFailed = true
+                            if (!request.isForMainFrame) return
+                            val failedUrl = request.url.toString()
+                            if (!navigationTracker.onPageError(failedUrl)) {
+                                Log.d(
+                                    "HuaweiPods-Docs",
+                                    "Ignored stale/late main-frame error code=${error.errorCode} url=$failedUrl",
+                                )
+                                return
+                            }
+                            Log.w(
+                                "HuaweiPods-Docs",
+                                "Main-frame load failed code=${error.errorCode} url=$failedUrl",
+                            )
+                            loadFailed = true
                         }
 
                         override fun onReceivedHttpError(
@@ -151,9 +169,14 @@ fun DocumentationPage(
                             request: WebResourceRequest,
                             errorResponse: WebResourceResponse,
                         ) {
-                            if (request.isForMainFrame && errorResponse.statusCode >= 400) {
-                                loadFailed = true
-                            }
+                            if (!request.isForMainFrame || errorResponse.statusCode < 400) return
+                            val failedUrl = request.url.toString()
+                            if (!navigationTracker.onPageError(failedUrl)) return
+                            Log.w(
+                                "HuaweiPods-Docs",
+                                "Main-frame HTTP ${errorResponse.statusCode} url=$failedUrl",
+                            )
+                            loadFailed = true
                         }
 
                         override fun onReceivedSslError(
@@ -162,7 +185,13 @@ fun DocumentationPage(
                             error: SslError,
                         ) {
                             handler.cancel()
-                            loadFailed = true
+                            if (navigationTracker.onPageError(error.url)) {
+                                Log.w(
+                                    "HuaweiPods-Docs",
+                                    "Main-frame SSL error primary=${error.primaryError} url=${error.url}",
+                                )
+                                loadFailed = true
+                            }
                         }
                     }
                     setDownloadListener { url, _, _, _, _ ->

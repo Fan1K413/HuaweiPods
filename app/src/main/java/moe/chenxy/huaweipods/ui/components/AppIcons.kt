@@ -16,7 +16,7 @@ object AppIcons {
         viewportWidth = 24f,
         viewportHeight = 24f,
     ).apply {
-        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2.1f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
+        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.85f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
             moveTo(3f, 4.8f)
             curveTo(6.4f, 3.9f, 9.2f, 4.7f, 12f, 6.8f)
             curveTo(14.8f, 4.7f, 17.6f, 3.9f, 21f, 4.8f)
@@ -36,7 +36,7 @@ object AppIcons {
         viewportWidth = 24f,
         viewportHeight = 24f,
     ).apply {
-        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2.1f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
+        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.85f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
             moveTo(12f, 21f)
             curveTo(9.8f, 19.3f, 3.5f, 14.9f, 3.5f, 9.4f)
             curveTo(3.5f, 6.4f, 5.6f, 4.4f, 8.4f, 4.4f)

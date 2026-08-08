@@ -169,6 +169,7 @@
     <string name="update_available_summary">Current: %1$s\nLatest: %2$s</string>
     <string name="update_release_notes">What’s new</string>
     <string name="update_release_notes_empty">No release notes were provided for this version.</string>
+    <string name="update_install_restart_hint">After installing the new version, reopen HuaweiPods and restart the selected scopes when prompted.</string>
     <string name="update_go_to_release">Open release</string>
     <string name="update_completed_title">Update complete</string>
     <string name="update_completed_summary">HuaweiPods has been updated to %1$s</string>

@@ -58,6 +58,7 @@ import top.yukonga.miuix.kmp.icon.extended.Edit
 import top.yukonga.miuix.kmp.icon.extended.Months
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 @Composable
@@ -340,6 +341,7 @@ private fun ModuleTabPage(
                             imageVector = AppIcons.Documentation,
                             contentDescription = stringResource(R.string.documentation_title),
                             modifier = Modifier.size(26.dp),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                     IconButton(onClick = onOpenSponsor) {
@@ -347,6 +349,7 @@ private fun ModuleTabPage(
                             imageVector = AppIcons.Support,
                             contentDescription = stringResource(R.string.sponsor_title),
                             modifier = Modifier.size(26.dp),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                     IconButton(
