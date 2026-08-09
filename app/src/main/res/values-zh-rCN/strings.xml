@@ -179,6 +179,9 @@
     <string name="update_restart_recommended">建议重启作用域，让新版 Hook 与界面改动完整生效。</string>
     <string name="update_restart_scope">重启作用域</string>
     <string name="update_later">稍后</string>
+    <string name="preview_update_dialog">预览更新弹窗</string>
+    <string name="preview_update_dialog_summary">仅 Debug 版可见，不需要发布新版本</string>
+    <string name="update_preview_changelog">这是本地模拟的更新，用于检查弹窗布局、更新说明滚动和按钮交互。不会修改更新记录。</string>
     <string name="onboarding_skip">跳过</string>
     <string name="onboarding_close">关闭</string>
     <string name="onboarding_previous">上一步</string>

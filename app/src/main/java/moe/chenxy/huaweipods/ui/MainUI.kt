@@ -75,6 +75,7 @@ import moe.chenxy.huaweipods.ui.pages.ThemeSettingsPage
 import moe.chenxy.huaweipods.ui.pages.UpdateCheckSummary
 import moe.chenxy.huaweipods.update.GitHubRelease
 import moe.chenxy.huaweipods.update.GitHubReleaseChecker
+import moe.chenxy.huaweipods.update.PendingUpdateStore
 import moe.chenxy.huaweipods.update.UpdateCheckFeedbackGate
 import moe.chenxy.huaweipods.update.shouldShowAvailableUpdateDialog
 import moe.chenxy.huaweipods.update.UpdateCheckResult
@@ -183,10 +184,20 @@ fun MainUI(
     val checkUpdatesOnLaunch = remember {
         mutableStateOf(lifecyclePrefs.checkUpdatesOnLaunch())
     }
+    val updatePreviewChangelog = stringResource(R.string.update_preview_changelog)
+    val pendingUpdateStore = remember(context) { PendingUpdateStore(context) }
     var checkingForUpdates by remember { mutableStateOf(false) }
     val updateFeedbackGate = remember { UpdateCheckFeedbackGate() }
     var updateCheckSummary by remember { mutableStateOf<UpdateCheckSummary?>(null) }
-    var availableUpdate by remember { mutableStateOf<GitHubRelease?>(null) }
+    var availableUpdate by remember {
+        mutableStateOf(
+            pendingUpdateStore.restore(
+                currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                allowPreview = BuildConfig.DEBUG,
+            ),
+        )
+    }
+    var previewUpdate by remember { mutableStateOf<GitHubRelease?>(null) }
 
     fun currentDeviceRoute(): HuaweiDeviceRoute = DeviceRoutePrefs.resolve(
         prefs = prefs,
@@ -223,10 +234,15 @@ fun MainUI(
                                 versionName = result.release.versionName,
                             )
                         }
+                        if (!pendingUpdateStore.save(result.release)) {
+                            Log.w("HuaweiPods-Update", "Unable to persist pending update ${result.release.tag}")
+                        }
                         availableUpdate = result.release
                     }
 
                     is UpdateCheckResult.UpToDate -> {
+                        pendingUpdateStore.clear()
+                        availableUpdate = null
                         lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
                         Log.i(
                             "HuaweiPods-Update",
@@ -980,6 +996,32 @@ fun MainUI(
                         checkingForUpdates = checkingForUpdates,
                         updateCheckSummary = updateCheckSummary,
                         onCheckForUpdates = { checkForUpdates(manual = true) },
+                        onPreviewUpdateDialog = if (BuildConfig.DEBUG) {
+                            {
+                                val previewRelease = GitHubRelease(
+                                    tag = "${BuildConfig.VERSION_CODE + 1}-${BuildConfig.VERSION_NAME}-preview",
+                                    versionCode = BuildConfig.VERSION_CODE.toLong() + 1L,
+                                    versionName = "${BuildConfig.VERSION_NAME}-preview",
+                                    releaseUrl = GitHubReleaseChecker.LATEST_RELEASE_PAGE,
+                                    changelog = updatePreviewChangelog,
+                                )
+                                val persisted = pendingUpdateStore.save(
+                                    release = previewRelease,
+                                    isPreview = true,
+                                )
+                                Log.i(
+                                    "HuaweiPods-Update",
+                                    "Debug update preview requested: persisted=$persisted tag=${previewRelease.tag}",
+                                )
+                                updateCheckSummary = UpdateCheckSummary.Available(
+                                    versionName = previewRelease.versionName,
+                                )
+                                availableUpdate = previewRelease
+                                previewUpdate = previewRelease
+                            }
+                        } else {
+                            null
+                        },
                         onOpenGitHub = { openExternalUrl(context, GITHUB_REPOSITORY_URL) },
                         onOpenIssues = { openExternalUrl(context, GITHUB_ISSUES_URL) },
                         onCopyQqGroup = { copyQqGroup() },
@@ -1116,12 +1158,14 @@ fun MainUI(
         }
     )
 
-    val release = availableUpdate
+    val release = previewUpdate ?: availableUpdate
+    val showingPreviewUpdate = previewUpdate != null
     val showUpdatedAppDialog = showUpdatedDialogOnLaunch && !restartRequestedByUpdate
     val showAvailableUpdateDialog = shouldShowAvailableUpdateDialog(
         hasAvailableUpdate = release != null,
         showUpdatedAppDialog = showUpdatedAppDialog,
         showRestartScopeDialog = showRestartScopeDialog,
+        forcePreview = showingPreviewUpdate,
     )
 
     LaunchedEffect(showAvailableUpdateDialog, release?.tag) {
@@ -1130,41 +1174,48 @@ fun MainUI(
         }
     }
 
-    when {
-        showUpdatedAppDialog -> UpdatedAppDialog(
-            show = true,
-            versionName = BuildConfig.VERSION_NAME,
-            onLater = onUpdatedDialogHandled,
-            onRestartScope = {
-                while (backStack.size > 1) {
-                    backStack.removeLast()
-                }
-                restartRequestedByUpdate = true
-                showRestartScopeDialog = true
-            },
-        )
+    // Keep both update modal call sites stable and let the priority policy expose only one.
+    UpdatedAppDialog(
+        show = showUpdatedAppDialog && !showAvailableUpdateDialog,
+        versionName = BuildConfig.VERSION_NAME,
+        onLater = onUpdatedDialogHandled,
+        onRestartScope = {
+            while (backStack.size > 1) {
+                backStack.removeLast()
+            }
+            restartRequestedByUpdate = true
+            showRestartScopeDialog = true
+        },
+    )
 
-        showAvailableUpdateDialog -> AvailableUpdateDialog(
-            show = true,
-            currentVersion = BuildConfig.VERSION_NAME,
-            latestVersion = release?.versionName.orEmpty(),
-            releaseNotes = release?.changelog.orEmpty(),
-            onLater = {
-                Log.i("HuaweiPods-Update", "Update dialog dismissed: ${release?.tag}")
+    AvailableUpdateDialog(
+        show = showAvailableUpdateDialog,
+        currentVersion = BuildConfig.VERSION_NAME,
+        latestVersion = release?.versionName.orEmpty(),
+        releaseNotes = release?.changelog.orEmpty(),
+        onLater = {
+            Log.i("HuaweiPods-Update", "Update dialog dismissed: ${release?.tag}")
+            if (!showingPreviewUpdate) {
                 lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
-                availableUpdate = null
-            },
-            onOpenRelease = {
-                release?.let {
-                    Log.i("HuaweiPods-Update", "Opening release page: ${it.tag}")
-                    if (openExternalUrl(context, it.releaseUrl)) {
+            }
+            pendingUpdateStore.clear()
+            availableUpdate = null
+            previewUpdate = null
+        },
+        onOpenRelease = {
+            release?.let {
+                Log.i("HuaweiPods-Update", "Opening release page: ${it.tag}")
+                if (openExternalUrl(context, it.releaseUrl)) {
+                    if (!showingPreviewUpdate) {
                         lifecyclePrefs.markUpdateCheck(System.currentTimeMillis())
-                        availableUpdate = null
                     }
+                    pendingUpdateStore.clear()
+                    availableUpdate = null
+                    previewUpdate = null
                 }
-            },
-        )
-    }
+            }
+        },
+    )
 }
 
 @Composable

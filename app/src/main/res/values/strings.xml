@@ -178,6 +178,9 @@
     <string name="update_restart_recommended">Restart the scope apps so the new hooks and UI changes take full effect.</string>
     <string name="update_restart_scope">Restart scope</string>
     <string name="update_later">Later</string>
+    <string name="preview_update_dialog">Preview update dialog</string>
+    <string name="preview_update_dialog_summary">Debug builds only; no release is required</string>
+    <string name="update_preview_changelog">This is a local simulated update for checking the dialog layout, scrolling release notes, and button interactions. It does not change update history.</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_close">Close</string>
     <string name="onboarding_previous">Previous</string>

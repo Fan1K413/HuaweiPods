@@ -49,4 +49,16 @@ class UpdateCheckFeedbackGateTest {
             ),
         )
     }
+
+    @Test
+    fun `debug preview is never hidden behind another dialog`() {
+        assertTrue(
+            shouldShowAvailableUpdateDialog(
+                hasAvailableUpdate = true,
+                showUpdatedAppDialog = true,
+                showRestartScopeDialog = true,
+                forcePreview = true,
+            ),
+        )
+    }
 }

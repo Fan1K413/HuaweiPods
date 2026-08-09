@@ -39,6 +39,7 @@ fun AboutPage(
     checkingForUpdates: Boolean,
     updateCheckSummary: UpdateCheckSummary?,
     onCheckForUpdates: () -> Unit,
+    onPreviewUpdateDialog: (() -> Unit)? = null,
     onOpenGitHub: () -> Unit,
     onOpenIssues: () -> Unit,
     onCopyQqGroup: () -> Unit,
@@ -109,6 +110,13 @@ fun AboutPage(
                     // feedback without starting a second network call.
                     onClick = onCheckForUpdates,
                 )
+                if (onPreviewUpdateDialog != null) {
+                    BasicComponent(
+                        title = stringResource(R.string.preview_update_dialog),
+                        summary = stringResource(R.string.preview_update_dialog_summary),
+                        onClick = onPreviewUpdateDialog,
+                    )
+                }
                 BasicComponent(
                     title = stringResource(R.string.github_repository),
                     summary = "Nshpiter/HuaweiPods",
