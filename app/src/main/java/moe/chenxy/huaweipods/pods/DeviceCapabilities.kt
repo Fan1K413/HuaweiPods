@@ -26,6 +26,7 @@ data class HuaweiDeviceCapabilities(
     val supportsRfcommBattery: Boolean = false,
     val supportsBackgroundBatteryRefresh: Boolean = false,
     val supportsGestureConfiguration: Boolean = false,
+    val supportsLowLatencyControl: Boolean = false,
     val hasChargingCase: Boolean = false,
     val usesReportedEarbudAvailability: Boolean = false,
 )
@@ -46,6 +47,7 @@ private val routeCapabilities = linkedMapOf(
         supportsAncStateReadback = true,
         supportsDiscreteAncLevels = true,
         supportsRfcommBattery = true,
+        supportsLowLatencyControl = true,
         hasChargingCase = true,
     ),
     HuaweiDeviceRoute.HUAWEI_FREEBUDS6I to HuaweiDeviceCapabilities(
@@ -57,6 +59,7 @@ private val routeCapabilities = linkedMapOf(
         supportsDiscreteAncLevels = true,
         supportsRfcommBattery = true,
         supportsGestureConfiguration = true,
+        supportsLowLatencyControl = true,
         hasChargingCase = true,
     ),
     HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 to HuaweiDeviceCapabilities(
@@ -68,6 +71,7 @@ private val routeCapabilities = linkedMapOf(
         supportsDiscreteAncLevels = true,
         supportsRfcommBattery = true,
         supportsGestureConfiguration = true,
+        supportsLowLatencyControl = true,
         hasChargingCase = true,
     ),
     HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4 to HuaweiDeviceCapabilities(
@@ -84,6 +88,7 @@ private val routeCapabilities = linkedMapOf(
         supportsTransparency = true,
         supportsAncStateReadback = true,
         supportsRfcommBattery = true,
+        supportsLowLatencyControl = true,
         hasChargingCase = true,
         usesReportedEarbudAvailability = true,
     ),
@@ -91,7 +96,12 @@ private val routeCapabilities = linkedMapOf(
         displayName = "HUAWEI FreeBuds 7i",
         aliases = setOf("huaweifreebuds7i", "freebuds7i"),
         supportsAnc = true,
+        supportsTransparency = true,
+        supportsAncStateReadback = true,
+        supportsDiscreteAncLevels = true,
         supportsRfcommBattery = true,
+        supportsGestureConfiguration = true,
+        supportsLowLatencyControl = true,
         hasChargingCase = true,
     ),
     HuaweiDeviceRoute.HUAWEI_FREECLIP to HuaweiDeviceCapabilities(
@@ -106,6 +116,7 @@ private val routeCapabilities = linkedMapOf(
         supportsRfcommBattery = true,
         supportsBackgroundBatteryRefresh = true,
         supportsGestureConfiguration = true,
+        supportsLowLatencyControl = true,
         hasChargingCase = true,
     ),
     HuaweiDeviceRoute.HUAWEI_EYEWEAR to HuaweiDeviceCapabilities(
@@ -118,6 +129,7 @@ private val routeCapabilities = linkedMapOf(
         aliases = setOf("huaweieyewear2", "eyewear2"),
         supportsRfcommBattery = true,
         supportsGestureConfiguration = true,
+        supportsLowLatencyControl = true,
     ),
 )
 
@@ -177,6 +189,9 @@ val HuaweiDeviceRoute.supportsBackgroundBatteryRefresh: Boolean
 
 val HuaweiDeviceRoute.supportsGestureConfiguration: Boolean
     get() = capabilities?.supportsGestureConfiguration == true
+
+val HuaweiDeviceRoute.supportsLowLatencyControl: Boolean
+    get() = capabilities?.supportsLowLatencyControl == true
 
 val HuaweiDeviceRoute.hasChargingCase: Boolean
     get() = capabilities?.hasChargingCase == true

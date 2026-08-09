@@ -30,9 +30,12 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.LowLatencyPrefs
+import moe.chenxy.huaweipods.HuaweiPodsApp
 import moe.chenxy.huaweipods.pods.FreeBuds5SettingsState
 import moe.chenxy.huaweipods.pods.FreeBuds5SoundEffect
 import moe.chenxy.huaweipods.pods.HuaweiFreeBuds5Controller
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.mergeFreeBuds5SettingsState
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
@@ -56,7 +59,13 @@ fun FreeBuds5Controls(address: String) {
         )
     }
     var lowLatency by remember(address) {
-        mutableStateOf(prefs.nullableBoolean(keyPrefix + "low_latency"))
+        mutableStateOf(
+            LowLatencyPrefs.desiredOrNull(
+                prefs,
+                address,
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+            ),
+        )
     }
 
     FreeBuds5ReadbackEffect(address) { update ->
@@ -129,10 +138,18 @@ fun FreeBuds5Controls(address: String) {
             onChange = { enabled, complete ->
                 context.setFreeBuds5LowLatency(address, enabled) { success ->
                     if (success) {
-                        lowLatency = enabled
-                        prefs.edit().putBoolean(keyPrefix + "low_latency", enabled).apply()
+                        val stored = LowLatencyPrefs.setDesired(
+                            prefs = prefs,
+                            service = HuaweiPodsApp.xposedService,
+                            address = address,
+                            route = HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+                            enabled = enabled,
+                        )
+                        if (stored) lowLatency = enabled
+                        complete(stored)
+                    } else {
+                        complete(false)
                     }
-                    complete(success)
                 }
             },
         )

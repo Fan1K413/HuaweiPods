@@ -152,6 +152,46 @@ class HuaweiGestureControllerTest {
     }
 
     @Test
+    fun `FreeBuds 7i gestures match captured packets`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
+        assertArrayEquals(
+            hex("5A000600011F01010133A2"),
+            HuaweiGestureController.buildDoubleTapPacket(
+                route,
+                HuaweiGestureSide.LEFT,
+                HuaweiTapAction.PLAY_PAUSE,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A00060001250101071726"),
+            HuaweiGestureController.buildTripleTapPacket(
+                route,
+                HuaweiGestureSide.LEFT,
+                HuaweiTapAction.PLAY_PREVIOUS,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A0006002B160201FFD94E"),
+            HuaweiGestureController.buildFreeBudsPro3LongPressPacket(
+                HuaweiGestureSide.RIGHT,
+                FreeBudsPro3LongPressAction.NONE,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A0009002B1E0101000202009D9B"),
+            HuaweiGestureController.buildFreeBudsPro3SwipeVolumePacket(true),
+        )
+        assertArrayEquals(
+            hex(
+                "5A000700012001000200E897" +
+                    "5A0007000126010002002512" +
+                    "5A0007002B1F01000200328A",
+            ),
+            HuaweiGestureController.buildGestureStateQuery(route),
+        )
+    }
+
+    @Test
     fun `FreeBuds 6i captured tap packet matrix remains exact`() {
         val packets = listOf(
             Triple(

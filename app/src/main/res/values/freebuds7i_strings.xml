@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="freebuds7i_smart_features">Smart features</string>
+    <string name="freebuds7i_wear_detection">Wear detection</string>
+    <string name="freebuds7i_head_motion">Head-motion control</string>
+    <string name="freebuds7i_spatial_audio">Spatial audio</string>
+    <string name="freebuds7i_spatial_off">Off</string>
+    <string name="freebuds7i_spatial_fixed">Fixed</string>
+    <string name="freebuds7i_spatial_head_tracking">Head tracking</string>
+    <string name="freebuds7i_sound_and_connection">Sound and connection</string>
+    <string name="freebuds7i_sound_effect">Sound effect</string>
+    <string name="freebuds7i_sound_effect_default">Default</string>
+    <string name="freebuds7i_sound_effect_bass">Bass boost</string>
+    <string name="freebuds7i_sound_effect_treble">Treble boost</string>
+    <string name="freebuds7i_sound_effect_clear_voice">Clear voice</string>
+    <string name="freebuds7i_custom_equalizer">Custom equalizer</string>
+    <string name="freebuds7i_custom_equalizer_summary">10 bands, from −6 dB to +6 dB</string>
+    <string name="freebuds7i_eq_band">Band %1$d</string>
+    <string name="freebuds7i_eq_gain">%1$.1f dB</string>
+    <string name="freebuds7i_eq_reset">Reset</string>
+    <string name="freebuds7i_eq_apply">Apply</string>
+    <string name="freebuds7i_high_quality_audio">High-quality audio</string>
+    <string name="freebuds7i_dual_device">Dual-device connections</string>
+    <string name="freebuds7i_dual_device_summary">View devices remembered by the earbuds and remove an old device.</string>
+    <string name="freebuds7i_dual_device_refresh">Refresh list</string>
+    <string name="freebuds7i_dual_device_empty">No remembered devices were returned.</string>
+    <string name="freebuds7i_dual_device_connected">Connected</string>
+    <string name="freebuds7i_dual_device_saved">Remembered</string>
+    <string name="freebuds7i_dual_device_remove">Remove</string>
+    <string name="freebuds7i_dual_device_remove_title">Remove this device?</string>
+    <string name="freebuds7i_dual_device_remove_summary">%1$s will need to pair with the earbuds again.</string>
+    <string name="freebuds7i_state_unknown">Reading from earbuds…</string>
+    <string name="freebuds7i_state_hint">Wear detection, head motion, spatial audio, sound effect and high-quality audio are read back from the earbuds. Low latency is automatically reapplied after every connection.</string>
+</resources>

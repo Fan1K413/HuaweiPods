@@ -19,13 +19,25 @@ object HuaweiFreeClip2Controller {
         feature: FreeClip2BooleanFeature,
         enabled: Boolean,
         onComplete: ((Boolean) -> Unit)? = null,
-    ) = send(
-        context = context,
-        device = device,
-        packet = feature.packet(enabled),
-        description = "freeclip2 ${feature.extraValue} enabled=$enabled",
-        onComplete = onComplete,
-    )
+    ) {
+        if (feature == FreeClip2BooleanFeature.LOW_LATENCY) {
+            HuaweiLowLatencyController.setEnabled(
+                context,
+                device,
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                enabled,
+                onComplete,
+            )
+            return
+        }
+        send(
+            context = context,
+            device = device,
+            packet = feature.packet(enabled),
+            description = "freeclip2 ${feature.extraValue} enabled=$enabled",
+            onComplete = onComplete,
+        )
+    }
 
     fun setSpatialAudioMode(
         context: Context,

@@ -19,6 +19,11 @@ object HuaweiGestureController {
     private val freeClip2DoubleTapQuery = hex("5A000700012001000200E897")
     private val freeClip2TripleTapQuery = hex("5A0007000126010002002512")
     private val freeClip2SwipeQuery = hex("5A0007002B1F01000200328A")
+    private val modernLongPressRoutes = setOf(
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+    )
+    private val modernSwipeVolumeRoutes = modernLongPressRoutes
 
     fun supportsTapAction(
         route: HuaweiDeviceRoute,
@@ -260,7 +265,9 @@ object HuaweiGestureController {
     }
 
     internal fun buildGestureStateQuery(route: HuaweiDeviceRoute): ByteArray? =
-        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+            route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
+        ) {
             freeClip2DoubleTapQuery + freeClip2TripleTapQuery + freeClip2SwipeQuery
         } else {
             null
@@ -317,13 +324,33 @@ object HuaweiGestureController {
         side: HuaweiGestureSide,
         action: FreeBudsPro3LongPressAction,
         onComplete: ((Boolean) -> Unit)? = null,
+    ) = setModernEarbudsLongPress(
+        context = context,
+        device = device,
+        route = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        side = side,
+        action = action,
+        onComplete = onComplete,
+    )
+
+    fun setModernEarbudsLongPress(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        side: HuaweiGestureSide,
+        action: FreeBudsPro3LongPressAction,
+        onComplete: ((Boolean) -> Unit)? = null,
     ) {
+        if (route !in modernLongPressRoutes) {
+            onComplete?.invoke(false)
+            return
+        }
         HuaweiL2capAncController.sendRawPacketOnce(
             context = context,
             device = device,
-            route = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            route = route,
             packet = buildFreeBudsPro3LongPressPacket(side, action),
-            description = "FreeBuds Pro 3 long-press side=${side.extraValue} action=${action.extraValue}",
+            description = "modern-earbuds long-press side=${side.extraValue} action=${action.extraValue}",
             onComplete = onComplete,
         )
     }
@@ -350,13 +377,31 @@ object HuaweiGestureController {
         device: BluetoothDevice,
         enabled: Boolean,
         onComplete: ((Boolean) -> Unit)? = null,
+    ) = setModernEarbudsSwipeVolume(
+        context = context,
+        device = device,
+        route = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        enabled = enabled,
+        onComplete = onComplete,
+    )
+
+    fun setModernEarbudsSwipeVolume(
+        context: Context,
+        device: BluetoothDevice,
+        route: HuaweiDeviceRoute,
+        enabled: Boolean,
+        onComplete: ((Boolean) -> Unit)? = null,
     ) {
+        if (route !in modernSwipeVolumeRoutes) {
+            onComplete?.invoke(false)
+            return
+        }
         HuaweiL2capAncController.sendRawPacketOnce(
             context = context,
             device = device,
-            route = HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            route = route,
             packet = buildFreeBudsPro3SwipeVolumePacket(enabled),
-            description = "FreeBuds Pro 3 swipe-volume enabled=$enabled",
+            description = "modern-earbuds swipe-volume enabled=$enabled",
             onComplete = onComplete,
         )
     }
@@ -491,6 +536,14 @@ enum class HuaweiTapAction(val extraValue: String) {
             NONE,
         )
         private val freeClip2TripleTapActions = listOf(PLAY_NEXT, PLAY_PREVIOUS, NONE)
+        private val freeBuds7iDoubleTapActions = listOf(
+            PLAY_PAUSE,
+            PLAY_NEXT,
+            PLAY_PREVIOUS,
+            VOICE_ASSISTANT,
+            NONE,
+        )
+        private val freeBuds7iTripleTapActions = listOf(PLAY_NEXT, PLAY_PREVIOUS, NONE)
         private val eyewear2DoubleTapActions = listOf(PLAY_PAUSE, VOICE_ASSISTANT, NONE)
 
         fun availableFor(
@@ -502,6 +555,8 @@ enum class HuaweiTapAction(val extraValue: String) {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I to HuaweiGestureKind.TRIPLE_TAP -> freeBuds6iTripleTapActions
             HuaweiDeviceRoute.HUAWEI_FREECLIP2 to HuaweiGestureKind.DOUBLE_TAP -> freeClip2DoubleTapActions
             HuaweiDeviceRoute.HUAWEI_FREECLIP2 to HuaweiGestureKind.TRIPLE_TAP -> freeClip2TripleTapActions
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to HuaweiGestureKind.DOUBLE_TAP -> freeBuds7iDoubleTapActions
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to HuaweiGestureKind.TRIPLE_TAP -> freeBuds7iTripleTapActions
             HuaweiDeviceRoute.HUAWEI_EYEWEAR2 to HuaweiGestureKind.DOUBLE_TAP -> eyewear2DoubleTapActions
             else -> emptyList()
         }
@@ -545,6 +600,17 @@ enum class HuaweiTapAction(val extraValue: String) {
                 VOICE_ASSISTANT -> 0x00
                 NONE -> 0xFF
                 NOISE_CANCELLATION -> null
+            }
+
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> when (this) {
+                PLAY_NEXT -> 0x02
+                PLAY_PREVIOUS -> 0x07
+                PLAY_PAUSE -> 0x01
+                VOICE_ASSISTANT -> 0x00
+                NONE -> 0xFF
+                NOISE_CANCELLATION,
+                SPATIAL_AUDIO,
+                -> null
             }
 
             HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> when (this) {

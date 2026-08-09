@@ -24,5 +24,5 @@
     <string name="freeclip2_low_latency">Low latency mode</string>
     <string name="freeclip2_dual_device">Dual-device connection</string>
     <string name="freeclip2_case_prompt_sound">Case prompt sound</string>
-    <string name="freeclip2_state_hint">State reflects the last value set by this module. Select it again after changing it in a Huawei app.</string>
+    <string name="freeclip2_state_hint">Low latency is reapplied after every connection when enabled. Other unreadable switches still reflect the last value set by this module.</string>
 </resources>

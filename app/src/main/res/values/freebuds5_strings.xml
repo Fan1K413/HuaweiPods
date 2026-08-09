@@ -11,5 +11,5 @@
     <string name="freebuds5_high_quality_audio">High-quality audio</string>
     <string name="freebuds5_low_latency">Low latency mode</string>
     <string name="freebuds5_state_unknown">Waiting for device state</string>
-    <string name="freebuds5_state_hint">Wear detection, sound effect and high-quality audio are read from the earbuds. Low latency only reflects the last value set by this module.</string>
+    <string name="freebuds5_state_hint">Wear detection, sound effect and high-quality audio are read from the earbuds. Low latency is an auto-apply policy and is reapplied after every connection.</string>
 </resources>

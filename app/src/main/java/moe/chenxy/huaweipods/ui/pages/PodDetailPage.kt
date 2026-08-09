@@ -58,8 +58,10 @@ import moe.chenxy.huaweipods.pods.HuaweiGestureController
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
 import moe.chenxy.huaweipods.ui.components.AncSwitch
 import moe.chenxy.huaweipods.ui.components.FreeBuds5Controls
+import moe.chenxy.huaweipods.ui.components.FreeBuds7iControls
 import moe.chenxy.huaweipods.ui.components.FreeClip2Controls
 import moe.chenxy.huaweipods.ui.components.HuaweiGestureControls
+import moe.chenxy.huaweipods.ui.components.LowLatencyControl
 import moe.chenxy.huaweipods.ui.components.PodStatus
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import top.yukonga.miuix.kmp.basic.Card
@@ -71,6 +73,7 @@ import moe.chenxy.huaweipods.pods.supportsAnc
 import moe.chenxy.huaweipods.pods.supportsAncDirectionDial
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
 import moe.chenxy.huaweipods.pods.supportsGestureConfiguration
+import moe.chenxy.huaweipods.pods.supportsLowLatencyControl
 import moe.chenxy.huaweipods.pods.supportsTransparency
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -326,6 +329,33 @@ private fun LazyListScope.podControlItems(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
             ) {
                 FreeBuds5Controls(address = connectedDeviceAddress)
+            }
+        }
+    }
+
+    if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I) {
+        item {
+            Card(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                FreeBuds7iControls(address = connectedDeviceAddress)
+            }
+        }
+    }
+
+    if (deviceRoute.supportsLowLatencyControl &&
+        deviceRoute != HuaweiDeviceRoute.HUAWEI_FREEBUDS5 &&
+        deviceRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2 &&
+        deviceRoute != HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
+    ) {
+        item {
+            Card(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                LowLatencyControl(
+                    address = connectedDeviceAddress,
+                    route = deviceRoute,
+                )
             }
         }
     }

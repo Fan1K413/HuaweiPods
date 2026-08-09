@@ -62,12 +62,12 @@ object HuaweiFreeBuds5Controller {
         device: BluetoothDevice,
         enabled: Boolean,
         onComplete: ((Boolean) -> Unit)? = null,
-    ) = send(
-        context = context,
-        device = device,
-        packet = FreeBuds5BooleanFeature.LOW_LATENCY.packet(enabled),
-        description = "freebuds5 low-latency enabled=$enabled",
-        onComplete = onComplete,
+    ) = HuaweiLowLatencyController.setEnabled(
+        context,
+        device,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
+        enabled,
+        onComplete,
     )
 
     fun requestWearDetectionState(

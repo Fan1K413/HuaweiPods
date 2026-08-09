@@ -5,6 +5,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
+import moe.chenxy.huaweipods.config.LowLatencyPrefs
 import moe.chenxy.huaweipods.hook.milink.MiLinkServiceHook
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRouteResolver
 
@@ -37,6 +38,7 @@ open class HookEntry : XposedModule() {
         hook.appClassLoader = classLoader
         hook.packageName = packageName
         hook.prefs = getRemotePreferences(ConfigManager.PREFS_NAME)
+        LowLatencyPrefs.attachHookPreferences(hook.prefs)
         HuaweiDeviceRouteResolver.init(hook.prefs)
         Log.d(TAG, "loadHook package=$packageName hook=${hook.javaClass.simpleName}")
         ConfigManager.init(hook.prefs)

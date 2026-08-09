@@ -46,6 +46,10 @@ class HuaweiDeviceRouteProbePolicyTest {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRouteProbePolicy.resolveVerifiedRoute("000153", "02"),
         )
+        assertEquals(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+            HuaweiDeviceRouteProbePolicy.resolveVerifiedRoute("000163", "02"),
+        )
         assertNull(HuaweiDeviceRouteProbePolicy.resolveVerifiedRoute("000027", "01"))
         assertNull(HuaweiDeviceRouteProbePolicy.resolveVerifiedRoute("FFFFFF", "00"))
         assertNull(HuaweiDeviceRouteProbePolicy.resolveVerifiedRoute("000153", "2"))

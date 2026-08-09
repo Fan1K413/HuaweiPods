@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="freebuds7i_smart_features">智慧功能</string>
+    <string name="freebuds7i_wear_detection">佩戴检测</string>
+    <string name="freebuds7i_head_motion">头动控制</string>
+    <string name="freebuds7i_spatial_audio">空间音频</string>
+    <string name="freebuds7i_spatial_off">关闭</string>
+    <string name="freebuds7i_spatial_fixed">固定</string>
+    <string name="freebuds7i_spatial_head_tracking">头部跟随</string>
+    <string name="freebuds7i_sound_and_connection">音效与连接</string>
+    <string name="freebuds7i_sound_effect">耳机音效</string>
+    <string name="freebuds7i_sound_effect_default">默认</string>
+    <string name="freebuds7i_sound_effect_bass">低音增强</string>
+    <string name="freebuds7i_sound_effect_treble">高音增强</string>
+    <string name="freebuds7i_sound_effect_clear_voice">清晰人声</string>
+    <string name="freebuds7i_custom_equalizer">自定义均衡器</string>
+    <string name="freebuds7i_custom_equalizer_summary">10 段调节，范围 −6 dB 至 +6 dB</string>
+    <string name="freebuds7i_eq_band">频段 %1$d</string>
+    <string name="freebuds7i_eq_gain">%1$.1f dB</string>
+    <string name="freebuds7i_eq_reset">重置</string>
+    <string name="freebuds7i_eq_apply">应用</string>
+    <string name="freebuds7i_high_quality_audio">高清音质</string>
+    <string name="freebuds7i_dual_device">双设备连接</string>
+    <string name="freebuds7i_dual_device_summary">查看耳机记住的设备，并移除不再使用的设备。</string>
+    <string name="freebuds7i_dual_device_refresh">刷新列表</string>
+    <string name="freebuds7i_dual_device_empty">耳机没有返回已记住的设备。</string>
+    <string name="freebuds7i_dual_device_connected">已连接</string>
+    <string name="freebuds7i_dual_device_saved">已记住</string>
+    <string name="freebuds7i_dual_device_remove">移除</string>
+    <string name="freebuds7i_dual_device_remove_title">移除这台设备？</string>
+    <string name="freebuds7i_dual_device_remove_summary">%1$s 之后需要重新与耳机配对。</string>
+    <string name="freebuds7i_state_unknown">正在从耳机读取…</string>
+    <string name="freebuds7i_state_hint">佩戴检测、头动控制、空间音频、耳机音效和高清音质均从耳机回读；低时延为自动保持策略，每次连接后都会重新应用。</string>
+</resources>

@@ -24,5 +24,5 @@
     <string name="freeclip2_low_latency">低时延模式</string>
     <string name="freeclip2_dual_device">双设备连接</string>
     <string name="freeclip2_case_prompt_sound">充电盒提示音</string>
-    <string name="freeclip2_state_hint">当前状态以本模块最后一次设置为准；若在华为应用中修改，请在此重新选择。</string>
+    <string name="freeclip2_state_hint">低时延开启后会在每次连接时自动重新应用；其他无法回读的开关仍以本模块最后一次设置为准。</string>
 </resources>

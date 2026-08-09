@@ -18,6 +18,8 @@
     <string name="click_action_module">模块</string>
     <string name="enabled">开启</string>
     <string name="off">关闭</string>
+    <string name="low_latency_mode">低时延模式</string>
+    <string name="low_latency_auto_apply_summary">开启后会在每次连接时自动重新应用</string>
     <string name="noise_cancellation_title">降噪</string>
     <string name="gesture_left_double_tap">左耳双击</string>
     <string name="gesture_right_double_tap">右耳双击</string>

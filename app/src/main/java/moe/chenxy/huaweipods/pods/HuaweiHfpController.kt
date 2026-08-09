@@ -12,6 +12,7 @@ import android.os.Process
 import android.os.SystemClock
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.LowLatencyPrefs
 import moe.chenxy.huaweipods.hook.Log
 import moe.chenxy.huaweipods.smartaudio.OfficialImageIdentityBridge
 import moe.chenxy.huaweipods.utils.miuiStrongToast.MiuiStrongToastUtil
@@ -31,6 +32,9 @@ object HuaweiHfpController {
     private const val FREECLIP2_AUDIO_CONFIRM_DELAY_MS = 450L
     private const val FREECLIP2_AUDIO_REFRESH_MIN_INTERVAL_MS = 2_500L
     private const val DEVICE_INFO_REFRESH_MIN_INTERVAL_MS = 60_000L
+    private const val LOW_LATENCY_AUTO_APPLY_DELAY_MS = 2_500L
+    private const val LOW_LATENCY_AUTO_APPLY_RETRY_DELAY_MS = 2_500L
+    private const val LOW_LATENCY_AUTO_APPLY_MAX_ATTEMPTS = 2
     private const val FREEBUDS3_SNAPSHOT_TTL_MS = 10 * 60_000L
     private const val EXTRA_STATE_CACHED = "state_cached"
 
@@ -63,6 +67,8 @@ object HuaweiHfpController {
     private var deviceInfoQueryUnavailableLogged = false
     private var currentDeviceInfoIdentity: HuaweiDeviceInfoIdentity? = null
     private var sessionGeneration = 0L
+    private var lowLatencyAutoApplyRequest: LowLatencyAutoApplyRequest? = null
+    private var lowLatencyAppliedGeneration: Long? = null
     private val freeClip2AudioStateTracker = FreeClip2AudioStateTracker()
     private val batteryIslandTriggerPolicy = BatteryIslandTriggerPolicy()
     private val freeBuds3SnapshotStore = FreeBuds3StateSnapshotStore()
@@ -70,6 +76,9 @@ object HuaweiHfpController {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val freeClip2AudioConfirmationRunnable = Runnable {
         requestFreeClip2AudioState(force = true)
+    }
+    private val lowLatencyAutoApplyRunnable = Runnable {
+        applyAutoLowLatency()
     }
     private var backgroundBatteryRefreshActive = false
     private val backgroundBatteryRefreshRunnable = object : Runnable {
@@ -121,6 +130,7 @@ object HuaweiHfpController {
                     }
                     requestOfficialImageIdentity()
                     requestPrivateBattery()
+                    scheduleAutoLowLatency()
                     if (sessionRoute.supportsAnc) {
                         val requestStarted = requestAncState()
                         synchronized(sessionStateLock) {
@@ -212,6 +222,7 @@ object HuaweiHfpController {
         requestOfficialImageIdentity(force = true)
         requestAncState(force = true)
         requestPrivateBattery()
+        scheduleAutoLowLatency()
         if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
             requestFreeClip2AudioState(force = true)
         }
@@ -257,6 +268,7 @@ object HuaweiHfpController {
             deviceIdentityPublished = false
             deviceInfoQueryUnavailableLogged = false
             currentDeviceInfoIdentity = null
+            cancelAutoLowLatency()
             sessionGeneration++
             synchronized(sessionStateLock) { freeClip2AudioStateTracker.reset() }
             mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
@@ -800,6 +812,7 @@ object HuaweiHfpController {
             deviceIdentityPublished = false
             deviceInfoQueryUnavailableLogged = false
             currentDeviceInfoIdentity = null
+            cancelAutoLowLatency()
             synchronized(sessionStateLock) { freeClip2AudioStateTracker.reset() }
             mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
             batteryIslandTriggerPolicy.onNewSession()
@@ -902,6 +915,99 @@ object HuaweiHfpController {
                 }
             }
         )
+    }
+
+    /**
+     * 非华为系统在 A2DP 建链时可能把耳机的低时延模式恢复为关闭。协议尚无可靠回读，
+     * 因此仅在用户明确开启自动保持后，于物理连接稳定后重新发送一次已验证的开启命令。
+     */
+    private fun scheduleAutoLowLatency() {
+        val currentDevice = device ?: return
+        val requestedRoute = sessionRoute
+        if (!LowLatencyPrefs.isAutoApplyEnabled(currentDevice.address, requestedRoute)) {
+            cancelAutoLowLatency()
+            return
+        }
+        if (lowLatencyAppliedGeneration == sessionGeneration) return
+        val existing = lowLatencyAutoApplyRequest
+        if (existing != null && existing.generation == sessionGeneration) return
+        lowLatencyAutoApplyRequest = LowLatencyAutoApplyRequest(
+            generation = sessionGeneration,
+            address = currentDevice.address,
+            route = requestedRoute,
+            attempt = 1,
+        )
+        mainHandler.removeCallbacks(lowLatencyAutoApplyRunnable)
+        mainHandler.postDelayed(lowLatencyAutoApplyRunnable, LOW_LATENCY_AUTO_APPLY_DELAY_MS)
+        Log.i(
+            TAG,
+            "Huawei low-latency auto-apply scheduled route=$requestedRoute device=${currentDevice.address}",
+        )
+    }
+
+    private fun applyAutoLowLatency() {
+        val request = lowLatencyAutoApplyRequest ?: return
+        val currentContext = context ?: return cancelAutoLowLatency()
+        val currentDevice = device ?: return cancelAutoLowLatency()
+        if (!matchesLowLatencyAutoApplyRequest(request)) return cancelAutoLowLatency()
+        if (!LowLatencyPrefs.isAutoApplyEnabled(request.address, request.route)) {
+            cancelAutoLowLatency()
+            return
+        }
+        val onComplete: (Boolean) -> Unit = completion@{ success ->
+            if (lowLatencyAutoApplyRequest != request ||
+                !matchesLowLatencyAutoApplyRequest(request)
+            ) {
+                return@completion
+            }
+            if (success) {
+                lowLatencyAppliedGeneration = request.generation
+                lowLatencyAutoApplyRequest = null
+                Log.i(
+                    TAG,
+                    "Huawei low-latency auto-apply sent route=${request.route} " +
+                        "attempt=${request.attempt} device=${request.address}",
+                )
+                return@completion
+            }
+            if (request.attempt >= LOW_LATENCY_AUTO_APPLY_MAX_ATTEMPTS ||
+                !LowLatencyPrefs.isAutoApplyEnabled(request.address, request.route)
+            ) {
+                lowLatencyAutoApplyRequest = null
+                Log.w(
+                    TAG,
+                    "Huawei low-latency auto-apply failed route=${request.route} " +
+                        "attempt=${request.attempt} device=${request.address}",
+                )
+                return@completion
+            }
+            lowLatencyAutoApplyRequest = request.copy(attempt = request.attempt + 1)
+            mainHandler.postDelayed(
+                lowLatencyAutoApplyRunnable,
+                LOW_LATENCY_AUTO_APPLY_RETRY_DELAY_MS,
+            )
+        }
+        HuaweiLowLatencyController.setEnabled(
+            context = currentContext,
+            device = currentDevice,
+            route = request.route,
+            enabled = true,
+            onComplete = onComplete,
+        )
+    }
+
+    private fun matchesLowLatencyAutoApplyRequest(request: LowLatencyAutoApplyRequest): Boolean =
+        matchesLowLatencyAutoApplySession(
+            request = request,
+            activeGeneration = sessionGeneration,
+            activeAddress = device?.address,
+            activeRoute = sessionRoute,
+        )
+
+    private fun cancelAutoLowLatency() {
+        mainHandler.removeCallbacks(lowLatencyAutoApplyRunnable)
+        lowLatencyAutoApplyRequest = null
+        lowLatencyAppliedGeneration = null
     }
 
     private fun requestOfficialImageIdentity(force: Boolean = false) {
@@ -1115,7 +1221,9 @@ object HuaweiHfpController {
         val currentContext = context ?: return
         val currentDevice = device ?: return
         val requestedRoute = sessionRoute
-        if (requestedRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        if (requestedRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2 &&
+            requestedRoute != HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
+        ) return
         if (!requestedAddress.isNullOrBlank() &&
             !requestedAddress.equals(currentDevice.address, ignoreCase = true)
         ) {
@@ -1434,6 +1542,23 @@ object HuaweiHfpController {
     }
 }
 
+internal data class LowLatencyAutoApplyRequest(
+    val generation: Long,
+    val address: String,
+    val route: HuaweiDeviceRoute,
+    val attempt: Int,
+)
+
+internal fun matchesLowLatencyAutoApplySession(
+    request: LowLatencyAutoApplyRequest,
+    activeGeneration: Long,
+    activeAddress: String?,
+    activeRoute: HuaweiDeviceRoute,
+): Boolean =
+    request.generation == activeGeneration &&
+        request.route == activeRoute &&
+        activeAddress?.equals(request.address, ignoreCase = true) == true
+
 internal fun matchesHuaweiSessionTarget(
     activeAddress: String,
     activeRoute: HuaweiDeviceRoute,
@@ -1508,6 +1633,7 @@ internal fun normalizeHuaweiAncSubMode(
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> setOf(0x01, 0x02)
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5 -> setOf(0x01, 0xFF)
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I -> setOf(0xFF)
         else -> emptySet()
     }
     if (accepted.isEmpty()) return null

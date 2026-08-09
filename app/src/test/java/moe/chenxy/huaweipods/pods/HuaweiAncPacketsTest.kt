@@ -192,14 +192,14 @@ class HuaweiAncPacketsTest {
         assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3))
         assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5))
         assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS5))
+        assertArrayEquals(query, HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4))
-        assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I))
         assertNull(HuaweiAncPackets.currentStateQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2))
     }
 
     @Test
-    fun `FreeBuds 6i and Pro 3 expose four verified ANC levels`() {
+    fun `FreeBuds 6i Pro 3 and 7i expose four verified ANC levels`() {
         val expected = mapOf(
             HuaweiAncLevel.ADAPTIVE to "5A0007002B0401020101F13D",
             HuaweiAncLevel.LIGHT to "5A0007002B0401020100E11C",
@@ -209,6 +209,7 @@ class HuaweiAncPacketsTest {
         listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
             expected.forEach { (level, packet) ->
                 assertArrayEquals(

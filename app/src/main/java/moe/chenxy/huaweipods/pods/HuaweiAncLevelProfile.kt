@@ -26,7 +26,9 @@ internal val HuaweiDeviceRoute.ancLevelOptions: List<HuaweiAncLevelOption>
     get() = when (this) {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> freeBuds5AncOptions
         HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 -> fourLevelAncOptions
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+        -> fourLevelAncOptions
         else -> emptyList()
     }
 

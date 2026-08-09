@@ -33,6 +33,8 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.LowLatencyPrefs
+import moe.chenxy.huaweipods.HuaweiPodsApp
 import moe.chenxy.huaweipods.pods.FreeClip2BooleanFeature
 import moe.chenxy.huaweipods.pods.FreeClip2SoundEffect
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
@@ -157,13 +159,37 @@ fun FreeClip2Controls(address: String) {
             FreeClip2BooleanFeature.DUAL_DEVICE to R.string.freeclip2_dual_device,
             FreeClip2BooleanFeature.CASE_PROMPT_SOUND to R.string.freeclip2_case_prompt_sound,
         ).forEach { (feature, title) ->
+            val initialValue = if (feature == FreeClip2BooleanFeature.LOW_LATENCY) {
+                LowLatencyPrefs.desiredOrNull(
+                    prefs,
+                    address,
+                    HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                ) ?: false
+            } else {
+                prefs.getBoolean(keyPrefix + feature.extraValue, false)
+            }
             FeatureToggle(
                 titleRes = title,
-                initialValue = prefs.getBoolean(keyPrefix + feature.extraValue, false),
+                initialValue = initialValue,
                 onChange = { enabled, complete ->
                     context.setFreeClip2BooleanFeature(address, feature, enabled) { success ->
-                        if (success) prefs.edit().putBoolean(keyPrefix + feature.extraValue, enabled).apply()
-                        complete(success)
+                        if (success) {
+                            val stored = if (feature == FreeClip2BooleanFeature.LOW_LATENCY) {
+                                LowLatencyPrefs.setDesired(
+                                    prefs = prefs,
+                                    service = HuaweiPodsApp.xposedService,
+                                    address = address,
+                                    route = HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                                    enabled = enabled,
+                                )
+                            } else {
+                                prefs.edit().putBoolean(keyPrefix + feature.extraValue, enabled).apply()
+                                true
+                            }
+                            complete(stored)
+                        } else {
+                            complete(false)
+                        }
                     }
                 },
             )

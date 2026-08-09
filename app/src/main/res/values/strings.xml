@@ -17,6 +17,8 @@
     <string name="click_action_module">Module</string>
     <string name="enabled">On</string>
     <string name="off">Off</string>
+    <string name="low_latency_mode">Low latency mode</string>
+    <string name="low_latency_auto_apply_summary">Automatically reapplied after every connection</string>
     <string name="noise_cancellation_title">NC</string>
     <string name="gesture_left_double_tap">Left double-tap</string>
     <string name="gesture_right_double_tap">Right double-tap</string>

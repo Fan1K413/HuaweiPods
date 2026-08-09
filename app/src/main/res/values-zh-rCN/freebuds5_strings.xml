@@ -11,5 +11,5 @@
     <string name="freebuds5_high_quality_audio">高清音质</string>
     <string name="freebuds5_low_latency">低时延模式</string>
     <string name="freebuds5_state_unknown">正在读取耳机状态</string>
-    <string name="freebuds5_state_hint">佩戴检测、耳机音效和高清音质会从耳机读取；低时延仅显示本模块最后一次设置。</string>
+    <string name="freebuds5_state_hint">佩戴检测、耳机音效和高清音质会从耳机读取；低时延表示自动保持策略，开启后会在每次连接时重新应用。</string>
 </resources>

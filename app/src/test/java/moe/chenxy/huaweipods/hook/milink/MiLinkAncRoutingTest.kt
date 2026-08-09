@@ -49,6 +49,7 @@ class MiLinkAncRoutingTest {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
             assertEquals(0, miLinkAncModeFor(route, 1))
             assertEquals(1, miLinkAncModeFor(route, 2))
@@ -65,7 +66,6 @@ class MiLinkAncRoutingTest {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
             assertEquals(0, miLinkAncModeFor(route, 1))
             assertEquals(1, miLinkAncModeFor(route, 2))
@@ -79,13 +79,13 @@ class MiLinkAncRoutingTest {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS5,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route -> assertTrue(shouldDetachMiLinkTransparency(route)) }
 
         listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
             HuaweiDeviceRoute.HUAWEI_FREECLIP2,
             HuaweiDeviceRoute.HUAWEI_EYEWEAR2,
         ).forEach { route -> assertFalse(shouldDetachMiLinkTransparency(route)) }

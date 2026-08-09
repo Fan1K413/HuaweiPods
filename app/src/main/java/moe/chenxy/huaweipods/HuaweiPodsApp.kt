@@ -7,6 +7,7 @@ import io.github.libxposed.service.XposedServiceHelper
 import java.util.concurrent.CopyOnWriteArraySet
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
+import moe.chenxy.huaweipods.config.LowLatencyPrefs
 import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.smartaudio.SmartAudioImageCache
 
@@ -23,6 +24,10 @@ class HuaweiPodsApp : Application(), XposedServiceHelper.OnServiceListener {
         xposedService = service
         runCatching {
             DeviceRoutePrefs.syncWithRemote(
+                prefs = getSharedPreferences(ConfigManager.PREFS_NAME, MODE_PRIVATE),
+                service = service,
+            )
+            LowLatencyPrefs.syncWithRemote(
                 prefs = getSharedPreferences(ConfigManager.PREFS_NAME, MODE_PRIVATE),
                 service = service,
             )

@@ -42,6 +42,10 @@ class BluetoothUpstreamAncPolicyTest {
             upstreamHuaweiAncStateForMode(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO5, 2, off),
         )
         assertEquals(
+            HuaweiAncState(NoiseControlMode.TRANSPARENCY, 0xFF),
+            upstreamHuaweiAncStateForMode(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I, 2, off),
+        )
+        assertEquals(
             HuaweiAncState(NoiseControlMode.TRANSPARENCY, 0x01),
             upstreamHuaweiAncStateForLevel(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I, "0201", off),
         )
@@ -52,7 +56,6 @@ class BluetoothUpstreamAncPolicyTest {
         listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO4,
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
             assertNull(upstreamHuaweiAncStateForMode(route, 2, off))
             assertNull(upstreamHuaweiAncStateForLevel(route, "02ff", off))
@@ -75,6 +78,7 @@ class BluetoothUpstreamAncPolicyTest {
         listOf(
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
             cases.forEach { (miuiPayload, huaweiLevel) ->
                 val state = upstreamHuaweiAncStateForLevel(route, miuiPayload, off)
