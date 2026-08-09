@@ -5,7 +5,7 @@ description: 自愿支持 HuaweiPods，并查看公开赞助名单。
 
 # 赞助支持
 
-<img src="/sponsor_qr_piter.png" alt="piter 的微信赞赏码" width="520" />
+<img src="../public/sponsor_qr_piter.png" alt="piter 的微信赞赏码" width="520" />
 
 ## 公开赞助名单
 
