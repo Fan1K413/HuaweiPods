@@ -29,11 +29,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
+          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
           VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
           VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts)
           TAG=${INPUT_TAG:-"${VERSION_CODE}-${VERSION_NAME}"}
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ] && [ "$WORKFLOW_HEAD_BRANCH" != "$TAG" ]; then
+            echo "Build came from $WORKFLOW_HEAD_BRANCH, not release tag $TAG; skipping sync."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "No published source release found for $TAG; skipping sync."
