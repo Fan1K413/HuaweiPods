@@ -111,3 +111,5 @@ jobs:
           name: ${{ steps.sign.outputs.version_name }}
           bodyFile: ${{ steps.sign.outputs.release_notes }}
           makeLatest: true
+          allowUpdates: true
+          replacesArtifacts: true

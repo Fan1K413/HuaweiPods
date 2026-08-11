@@ -64,14 +64,43 @@ jobs:
           TARGET_REPOSITORY: Xposed-Modules-Repo/moe.chenxy.huaweipods
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
-            echo "LSPosed release $TAG already exists; skipping."
-            exit 0
+          gh repo clone "$TARGET_REPOSITORY" target-repository -- --depth=1
+          pushd target-repository
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          printf '%s\n' "$TAG" > VERSION
+          git add VERSION
+          if git diff --cached --quiet; then
+            git commit --allow-empty -m "release: refresh HuaweiPods $VERSION_NAME"
+          else
+            git commit -m "release: HuaweiPods $VERSION_NAME"
           fi
+          git push origin HEAD:main
+          TARGET_SHA=$(git rev-parse HEAD)
+          popd
 
-          gh release create "$TAG" release/*.apk \
-            --repo "$TARGET_REPOSITORY" \
-            --target main \
-            --title "$VERSION_NAME" \
-            --notes-file release-notes.md \
-            --latest
+          if gh release view "$TAG" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$TARGET_REPOSITORY" \
+              --title "$VERSION_NAME" \
+              --notes-file release-notes.md \
+              --latest
+            gh release upload "$TAG" release/*.apk \
+              --repo "$TARGET_REPOSITORY" \
+              --clobber
+            pushd target-repository
+            git tag -f "$TAG" "$TARGET_SHA"
+            git push origin "refs/tags/$TAG" --force
+            popd
+          else
+            pushd target-repository
+            git tag "$TAG" "$TARGET_SHA"
+            git push origin "refs/tags/$TAG"
+            popd
+            gh release create "$TAG" release/*.apk \
+              --repo "$TARGET_REPOSITORY" \
+              --target "$TARGET_SHA" \
+              --title "$VERSION_NAME" \
+              --notes-file release-notes.md \
+              --latest
+          fi

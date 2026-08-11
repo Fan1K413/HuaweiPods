@@ -72,8 +72,8 @@ fun AvailableUpdateDialog(
                 color = MiuixTheme.colorScheme.onSurface,
                 style = MiuixTheme.textStyles.headline1,
             )
-            Text(
-                text = displayedReleaseNotes,
+            ReleaseNotesMarkdown(
+                markdown = displayedReleaseNotes,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 240.dp)
@@ -81,8 +81,6 @@ fun AvailableUpdateDialog(
                     .background(MiuixTheme.colorScheme.surface)
                     .padding(horizontal = 14.dp, vertical = 12.dp)
                     .verticalScroll(rememberScrollState()),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.body2,
             )
             Text(
                 text = stringResource(R.string.update_install_restart_hint),
