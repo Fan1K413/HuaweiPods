@@ -71,6 +71,7 @@ jobs:
           TARGET_REPOSITORY: Xposed-Modules-Repo/moe.chenxy.huaweipods
         run: |
           set -euo pipefail
+          gh auth setup-git
           gh repo clone "$TARGET_REPOSITORY" target-repository -- --depth=1
           pushd target-repository
           git config user.name "github-actions[bot]"
