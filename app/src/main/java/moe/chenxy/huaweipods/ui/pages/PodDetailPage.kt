@@ -61,6 +61,7 @@ import moe.chenxy.huaweipods.ui.components.FreeBuds5Controls
 import moe.chenxy.huaweipods.ui.components.FreeBuds7iControls
 import moe.chenxy.huaweipods.ui.components.FreeClip2Controls
 import moe.chenxy.huaweipods.ui.components.HuaweiGestureControls
+import moe.chenxy.huaweipods.ui.components.HuaweiEqualizerPreference
 import moe.chenxy.huaweipods.ui.components.LowLatencyControl
 import moe.chenxy.huaweipods.ui.components.PodStatus
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
@@ -339,6 +340,19 @@ private fun LazyListScope.podControlItems(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
             ) {
                 FreeBuds7iControls(address = connectedDeviceAddress)
+            }
+        }
+    }
+
+    if (deviceRoute == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) {
+        item {
+            Card(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                HuaweiEqualizerPreference(
+                    address = connectedDeviceAddress,
+                    route = HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                )
             }
         }
     }

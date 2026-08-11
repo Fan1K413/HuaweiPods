@@ -476,6 +476,12 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                     clearPendingHuaweiCallback()
                     return@hookBefore
                 }
+                val route = currentHuaweiRoute()
+                if (!shouldExposeMiuiAdvancedHeadsetUi(route)) {
+                    clearPendingHuaweiCallback()
+                    Log.d(TAG, "BinderC6776v.checkSupport left native route=$route device=${device.describe()}")
+                    return@hookBefore
+                }
                 lastHuaweiDevice = device
                 rememberPendingHuaweiCallback(device?.address)
                 result = fakeSupport()
@@ -577,6 +583,11 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
             hookBefore(binderClass.method(methodName, String::class.java)) {
                 val address = args[0] as? String
                 if (address == null || !isHuaweiAddress(address)) return@hookBefore
+                val route = routeForKnownHuaweiAddress(address)
+                if (!shouldExposeMiuiAdvancedHeadsetUi(route)) {
+                    Log.d(TAG, "BinderC6776v.$label left native route=$route address=$address method=$methodName")
+                    return@hookBefore
+                }
                 result = forced()
                 Log.d(TAG, "BinderC6776v.$label forced address=$address result=$result method=$methodName")
             }
@@ -595,6 +606,11 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
             hookBefore(binderClass.method(methodName, String::class.java)) {
                 val address = args[0] as? String
                 if (address == null || !isHuaweiAddress(address)) return@hookBefore
+                val route = routeForKnownHuaweiAddress(address)
+                if (!shouldExposeMiuiAdvancedHeadsetUi(route)) {
+                    Log.d(TAG, "BinderC6776v.$label left native route=$route address=$address method=$methodName")
+                    return@hookBefore
+                }
                 result = forced
                 Log.d(TAG, "BinderC6776v.$label forced address=$address result=$forced method=$methodName")
             }
@@ -629,8 +645,11 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                 val route = currentHuaweiRoute()
                 val selection = mode?.let { upstreamHuaweiAncStateForMode(route, it, currentHuaweiAncState()) }
                 Log.d(TAG, "BinderC6776v.changeAncMode swallowed mode=$mode route=$route selection=$selection device=${device.describe()}")
-                selection?.let { sendHuaweiAnc(route, it, device) }
-                sendRealStatus(device, "changeAncMode:$mode")
+                if (selection != null) {
+                    sendHuaweiAnc(route, selection, device)
+                } else {
+                    sendRealStatus(device, "changeAncMode-invalid:$mode")
+                }
             }
         }.onFailure { Log.w(TAG, "hook BinderC6776v.changeAncMode skipped", it) }
     }
@@ -646,8 +665,11 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
                 val route = currentHuaweiRoute()
                 val selection = level?.let { upstreamHuaweiAncStateForLevel(route, it, currentHuaweiAncState()) }
                 Log.d(TAG, "BinderC6776v.changeAncLevel swallowed level=$level route=$route selection=$selection device=${device.describe()}")
-                selection?.let { sendHuaweiAnc(route, it, device) }
-                sendRealStatus(device, "changeAncLevel:$level")
+                if (selection != null) {
+                    sendHuaweiAnc(route, selection, device)
+                } else {
+                    sendRealStatus(device, "changeAncLevel-invalid:$level")
+                }
             }
         }.onFailure { Log.w(TAG, "hook BinderC6776v.changeAncLevel skipped", it) }
     }
@@ -727,8 +749,18 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private fun handleCheckSupport(data: Parcel, reply: Parcel): Boolean? {
         val device = data.readDevice()
         val isHuawei = isHuaweiPod(device)
-        Log.d(TAG, "checkSupport upstream device=${device.describe()} isHuawei=$isHuawei")
+        val route = currentHuaweiRoute()
+        val exposeAdvancedUi = isHuawei && shouldExposeMiuiAdvancedHeadsetUi(route)
+        Log.d(
+            TAG,
+            "checkSupport upstream device=${device.describe()} isHuawei=$isHuawei " +
+                "route=$route exposeAdvancedUi=$exposeAdvancedUi",
+        )
         if (!isHuawei) {
+            clearPendingHuaweiCallback()
+            return null
+        }
+        if (!exposeAdvancedUi) {
             clearPendingHuaweiCallback()
             return null
         }
@@ -780,9 +812,12 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         lastHuaweiDevice = device
         val route = currentHuaweiRoute()
         val selection = upstreamHuaweiAncStateForMode(route, mode, currentHuaweiAncState())
-        selection?.let { sendHuaweiAnc(route, it, device) }
+        if (selection != null) {
+            sendHuaweiAnc(route, selection, device)
+        } else {
+            sendRealStatus(device, "changeAncMode-invalid:$mode")
+        }
         reply.writeNoException()
-        sendRealStatus(device, "changeAncMode:$mode")
         return true
     }
 
@@ -795,17 +830,26 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
         lastHuaweiDevice = device
         val route = currentHuaweiRoute()
         val selection = level?.let { upstreamHuaweiAncStateForLevel(route, it, currentHuaweiAncState()) }
-        selection?.let { sendHuaweiAnc(route, it, device) }
+        if (selection != null) {
+            sendHuaweiAnc(route, selection, device)
+        } else {
+            sendRealStatus(device, "changeAncLevel-invalid:$level")
+        }
         reply.writeNoException()
-        sendRealStatus(device, "changeAncLevel:$level")
         return true
     }
 
     private fun handleAddressString(method: String, data: Parcel, reply: Parcel, forced: String): Boolean? {
         val address = data.readString()
         val isHuawei = address != null && isHuaweiAddress(address)
-        Log.d(TAG, "$method upstream address=$address isHuawei=$isHuawei")
-        if (!isHuawei) return null
+        val route = address?.let(::routeForKnownHuaweiAddress) ?: HuaweiDeviceRoute.UNSUPPORTED
+        val exposeAdvancedUi = isHuawei && shouldExposeMiuiAdvancedHeadsetUi(route)
+        Log.d(
+            TAG,
+            "$method upstream address=$address isHuawei=$isHuawei route=$route " +
+                "exposeAdvancedUi=$exposeAdvancedUi",
+        )
+        if (!exposeAdvancedUi) return null
         reply.writeNoException()
         reply.writeString(forced)
         Log.d(TAG, "$method upstream forced $forced")
@@ -815,8 +859,14 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private fun handleAddressBoolean(method: String, data: Parcel, reply: Parcel, forced: Boolean): Boolean? {
         val address = data.readString()
         val isHuawei = address != null && isHuaweiAddress(address)
-        Log.d(TAG, "$method upstream address=$address isHuawei=$isHuawei")
-        if (!isHuawei) return null
+        val route = address?.let(::routeForKnownHuaweiAddress) ?: HuaweiDeviceRoute.UNSUPPORTED
+        val exposeAdvancedUi = isHuawei && shouldExposeMiuiAdvancedHeadsetUi(route)
+        Log.d(
+            TAG,
+            "$method upstream address=$address isHuawei=$isHuawei route=$route " +
+                "exposeAdvancedUi=$exposeAdvancedUi",
+        )
+        if (!exposeAdvancedUi) return null
         reply.writeNoException()
         reply.writeInt(if (forced) 1 else 0)
         Log.d(TAG, "$method upstream forced $forced")
@@ -1132,6 +1182,13 @@ class BluetoothUpstreamHeadsetHook : HookContext() {
     private fun isHuaweiAddress(address: String): Boolean {
         return resolveHuaweiDeviceRoute(address, null).isSupported ||
             address.uppercase() in knownHuaweiAddresses
+    }
+
+    private fun routeForKnownHuaweiAddress(address: String): HuaweiDeviceRoute {
+        if (address.equals(currentAddress, ignoreCase = true)) {
+            currentRoute?.takeIf { it.isSupported }?.let { return it }
+        }
+        return resolveHuaweiDeviceRoute(address, null)
     }
 
     private fun rememberKnownAddress(address: String?) {

@@ -169,6 +169,34 @@ class HuaweiAncPacketsTest {
     }
 
     @Test
+    fun `Pro 3 and 6i entering modes from off replay captured FF transition packets`() {
+        val off = HuaweiAncState(NoiseControlMode.OFF)
+        listOf(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        ).forEach { route ->
+            assertArrayEquals(
+                route.name,
+                hex("5A0007002B04010201FFFFEC"),
+                HuaweiAncPackets.mode(
+                    route,
+                    NoiseControlMode.NOISE_CANCELLATION,
+                    huaweiAncCommandSubMode(route, NoiseControlMode.NOISE_CANCELLATION, 0x03, off),
+                ),
+            )
+            assertArrayEquals(
+                route.name,
+                hex("5A0007002B04010202FFAABF"),
+                HuaweiAncPackets.mode(
+                    route,
+                    NoiseControlMode.TRANSPARENCY,
+                    huaweiAncCommandSubMode(route, NoiseControlMode.TRANSPARENCY, 0x01, off),
+                ),
+            )
+        }
+    }
+
+    @Test
     fun `modern RFCOMM models use the verified DeviceInfo query`() {
         val query = hex(
             "5A00210001070100020003000400050006000700080009000A000B000C000F0018001900DFF3",
@@ -199,7 +227,28 @@ class HuaweiAncPacketsTest {
     }
 
     @Test
-    fun `FreeBuds 6i Pro 3 and 7i expose four verified ANC levels`() {
+    fun `FreeBuds 6i packets follow the captured semantic level mapping`() {
+        val expected = mapOf(
+            HuaweiAncLevel.ADAPTIVE to "5A0007002B0401020103D17F",
+            HuaweiAncLevel.LIGHT to "5A0007002B0401020101F13D",
+            HuaweiAncLevel.BALANCED to "5A0007002B0401020100E11C",
+            HuaweiAncLevel.DEEP to "5A0007002B0401020102C15E",
+        )
+
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I.ancLevelOptions.forEach { option ->
+            assertArrayEquals(
+                hex(expected.getValue(option.level)),
+                HuaweiAncPackets.mode(
+                    HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                    NoiseControlMode.NOISE_CANCELLATION,
+                    option.protocolValue,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `Pro 3 and 7i retain four verified ANC packets`() {
         val expected = mapOf(
             HuaweiAncLevel.ADAPTIVE to "5A0007002B0401020101F13D",
             HuaweiAncLevel.LIGHT to "5A0007002B0401020100E11C",
@@ -207,14 +256,13 @@ class HuaweiAncPacketsTest {
             HuaweiAncLevel.DEEP to "5A0007002B0401020103D17F",
         )
         listOf(
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
-            expected.forEach { (level, packet) ->
+            route.ancLevelOptions.forEach { option ->
                 assertArrayEquals(
-                    hex(packet),
-                    HuaweiAncPackets.mode(route, NoiseControlMode.NOISE_CANCELLATION, level.protocolValue),
+                    hex(expected.getValue(option.level)),
+                    HuaweiAncPackets.mode(route, NoiseControlMode.NOISE_CANCELLATION, option.protocolValue),
                 )
             }
         }
@@ -222,6 +270,14 @@ class HuaweiAncPacketsTest {
 
     @Test
     fun `FreeBuds 6i exposes both verified transparency submodes`() {
+        assertArrayEquals(
+            hex("5A0007002B04010202FFAABF"),
+            HuaweiAncPackets.mode(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                NoiseControlMode.TRANSPARENCY,
+                0xFF,
+            ),
+        )
         assertArrayEquals(
             hex("5A0007002B0401020201A46E"),
             HuaweiAncPackets.mode(

@@ -108,6 +108,8 @@
     <string name="transparency_voice">人声增强</string>
     <string name="island_mode">超级岛</string>
     <string name="island_mode_summary">选择要显示的电量超级岛</string>
+    <string name="lockscreen_notification">锁屏通知</string>
+    <string name="lockscreen_notification_summary">允许耳机常驻通知显示在锁屏和息屏界面</string>
     <string name="island_mode_none">不显示</string>
     <string name="island_mode_official">系统原生（部分机型可用）</string>
     <string name="island_mode_module">模块（推荐）</string>
@@ -124,6 +126,7 @@
     <string name="restart_scope_settings">设置</string>
     <string name="restart_scope_milink_service">互联互通服务</string>
     <string name="restart_scope_mi_bluetooth">小米蓝牙</string>
+    <string name="restart_scope_smart_audio">智慧音频（空间音频同步）</string>
     <string name="documentation_title">使用文档</string>
     <string name="documentation_load_failed">文档暂时无法加载</string>
     <string name="documentation_load_failed_summary">请检查网络后重试。站内内容会留在 App 中，外部链接仍由系统浏览器打开。</string>
@@ -205,4 +208,6 @@
     <string name="onboarding_ready_pair">先在系统蓝牙中完成配对</string>
     <string name="onboarding_ready_model">连接后优先按设备标识自动识别；识别失败时可手动选择一次</string>
     <string name="onboarding_ready_group">需要帮助或参与测试可加入 QQ 群：%1$s</string>
+    <string name="huawei_equalizer_title">自定义均衡器</string>
+    <string name="huawei_equalizer_summary">编辑前会先读取耳机当前曲线</string>
 </resources>

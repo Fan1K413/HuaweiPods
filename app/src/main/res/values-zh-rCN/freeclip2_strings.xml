@@ -6,6 +6,7 @@
     <string name="freeclip2_adaptive_volume">智感音量自适应</string>
     <string name="freeclip2_head_motion">头动控制</string>
     <string name="freeclip2_spatial_audio">空间音频</string>
+    <string name="freeclip2_audio_settings">音效</string>
     <string name="freeclip2_spatial_mode">空间音频模式</string>
     <string name="freeclip2_spatial_fixed">固定</string>
     <string name="freeclip2_spatial_head_tracking">头部跟踪</string>
@@ -14,12 +15,14 @@
     <string name="freeclip2_spatial_scene_theater">有声剧场</string>
     <string name="freeclip2_spatial_scene_cinema">电影院</string>
     <string name="freeclip2_spatial_scene_concert">音乐厅</string>
-    <string name="freeclip2_sound_and_connection">音效与连接</string>
-    <string name="freeclip2_sound_effect">耳机音效</string>
+    <string name="freeclip2_sound_and_connection">声音与连接</string>
+    <string name="freeclip2_sound_effect">音效</string>
+    <string name="freeclip2_sound_effect_preset">官方预置音效</string>
     <string name="freeclip2_sound_effect_default">默认</string>
     <string name="freeclip2_sound_effect_sport">运动增效</string>
     <string name="freeclip2_sound_effect_treble">高音增强</string>
     <string name="freeclip2_sound_effect_clear_voice">清晰人声</string>
+    <string name="freeclip2_sound_effect_custom">官方/自定义音效</string>
     <string name="freeclip2_sound_quality_priority">声音质量优先</string>
     <string name="freeclip2_low_latency">低时延模式</string>
     <string name="freeclip2_dual_device">双设备连接</string>

@@ -20,10 +20,14 @@ object HuaweiGestureController {
     private val freeClip2TripleTapQuery = hex("5A0007000126010002002512")
     private val freeClip2SwipeQuery = hex("5A0007002B1F01000200328A")
     private val modernLongPressRoutes = setOf(
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
     )
-    private val modernSwipeVolumeRoutes = modernLongPressRoutes
+    private val modernSwipeVolumeRoutes = setOf(
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+    )
 
     fun supportsTapAction(
         route: HuaweiDeviceRoute,
@@ -103,7 +107,9 @@ object HuaweiGestureController {
     ): ByteArray? {
         if (!supportsSwipeAction(route, action)) return null
         return when (route) {
-            HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> buildSideActionPacket(
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            -> buildSideActionPacket(
                 service = 0x2B,
                 command = 0x1E,
                 side = side,
@@ -265,7 +271,8 @@ object HuaweiGestureController {
     }
 
     internal fun buildGestureStateQuery(route: HuaweiDeviceRoute): ByteArray? =
-        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+        if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+            route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
             route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
         ) {
             freeClip2DoubleTapQuery + freeClip2TripleTapQuery + freeClip2SwipeQuery
@@ -637,6 +644,7 @@ enum class HuaweiSwipeAction(
         val all: List<HuaweiSwipeAction> = entries.toList()
 
         fun availableFor(route: HuaweiDeviceRoute): List<HuaweiSwipeAction> = when (route) {
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> all
             HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> listOf(VOLUME_CONTROL, NONE)
             HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> all
             else -> emptyList()

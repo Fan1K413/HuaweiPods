@@ -51,6 +51,21 @@ class HuaweiGestureControllerTest {
                 FreeBuds6iTapAction.PLAY_PAUSE,
             ),
         )
+        assertArrayEquals(
+            hex("5A0006002B1601010A3FA4"),
+            HuaweiGestureController.buildFreeBudsPro3LongPressPacket(
+                HuaweiGestureSide.LEFT,
+                FreeBudsPro3LongPressAction.NOISE_CONTROL,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A0006002B1E020101525C"),
+            HuaweiGestureController.buildSwipePacket(
+                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+                HuaweiGestureSide.RIGHT,
+                HuaweiSwipeAction.TRACK_CONTROL,
+            ),
+        )
     }
 
     @Test
@@ -400,13 +415,6 @@ class HuaweiGestureControllerTest {
                 HuaweiDeviceRoute.HUAWEI_FREEBUDS3,
                 HuaweiGestureSide.LEFT,
                 HuaweiTapAction.PLAY_NEXT,
-            ),
-        )
-        assertNull(
-            HuaweiGestureController.buildSwipePacket(
-                HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
-                HuaweiGestureSide.LEFT,
-                HuaweiSwipeAction.VOLUME_CONTROL,
             ),
         )
         assertNull(

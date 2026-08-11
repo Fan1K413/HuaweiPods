@@ -5,6 +5,8 @@
     <string name="huawei_gesture_swipe_section">滑动手势</string>
     <string name="huawei_gesture_pro3_long_press_section">长按手势</string>
     <string name="huawei_gesture_pro3_pinch_section">捏合手势</string>
+    <string name="huawei_gesture_smart_wear_section">智慧佩戴</string>
+    <string name="huawei_gesture_wear_detection">佩戴检测</string>
     <string name="huawei_gesture_left_double_tap">双击左耳</string>
     <string name="huawei_gesture_right_double_tap">双击右耳</string>
     <string name="huawei_gesture_left_triple_tap">三击左耳</string>

@@ -41,6 +41,7 @@ import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialScene
 import moe.chenxy.huaweipods.pods.HuaweiFreeClip2Controller
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.HuaweiEqualizerState
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import top.yukonga.miuix.kmp.basic.Checkbox
@@ -78,8 +79,9 @@ fun FreeClip2Controls(address: String) {
             ),
         )
     }
+    var equalizer by remember(address) { mutableStateOf<HuaweiEqualizerState?>(null) }
 
-    FreeClip2AudioReadbackEffect(address) { mode, scene, effect ->
+    FreeClip2AudioReadbackEffect(address) { mode, scene, effect, equalizerState ->
         mode?.let {
             spatialMode = it
             prefs.edit().putString(keyPrefix + "spatial_mode", it.name).apply()
@@ -92,28 +94,10 @@ fun FreeClip2Controls(address: String) {
             soundEffect = it
             prefs.edit().putString(keyPrefix + "sound_effect", it.name).apply()
         }
+        equalizerState?.let { equalizer = it }
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        SectionTitle(R.string.freeclip2_smart_features)
-        listOf(
-            FreeClip2BooleanFeature.WEAR_DETECTION to R.string.freeclip2_wear_detection,
-            FreeClip2BooleanFeature.DROP_REMINDER to R.string.freeclip2_drop_reminder,
-            FreeClip2BooleanFeature.ADAPTIVE_VOLUME to R.string.freeclip2_adaptive_volume,
-            FreeClip2BooleanFeature.HEAD_MOTION_CONTROL to R.string.freeclip2_head_motion,
-        ).forEach { (feature, title) ->
-            FeatureToggle(
-                titleRes = title,
-                initialValue = prefs.getBoolean(keyPrefix + feature.extraValue, false),
-                onChange = { enabled, complete ->
-                    context.setFreeClip2BooleanFeature(address, feature, enabled) { success ->
-                        if (success) prefs.edit().putBoolean(keyPrefix + feature.extraValue, enabled).apply()
-                        complete(success)
-                    }
-                },
-            )
-        }
-
         SectionTitle(R.string.freeclip2_spatial_audio)
         EnumPreference(
             title = stringResource(R.string.freeclip2_spatial_mode),
@@ -140,12 +124,11 @@ fun FreeClip2Controls(address: String) {
                 },
             )
         }
-
-        SectionTitle(R.string.freeclip2_sound_and_connection)
+        SectionTitle(R.string.freeclip2_sound_effect)
         EnumPreference(
-            title = stringResource(R.string.freeclip2_sound_effect),
+            title = stringResource(R.string.freeclip2_sound_effect_preset),
             selected = soundEffect,
-            values = FreeClip2SoundEffect.entries,
+            values = FreeClip2SoundEffect.selectableEntries,
             label = { effect -> stringResource(effect.labelRes()) },
             onSelected = { effect, complete ->
                 context.setFreeClip2SoundEffect(address, effect) { success ->
@@ -153,6 +136,34 @@ fun FreeClip2Controls(address: String) {
                 }
             },
         )
+        HuaweiEqualizerPreference(
+            address = address,
+            route = HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            readback = equalizer,
+            requestOnMount = false,
+            editable = true,
+        )
+
+        SectionTitle(R.string.freeclip2_smart_features)
+        listOf(
+            FreeClip2BooleanFeature.WEAR_DETECTION to R.string.freeclip2_wear_detection,
+            FreeClip2BooleanFeature.DROP_REMINDER to R.string.freeclip2_drop_reminder,
+            FreeClip2BooleanFeature.ADAPTIVE_VOLUME to R.string.freeclip2_adaptive_volume,
+            FreeClip2BooleanFeature.HEAD_MOTION_CONTROL to R.string.freeclip2_head_motion,
+        ).forEach { (feature, title) ->
+            FeatureToggle(
+                titleRes = title,
+                initialValue = prefs.getBoolean(keyPrefix + feature.extraValue, false),
+                onChange = { enabled, complete ->
+                    context.setFreeClip2BooleanFeature(address, feature, enabled) { success ->
+                        if (success) prefs.edit().putBoolean(keyPrefix + feature.extraValue, enabled).apply()
+                        complete(success)
+                    }
+                },
+            )
+        }
+
+        SectionTitle(R.string.freeclip2_sound_and_connection)
         listOf(
             FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY to R.string.freeclip2_sound_quality_priority,
             FreeClip2BooleanFeature.LOW_LATENCY to R.string.freeclip2_low_latency,
@@ -383,6 +394,7 @@ private fun FreeClip2AudioReadbackEffect(
         FreeClip2SpatialAudioMode?,
         FreeClip2SpatialScene?,
         FreeClip2SoundEffect?,
+        HuaweiEqualizerState?,
     ) -> Unit,
 ) {
     val context = LocalContext.current
@@ -414,6 +426,33 @@ private fun FreeClip2AudioReadbackEffect(
                     FreeClip2SoundEffect.fromExtraValue(
                         receivedIntent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_SOUND_EFFECT),
                     ),
+                    receivedIntent.takeIf {
+                        it.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID)
+                    }?.let {
+                        val selectedId = it.getIntExtra(
+                            HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID,
+                            -1,
+                        )
+                        val gains = it.getIntArrayExtra(
+                            HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_GAINS,
+                        )?.toList()
+                        selectedId.takeIf { id -> id in 0..0xFF }?.let { id ->
+                            HuaweiEqualizerState(
+                                supported = it.getBooleanExtra(
+                                    HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SUPPORTED,
+                                    true,
+                                ),
+                                selectedId = id,
+                                builtInIds = emptyList(),
+                                bandCount = gains?.size ?: 10,
+                                selectedName = it.getStringExtra(
+                                    HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME,
+                                ),
+                                selectedGains = gains,
+                                customPresets = emptyList(),
+                            )
+                        }
+                    },
                 )
             }
         }
@@ -458,4 +497,5 @@ private fun FreeClip2SoundEffect.labelRes(): Int = when (this) {
     FreeClip2SoundEffect.SPORT_ENHANCE -> R.string.freeclip2_sound_effect_sport
     FreeClip2SoundEffect.TREBLE_ENHANCE -> R.string.freeclip2_sound_effect_treble
     FreeClip2SoundEffect.CLEAR_VOICE -> R.string.freeclip2_sound_effect_clear_voice
+    FreeClip2SoundEffect.CUSTOM -> R.string.freeclip2_sound_effect_custom
 }

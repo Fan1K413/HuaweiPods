@@ -9,6 +9,7 @@
     <queries>
         <package android:name="com.android.bluetooth" />
         <package android:name="com.android.settings" />
+        <package android:name="com.huawei.smartaudio" />
         <package android:name="com.milink.service" />
         <package android:name="com.xiaomi.bluetooth" />
     </queries>

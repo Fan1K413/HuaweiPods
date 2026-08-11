@@ -25,18 +25,15 @@ internal data class HuaweiAncState(
     val subMode: Int? = null,
 )
 
-/** FreeBuds 6i 与 FreeBuds Pro 3 共用的四档降噪语义。 */
-enum class HuaweiAncLevel(val protocolValue: Int) {
-    ADAPTIVE(0x01),
-    LIGHT(0x00),
-    BALANCED(0x02),
-    DEEP(0x03),
-    ;
+/** 尚未按具体机型确认档位；不得作为 Huawei 协议值下发。 */
+internal const val UNKNOWN_HUAWEI_ANC_SUBMODE = -1
 
-    companion object {
-        fun fromProtocolValue(value: Int): HuaweiAncLevel? =
-            entries.firstOrNull { it.protocolValue == value }
-    }
+/** 降噪档位的业务语义；协议值必须通过具体机型的 [HuaweiAncLevelOption] 转换。 */
+enum class HuaweiAncLevel {
+    ADAPTIVE,
+    LIGHT,
+    BALANCED,
+    DEEP,
 }
 
 enum class HuaweiTransparencyMode {

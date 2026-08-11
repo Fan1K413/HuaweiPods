@@ -45,6 +45,7 @@ The unified build supports the 11 models below in one APK. Model-specific test A
 - **ANC dial** for FreeBuds 3 spatial noise cancellation adjustment only.
 - **System Bluetooth detail page** integration for battery and controls supported by the selected model.
 - **Super Island / popup** status display and quick ANC controls.
+- Independent switches for lock-screen headset notifications and all Super Island notifications.
 - **Fusion Device Center** headset display and transfer between paired devices.
 - **Manual model binding** by Bluetooth address when a device has been renamed or cannot be identified automatically.
 - **First-run setup guide** and in-app GitHub release checks.

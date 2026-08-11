@@ -70,9 +70,12 @@ internal object HuaweiAncPackets {
         }
         mode == NoiseControlMode.OFF -> modernFreeBudsEnabled[false]
         mode == NoiseControlMode.NOISE_CANCELLATION && route.supportsDiscreteAncLevels -> {
-            (subMode ?: route.defaultAncSubMode)
-                ?.takeIf(route::supportsAncSubMode)
-                ?.let(modernAncLevels::get)
+            val selected = subMode ?: route.defaultAncSubMode
+            when {
+                selected == 0xFF -> modernAncLevels[0xFF]
+                selected?.let(route::supportsAncSubMode) == true -> modernAncLevels[selected]
+                else -> null
+            }
         }
         mode == NoiseControlMode.NOISE_CANCELLATION -> modernFreeBudsEnabled[true]
         mode == NoiseControlMode.TRANSPARENCY && route.supportsTransparency -> {

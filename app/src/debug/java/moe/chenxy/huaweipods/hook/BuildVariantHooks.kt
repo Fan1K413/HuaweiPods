@@ -8,5 +8,6 @@ internal object BuildVariantHooks {
     fun onPackageLoaded(entry: HookEntry, param: PackageLoadedParam) {
         if (!SmartAudioCaptureTarget.isAllowedSender(param.packageName)) return
         entry.loadHook(AiLifeCaptureHook, param.defaultClassLoader, param.packageName)
+        entry.loadHook(SmartAudioFreeClip2BridgeHook, param.defaultClassLoader, param.packageName)
     }
 }

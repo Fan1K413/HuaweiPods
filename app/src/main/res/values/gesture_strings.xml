@@ -5,6 +5,8 @@
     <string name="huawei_gesture_swipe_section">Swipe gestures</string>
     <string name="huawei_gesture_pro3_long_press_section">Long press</string>
     <string name="huawei_gesture_pro3_pinch_section">Pinch gestures</string>
+    <string name="huawei_gesture_smart_wear_section">Smart wear</string>
+    <string name="huawei_gesture_wear_detection">Wear detection</string>
     <string name="huawei_gesture_left_double_tap">Left earbud double tap</string>
     <string name="huawei_gesture_right_double_tap">Right earbud double tap</string>
     <string name="huawei_gesture_left_triple_tap">Left earbud triple tap</string>

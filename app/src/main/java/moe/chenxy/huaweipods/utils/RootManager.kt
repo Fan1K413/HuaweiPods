@@ -8,6 +8,7 @@ object RootManager {
         "com.android.settings",
         "com.milink.service",
         "com.xiaomi.bluetooth",
+        "com.huawei.smartaudio",
         "com.android.bluetooth",
     )
 

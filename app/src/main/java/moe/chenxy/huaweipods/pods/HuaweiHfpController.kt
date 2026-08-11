@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
+import java.util.UUID
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.LowLatencyPrefs
@@ -20,6 +21,7 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
+import moe.chenxy.huaweipods.utils.miuiStrongToast.data.sendIdentitySharingBroadcast
 
 @SuppressLint("MissingPermission", "StaticFieldLeak")
 object HuaweiHfpController {
@@ -30,6 +32,7 @@ object HuaweiHfpController {
     private const val GESTURE_CONFIRM_DELAY_MS = 300L
     private const val GESTURE_REFRESH_MIN_INTERVAL_MS = 750L
     private const val FREECLIP2_AUDIO_CONFIRM_DELAY_MS = 450L
+    private const val FREECLIP2_SMART_AUDIO_BRIDGE_TIMEOUT_MS = 1_500L
     private const val FREECLIP2_AUDIO_REFRESH_MIN_INTERVAL_MS = 2_500L
     private const val DEVICE_INFO_REFRESH_MIN_INTERVAL_MS = 60_000L
     private const val LOW_LATENCY_AUTO_APPLY_DELAY_MS = 2_500L
@@ -75,7 +78,39 @@ object HuaweiHfpController {
     private val sessionStateLock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val freeClip2AudioConfirmationRunnable = Runnable {
-        requestFreeClip2AudioState(force = true)
+        requestFreeClip2AudioState(force = true, pendingOnly = true)
+    }
+    private var pendingSmartAudioSpatialWrite: PendingSmartAudioSpatialWrite? = null
+    private var pendingSmartAudioAudioQuery: PendingSmartAudioAudioQuery? = null
+    private val smartAudioSpatialTimeoutRunnable = Runnable {
+        val pending = pendingSmartAudioSpatialWrite ?: return@Runnable
+        pendingSmartAudioSpatialWrite = null
+        if (shouldFallbackAfterSmartAudioBridgeTimeout(pending.accepted)) {
+            Log.d(TAG, "Smart Audio spatial bridge unavailable; using direct transaction")
+            dispatchDirectFreeClip2AudioWrite(pending.request)
+        } else {
+            synchronized(sessionStateLock) {
+                freeClip2AudioStateTracker.completeWrite(pending.request.token, success = false)
+            }
+            Log.w(
+                TAG,
+                "Smart Audio accepted spatial write but readback was delayed; " +
+                    "direct RFCOMM fallback suppressed to avoid stealing its control channel",
+            )
+        }
+    }
+    private val smartAudioAudioQueryTimeoutRunnable = Runnable {
+        val pending = pendingSmartAudioAudioQuery ?: return@Runnable
+        pendingSmartAudioAudioQuery = null
+        if (shouldFallbackAfterSmartAudioBridgeTimeout(pending.accepted)) {
+            Log.d(TAG, "Smart Audio state query unavailable; using direct transaction")
+            dispatchDirectFreeClip2AudioStateQuery(pending.request)
+        } else {
+            Log.d(
+                TAG,
+                "Smart Audio accepted state query; direct RFCOMM fallback suppressed",
+            )
+        }
     }
     private val lowLatencyAutoApplyRunnable = Runnable {
         applyAutoLowLatency()
@@ -201,6 +236,15 @@ object HuaweiHfpController {
                         force = receivedIntent.getBooleanExtra("force", false),
                     )
                 }
+                HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_RESULT -> {
+                    handleSmartAudioFreeClip2Result(receivedIntent, sentFromPackage)
+                }
+                HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_QUERY_RESULT -> {
+                    handleSmartAudioFreeClip2QueryResult(receivedIntent, sentFromPackage)
+                }
+                HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_STATE -> {
+                    handleSmartAudioFreeClip2State(receivedIntent, sentFromPackage)
+                }
             }
         }
     }
@@ -272,6 +316,8 @@ object HuaweiHfpController {
             sessionGeneration++
             synchronized(sessionStateLock) { freeClip2AudioStateTracker.reset() }
             mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
+            cancelPendingSmartAudioSpatialWrite()
+            cancelPendingSmartAudioAudioQuery()
             this.device = null
             this.context = null
             sessionRoute = HuaweiDeviceRoute.UNSUPPORTED
@@ -362,17 +408,25 @@ object HuaweiHfpController {
             NoiseControlMode.TRANSPARENCY -> subMode ?: currentTransparencySubMode
             else -> null
         }
-        val commandSubMode = normalizeHuaweiAncSubMode(
+        val normalizedSubMode = normalizeHuaweiAncSubMode(
             route = sessionRoute,
             mode = targetMode,
             requestedSubMode = rememberedSubMode,
             previousState = currentAnc,
         )
         val previousState = currentAnc
+        val commandSubMode = huaweiAncCommandSubMode(
+            route = sessionRoute,
+            targetMode = targetMode,
+            normalizedSubMode = normalizedSubMode,
+            previousState = previousState,
+        )
         val requestedAddress = currentDevice.address
         val requestedRoute = sessionRoute
         val requestedGeneration = sessionGeneration
-        val targetState = HuaweiAncState(targetMode, commandSubMode)
+        // FF is a verified mode-transition token, not a semantic ANC level. The subsequent
+        // readback supplies the actual level retained by the earbuds.
+        val targetState = HuaweiAncState(targetMode, normalizedSubMode)
         Log.i(
             TAG,
             "Huawei ANC dispatch mode=$targetMode subMode=$commandSubMode device=${currentDevice.address}",
@@ -511,6 +565,10 @@ object HuaweiHfpController {
                     Log.w(TAG, "FreeClip 2 audio skipped: invalid sound effect=$value")
                     return
                 }
+                if (!effect.isSelectable) {
+                    Log.w(TAG, "FreeClip 2 audio skipped: read-only sound effect=$value")
+                    return
+                }
                 FreeClip2AudioState(effect = effect)
             }
             else -> {
@@ -524,55 +582,341 @@ object HuaweiHfpController {
             Log.d(TAG, "FreeClip 2 duplicate audio write ignored kind=$kind value=$value device=$requestedAddress")
             return
         }
-        val onComplete: (Boolean) -> Unit = completion@{ success ->
-            if (!isCurrentSession(
-                    requestedGeneration,
-                    requestedAddress,
-                    HuaweiDeviceRoute.HUAWEI_FREECLIP2,
-                )
-            ) {
-                return@completion
-            }
-            val isLatestWrite = synchronized(sessionStateLock) {
-                freeClip2AudioStateTracker.completeWrite(writeToken, success)
-            }
-            if (!isLatestWrite) {
-                Log.d(TAG, "FreeClip 2 stale audio write completion ignored kind=$kind value=$value")
-                return@completion
-            }
-            if (!success) {
-                Log.w(TAG, "FreeClip 2 audio write failed kind=$kind value=$value device=$requestedAddress")
-            }
-            mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
-            mainHandler.postDelayed(
-                freeClip2AudioConfirmationRunnable,
-                FREECLIP2_AUDIO_CONFIRM_DELAY_MS,
+        val request = FreeClip2AudioWriteRequest(
+            context = currentContext,
+            device = currentDevice,
+            generation = requestedGeneration,
+            address = requestedAddress,
+            kind = requireNotNull(kind),
+            value = value.orEmpty(),
+            update = update,
+            token = writeToken,
+        )
+        if (update.mode != null) {
+            dispatchSmartAudioSpatialWrite(request, update.mode)
+        } else {
+            dispatchDirectFreeClip2AudioWrite(request)
+        }
+    }
+
+    private fun dispatchSmartAudioSpatialWrite(
+        request: FreeClip2AudioWriteRequest,
+        mode: FreeClip2SpatialAudioMode,
+    ) {
+        cancelPendingSmartAudioSpatialWrite()
+        val pending = PendingSmartAudioSpatialWrite(
+            nonce = UUID.randomUUID().toString(),
+            mode = mode,
+            request = request,
+        )
+        pendingSmartAudioSpatialWrite = pending
+        val dispatched = runCatching {
+            request.context.sendIdentitySharingBroadcast(
+                Intent(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_SET).apply {
+                    putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE, pending.nonce)
+                    putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ADDRESS, request.address)
+                    putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_MODE, mode.protocolValue)
+                    setPackage(SmartAudioFreeClip2BridgePolicy.SMART_AUDIO_PACKAGE)
+                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                },
+            )
+        }.onFailure {
+            Log.w(TAG, "Unable to dispatch Smart Audio spatial bridge request", it)
+        }.isSuccess
+        if (!dispatched) {
+            pendingSmartAudioSpatialWrite = null
+            dispatchDirectFreeClip2AudioWrite(request)
+            return
+        }
+        mainHandler.postDelayed(
+            smartAudioSpatialTimeoutRunnable,
+            FREECLIP2_SMART_AUDIO_BRIDGE_TIMEOUT_MS,
+        )
+    }
+
+    private fun handleSmartAudioFreeClip2Result(intent: Intent, senderPackage: String?) {
+        if (!SmartAudioFreeClip2BridgePolicy.isTrustedResultSender(senderPackage)) {
+            Log.w(TAG, "Rejected untrusted Smart Audio spatial result")
+            return
+        }
+        val pending = pendingSmartAudioSpatialWrite ?: return
+        val nonce = SmartAudioFreeClip2BridgePolicy.normalizeNonce(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE),
+        ) ?: return
+        val address = SmartAudioFreeClip2BridgePolicy.normalizeAddress(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ADDRESS),
+        ) ?: return
+        val requestedMode = FreeClip2SpatialAudioMode.fromProtocolValue(
+            intent.getIntExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_MODE, -1),
+        ) ?: return
+        if (
+            nonce != pending.nonce ||
+            !address.equals(pending.request.address, ignoreCase = true) ||
+            requestedMode != pending.mode ||
+            !isCurrentSession(
+                pending.request.generation,
+                pending.request.address,
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            )
+        ) {
+            Log.d(TAG, "Stale Smart Audio spatial result ignored")
+            return
+        }
+        if (!intent.getBooleanExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ACCEPTED, false)) {
+            Log.d(TAG, "Smart Audio spatial bridge declined; using direct transaction")
+            pendingSmartAudioSpatialWrite = null
+            mainHandler.removeCallbacks(smartAudioSpatialTimeoutRunnable)
+            dispatchDirectFreeClip2AudioWrite(pending.request)
+            return
+        }
+        pending.accepted = true
+        // Receiver acceptance only proves that the asynchronous official API was invoked. Keep
+        // the timeout armed until the official state observer reports the requested mode. Once
+        // accepted, timeout must not open a second RFCOMM connection and evict Smart Audio.
+        Log.d(TAG, "Smart Audio spatial bridge accepted; awaiting confirmed mode=${pending.mode}")
+    }
+
+    private fun handleSmartAudioFreeClip2State(intent: Intent, senderPackage: String?) {
+        if (!SmartAudioFreeClip2BridgePolicy.isTrustedResultSender(senderPackage)) {
+            Log.w(TAG, "Rejected untrusted Smart Audio FreeClip 2 state")
+            return
+        }
+        val address = SmartAudioFreeClip2BridgePolicy.normalizeAddress(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ADDRESS),
+        ) ?: return
+        val activeDevice = device ?: return
+        if (sessionRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+            !address.equals(activeDevice.address, ignoreCase = true)
+        ) {
+            Log.d(TAG, "Smart Audio FreeClip 2 state ignored for inactive device")
+            return
+        }
+        val mode = intent.takeIf {
+            it.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_OFFICIAL_MODE)
+        }?.let {
+            SmartAudioFreeClip2BridgePolicy.modeFromOfficial(
+                it.getIntExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_OFFICIAL_MODE, -1),
             )
         }
-        when (kind) {
+        val effect = intent.takeIf {
+            it.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_OFFICIAL_EFFECT)
+        }?.let {
+            SmartAudioFreeClip2BridgePolicy.soundEffectFromOfficial(
+                it.getIntExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_OFFICIAL_EFFECT, -1),
+            )
+        }
+        val equalizer = intent.takeIf {
+            it.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID)
+        }?.let {
+            val selectedId = it.getIntExtra(
+                HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID,
+                -1,
+            )
+            val gains = it.getIntArrayExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_GAINS)
+                ?.toList()
+                ?.takeIf { values ->
+                    values.size == HuaweiEqualizerCodec.BAND_COUNT &&
+                        values.all { value -> value in HuaweiEqualizerCodec.GAIN_RANGE }
+                }
+            selectedId.takeIf { value -> value in 0..0xFF }?.let { validId ->
+                HuaweiEqualizerState(
+                    supported = it.getBooleanExtra(
+                        HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SUPPORTED,
+                        true,
+                    ),
+                    selectedId = validId,
+                    builtInIds = emptyList(),
+                    bandCount = gains?.size ?: HuaweiEqualizerCodec.BAND_COUNT,
+                    selectedName = it.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME),
+                    selectedGains = gains,
+                    customPresets = if (validId in 0x64..0x66 && gains != null) {
+                        listOf(
+                            HuaweiEqualizerPreset(
+                                id = validId,
+                                name = it.getStringExtra(
+                                    HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME,
+                                ).orEmpty(),
+                                gains = gains,
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    },
+                )
+            }
+        }
+        if (mode == null && effect == null && equalizer == null) return
+
+        pendingSmartAudioAudioQuery?.let { pending ->
+            if (address.equals(pending.request.address, ignoreCase = true)) {
+                pendingSmartAudioAudioQuery = null
+                mainHandler.removeCallbacks(smartAudioAudioQueryTimeoutRunnable)
+            }
+        }
+
+        val pending = pendingSmartAudioSpatialWrite
+        if (mode != null && pending != null) {
+            if (mode == pending.mode) {
+                pendingSmartAudioSpatialWrite = null
+                mainHandler.removeCallbacks(smartAudioSpatialTimeoutRunnable)
+                acceptFreeClip2WriteConfirmation(
+                    pending.request,
+                    FreeClip2AudioState(mode = mode),
+                    source = "smart-audio-readback",
+                )
+            } else {
+                Log.d(
+                    TAG,
+                    "Ignored stale Smart Audio spatial state=$mode while awaiting=${pending.mode}",
+                )
+            }
+        }
+
+        val externalMode = mode.takeIf { pending == null }
+        val update = FreeClip2AudioState(
+            mode = externalMode,
+            effect = effect,
+            equalizer = equalizer,
+        )
+        if (update.mode == null && update.effect == null && update.equalizer == null) return
+        val confirmed = synchronized(sessionStateLock) {
+            freeClip2AudioStateTracker.acceptExternalConfirmation(update)
+        } ?: return
+        mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
+        sendFreeClip2AudioState(confirmed)
+        Log.i(
+            TAG,
+            "FreeClip 2 official state confirmed mode=$mode effect=$effect " +
+                "equalizer=${equalizer?.selectedId} device=$address",
+        )
+    }
+
+    private fun handleSmartAudioFreeClip2QueryResult(intent: Intent, senderPackage: String?) {
+        if (!SmartAudioFreeClip2BridgePolicy.isTrustedResultSender(senderPackage)) {
+            Log.w(TAG, "Rejected untrusted Smart Audio state-query result")
+            return
+        }
+        val pending = pendingSmartAudioAudioQuery ?: return
+        val nonce = SmartAudioFreeClip2BridgePolicy.normalizeNonce(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE),
+        ) ?: return
+        val address = SmartAudioFreeClip2BridgePolicy.normalizeAddress(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ADDRESS),
+        ) ?: return
+        if (
+            nonce != pending.nonce ||
+            !address.equals(pending.request.address, ignoreCase = true) ||
+            !isCurrentSession(
+                pending.request.generation,
+                pending.request.address,
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            )
+        ) return
+        if (intent.getBooleanExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ACCEPTED, false)) {
+            pending.accepted = true
+            Log.d(TAG, "Smart Audio FreeClip 2 state query accepted")
+        } else {
+            pendingSmartAudioAudioQuery = null
+            mainHandler.removeCallbacks(smartAudioAudioQueryTimeoutRunnable)
+            dispatchDirectFreeClip2AudioStateQuery(pending.request)
+        }
+    }
+
+    private fun dispatchDirectFreeClip2AudioWrite(request: FreeClip2AudioWriteRequest) {
+        if (!isCurrentSession(
+                request.generation,
+                request.address,
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            )
+        ) return
+        val onState: (FreeClip2AudioState?) -> Unit = { state ->
+            state?.let { acceptFreeClip2WriteConfirmation(request, it, source = "rfcomm") }
+        }
+        val onComplete: (Boolean) -> Unit = completion@{ success ->
+            if (!isCurrentSession(
+                    request.generation,
+                    request.address,
+                    HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                )
+            ) return@completion
+            val isLatestWrite = synchronized(sessionStateLock) {
+                freeClip2AudioStateTracker.completeWrite(request.token, success)
+            }
+            if (!isLatestWrite) return@completion
+            if (!success) {
+                Log.w(
+                    TAG,
+                    "FreeClip 2 audio write failed kind=${request.kind} " +
+                        "value=${request.value} device=${request.address}",
+                )
+                return@completion
+            }
+            val stillPending = synchronized(sessionStateLock) {
+                freeClip2AudioStateTracker.isPending(request.token)
+            }
+            if (stillPending) {
+                mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
+                mainHandler.postDelayed(
+                    freeClip2AudioConfirmationRunnable,
+                    FREECLIP2_AUDIO_CONFIRM_DELAY_MS,
+                )
+            }
+        }
+        when (request.kind) {
             HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE ->
                 HuaweiFreeClip2Controller.setSpatialAudioMode(
-                    currentContext,
-                    currentDevice,
-                    requireNotNull(update.mode),
+                    request.context,
+                    request.device,
+                    requireNotNull(request.update.mode),
                     onComplete,
+                    onState,
                 )
             HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_SCENE ->
                 HuaweiFreeClip2Controller.setSpatialScene(
-                    currentContext,
-                    currentDevice,
-                    requireNotNull(update.scene),
+                    request.context,
+                    request.device,
+                    requireNotNull(request.update.scene),
                     onComplete,
+                    onState,
                 )
             HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SOUND_EFFECT ->
                 HuaweiFreeClip2Controller.setSoundEffect(
-                    currentContext,
-                    currentDevice,
-                    requireNotNull(update.effect),
+                    request.context,
+                    request.device,
+                    requireNotNull(request.update.effect),
                     onComplete,
+                    onState,
                 )
-            else -> Unit
         }
+    }
+
+    private fun acceptFreeClip2WriteConfirmation(
+        request: FreeClip2AudioWriteRequest,
+        update: FreeClip2AudioState,
+        source: String,
+    ) {
+        if (!isCurrentSession(
+                request.generation,
+                request.address,
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            )
+        ) return
+        val confirmed = synchronized(sessionStateLock) {
+            freeClip2AudioStateTracker.acceptWriteConfirmation(request.token, update)
+        } ?: return
+        mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
+        sendFreeClip2AudioState(confirmed)
+        Log.i(TAG, "FreeClip 2 audio write confirmed source=$source update=$update")
+    }
+
+    private fun cancelPendingSmartAudioSpatialWrite() {
+        pendingSmartAudioSpatialWrite = null
+        mainHandler.removeCallbacks(smartAudioSpatialTimeoutRunnable)
+    }
+
+    private fun cancelPendingSmartAudioAudioQuery() {
+        pendingSmartAudioAudioQuery = null
+        mainHandler.removeCallbacks(smartAudioAudioQueryTimeoutRunnable)
     }
 
     fun setAncLevel(level: Int) {
@@ -708,7 +1052,7 @@ object HuaweiHfpController {
                     "Huawei gesture write failed kind=${kind.extraValue} side=${side.extraValue} device=${currentDevice.address}",
                 )
             }
-            if (sessionRoute == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            if (HuaweiGestureController.buildGestureStateQuery(sessionRoute) != null) {
                 mainHandler.postDelayed(
                     { requestGestureState(currentDevice.address, force = true) },
                     GESTURE_CONFIRM_DELAY_MS,
@@ -815,6 +1159,8 @@ object HuaweiHfpController {
             cancelAutoLowLatency()
             synchronized(sessionStateLock) { freeClip2AudioStateTracker.reset() }
             mainHandler.removeCallbacks(freeClip2AudioConfirmationRunnable)
+            cancelPendingSmartAudioSpatialWrite()
+            cancelPendingSmartAudioAudioQuery()
             batteryIslandTriggerPolicy.onNewSession()
             sessionGeneration++
             Log.i(
@@ -1221,9 +1567,7 @@ object HuaweiHfpController {
         val currentContext = context ?: return
         val currentDevice = device ?: return
         val requestedRoute = sessionRoute
-        if (requestedRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2 &&
-            requestedRoute != HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
-        ) return
+        if (HuaweiGestureController.buildGestureStateQuery(requestedRoute) == null) return
         if (!requestedAddress.isNullOrBlank() &&
             !requestedAddress.equals(currentDevice.address, ignoreCase = true)
         ) {
@@ -1265,7 +1609,10 @@ object HuaweiHfpController {
         )
     }
 
-    private fun requestFreeClip2AudioState(force: Boolean = false) {
+    private fun requestFreeClip2AudioState(
+        force: Boolean = false,
+        pendingOnly: Boolean = false,
+    ) {
         val currentContext = context ?: return
         val currentDevice = device ?: return
         val requestedRoute = sessionRoute
@@ -1277,36 +1624,94 @@ object HuaweiHfpController {
         lastFreeClip2AudioStateRequestAt = now
         val requestedAddress = currentDevice.address
         val requestedGeneration = sessionGeneration
-        val queryToken = synchronized(sessionStateLock) {
-            freeClip2AudioStateTracker.beginQuery()
+        val pendingUpdate = synchronized(sessionStateLock) {
+            freeClip2AudioStateTracker.pendingUpdate()
         }
+        if (pendingOnly && pendingUpdate == null) return
+        val queryToken = synchronized(sessionStateLock) { freeClip2AudioStateTracker.beginQuery() }
+        val request = FreeClip2AudioQueryRequest(
+            context = currentContext,
+            device = currentDevice,
+            generation = requestedGeneration,
+            address = requestedAddress,
+            pendingOnly = pendingOnly,
+            pendingUpdate = pendingUpdate,
+            queryToken = queryToken,
+        )
+        dispatchSmartAudioFreeClip2AudioQuery(request)
+    }
+
+    private fun dispatchSmartAudioFreeClip2AudioQuery(request: FreeClip2AudioQueryRequest) {
+        cancelPendingSmartAudioAudioQuery()
+        val pending = PendingSmartAudioAudioQuery(
+            nonce = UUID.randomUUID().toString(),
+            request = request,
+        )
+        pendingSmartAudioAudioQuery = pending
+        val dispatched = runCatching {
+            request.context.sendIdentitySharingBroadcast(
+                Intent(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_QUERY).apply {
+                    putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE, pending.nonce)
+                    putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ADDRESS, request.address)
+                    setPackage(SmartAudioFreeClip2BridgePolicy.SMART_AUDIO_PACKAGE)
+                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                },
+            )
+        }.onFailure { Log.w(TAG, "Unable to dispatch Smart Audio state query", it) }.isSuccess
+        if (!dispatched) {
+            pendingSmartAudioAudioQuery = null
+            dispatchDirectFreeClip2AudioStateQuery(request)
+            return
+        }
+        mainHandler.postDelayed(
+            smartAudioAudioQueryTimeoutRunnable,
+            FREECLIP2_SMART_AUDIO_BRIDGE_TIMEOUT_MS,
+        )
+    }
+
+    private fun dispatchDirectFreeClip2AudioStateQuery(request: FreeClip2AudioQueryRequest) {
+        if (!isCurrentSession(
+                request.generation,
+                request.address,
+                HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            )
+        ) return
         val acceptState: (FreeClip2AudioState?) -> Unit = accept@{ update ->
-            if (!isCurrentSession(requestedGeneration, requestedAddress, requestedRoute)) {
+            if (!isCurrentSession(
+                    request.generation,
+                    request.address,
+                    HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                )
+            ) {
                 return@accept
             }
             if (update == null) {
-                Log.w(TAG, "FreeClip 2 audio state query returned no verified state device=$requestedAddress")
+                Log.w(TAG, "FreeClip 2 audio state query returned no verified state device=${request.address}")
                 return@accept
             }
             val confirmed = synchronized(sessionStateLock) {
-                freeClip2AudioStateTracker.acceptQuery(queryToken, update)
+                freeClip2AudioStateTracker.acceptQuery(request.queryToken, update)
             } ?: run {
-                Log.d(TAG, "FreeClip 2 stale audio query response ignored update=$update device=$requestedAddress")
+                Log.d(TAG, "FreeClip 2 stale audio query response ignored update=$update device=${request.address}")
                 return@accept
             }
             sendFreeClip2AudioState(confirmed)
-            Log.i(TAG, "FreeClip 2 audio state confirmed update=$update device=$requestedAddress")
+            Log.i(TAG, "FreeClip 2 audio state confirmed update=$update device=${request.address}")
         }
-        HuaweiFreeClip2Controller.requestSpatialAudioState(
-            currentContext,
-            currentDevice,
-            acceptState,
-        )
-        HuaweiFreeClip2Controller.requestSoundEffectState(
-            currentContext,
-            currentDevice,
-            acceptState,
-        )
+        if (!request.pendingOnly || request.pendingUpdate?.mode != null || request.pendingUpdate?.scene != null) {
+            HuaweiFreeClip2Controller.requestSpatialAudioState(
+                request.context,
+                request.device,
+                acceptState,
+            )
+        }
+        if (!request.pendingOnly || request.pendingUpdate?.effect != null) {
+            HuaweiFreeClip2Controller.requestSoundEffectState(
+                request.context,
+                request.device,
+                acceptState,
+            )
+        }
     }
 
     private fun scheduleAncConfirmation(
@@ -1349,6 +1754,9 @@ object HuaweiHfpController {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_REFRESH)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_SET)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_REFRESH)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_RESULT)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_QUERY_RESULT)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_STATE)
         }, Context.RECEIVER_EXPORTED)
         receiverRegistered = true
     }
@@ -1475,6 +1883,14 @@ object HuaweiHfpController {
             state.effect?.let {
                 putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_SOUND_EFFECT, it.extraValue)
             }
+            state.equalizer?.let {
+                putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SUPPORTED, it.supported)
+                putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID, it.selectedId)
+                putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME, it.selectedName)
+                it.selectedGains?.let { gains ->
+                    putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_GAINS, gains.toIntArray())
+                }
+            }
         }
         sendAppBroadcast(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED, fillState)
         sendExternalBroadcast(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED, fillState)
@@ -1541,6 +1957,42 @@ object HuaweiHfpController {
             .toByteArray()
     }
 }
+
+private data class FreeClip2AudioWriteRequest(
+    val context: Context,
+    val device: BluetoothDevice,
+    val generation: Long,
+    val address: String,
+    val kind: String,
+    val value: String,
+    val update: FreeClip2AudioState,
+    val token: FreeClip2AudioStateTracker.WriteToken,
+)
+
+private data class PendingSmartAudioSpatialWrite(
+    val nonce: String,
+    val mode: FreeClip2SpatialAudioMode,
+    val request: FreeClip2AudioWriteRequest,
+    var accepted: Boolean = false,
+)
+
+private data class FreeClip2AudioQueryRequest(
+    val context: Context,
+    val device: BluetoothDevice,
+    val generation: Long,
+    val address: String,
+    val pendingOnly: Boolean,
+    val pendingUpdate: FreeClip2AudioState?,
+    val queryToken: FreeClip2AudioStateTracker.QueryToken,
+)
+
+private data class PendingSmartAudioAudioQuery(
+    val nonce: String,
+    val request: FreeClip2AudioQueryRequest,
+    var accepted: Boolean = false,
+)
+
+internal fun shouldFallbackAfterSmartAudioBridgeTimeout(accepted: Boolean): Boolean = !accepted
 
 internal data class LowLatencyAutoApplyRequest(
     val generation: Long,
@@ -1641,4 +2093,21 @@ internal fun normalizeHuaweiAncSubMode(
         ?.takeIf(accepted::contains)
         ?: previousState.subMode?.takeIf { previousState.mode == mode && it in accepted }
         ?: if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I) 0x02 else 0xFF
+}
+
+/**
+ * Modern FreeBuds use FF when entering ANC/transparency and concrete values only while changing
+ * a submode inside the already active mode. The Pro 3 and 6i captures both use 01FF/02FF for main
+ * mode transitions; using 010x/020x directly after OFF changes no mode and produces no prompt.
+ */
+internal fun huaweiAncCommandSubMode(
+    route: HuaweiDeviceRoute,
+    targetMode: NoiseControlMode,
+    normalizedSubMode: Int?,
+    previousState: HuaweiAncState,
+): Int? = when {
+    route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 -> normalizedSubMode
+    targetMode == NoiseControlMode.OFF -> null
+    targetMode != previousState.mode -> 0xFF
+    else -> normalizedSubMode
 }

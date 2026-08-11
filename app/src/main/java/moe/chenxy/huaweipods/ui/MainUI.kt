@@ -54,8 +54,8 @@ import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.config.PodImageChangeNotifier
 import moe.chenxy.huaweipods.config.PodImageResource
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
-import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.NoiseControlMode
+import moe.chenxy.huaweipods.pods.UNKNOWN_HUAWEI_ANC_SUBMODE
 import moe.chenxy.huaweipods.pods.decodeHuaweiDeviceRouteFromBroadcast
 import moe.chenxy.huaweipods.pods.defaultAncSubMode
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
@@ -138,7 +138,7 @@ fun MainUI(
     val mainTitle = remember { mutableStateOf("") }
     val batteryParams = remember { mutableStateOf(BatteryParams()) }
     val ancMode = remember { mutableStateOf(NoiseControlMode.UNKNOWN) }
-    val huaweiAncLevel = remember { mutableStateOf(HuaweiAncLevel.ADAPTIVE.protocolValue) }
+    val huaweiAncLevel = remember { mutableStateOf(UNKNOWN_HUAWEI_ANC_SUBMODE) }
     val hasHuaweiAncLevel = remember { mutableStateOf(false) }
     val huaweiTransparencySubMode = remember { mutableStateOf(-1) }
     val hookConnected = remember { mutableStateOf(false) }
@@ -179,7 +179,10 @@ fun MainUI(
     val desktopIconHidden = remember { mutableStateOf(isLauncherIconHidden(context)) }
     val logLevel = remember { mutableStateOf(appConfig.logLevel) }
     val fakeDeviceId = remember { mutableStateOf(appConfig.fakeDeviceId) }
-    val islandMode = remember { mutableStateOf(appConfig.islandMode) }
+    val islandMode = remember { mutableStateOf(ConfigManager.islandMode()) }
+    val lockscreenNotificationEnabled = remember {
+        mutableStateOf(appConfig.lockscreenNotificationEnabled)
+    }
     val earphonePrefs = remember { mutableStateOf(PodImagePrefs.load(prefs)) }
     val checkUpdatesOnLaunch = remember {
         mutableStateOf(lifecyclePrefs.checkUpdatesOnLaunch())
@@ -425,7 +428,7 @@ fun MainUI(
                         ) {
                             ancMode.value = NoiseControlMode.UNKNOWN
                             huaweiAncLevel.value = route.defaultAncSubMode
-                                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+                                ?: UNKNOWN_HUAWEI_ANC_SUBMODE
                             hasHuaweiAncLevel.value = false
                             huaweiTransparencySubMode.value = -1
                         }
@@ -456,7 +459,7 @@ fun MainUI(
                             batteryParams.value = BatteryParams()
                             ancMode.value = NoiseControlMode.UNKNOWN
                             huaweiAncLevel.value = route.defaultAncSubMode
-                                ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+                                ?: UNKNOWN_HUAWEI_ANC_SUBMODE
                             hasHuaweiAncLevel.value = false
                             huaweiTransparencySubMode.value = -1
                             hookConnected.value = false
@@ -475,7 +478,7 @@ fun MainUI(
                                 batteryParams.value = BatteryParams()
                                 ancMode.value = NoiseControlMode.UNKNOWN
                                 huaweiAncLevel.value = route.defaultAncSubMode
-                                    ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+                                    ?: UNKNOWN_HUAWEI_ANC_SUBMODE
                                 hasHuaweiAncLevel.value = false
                                 huaweiTransparencySubMode.value = -1
                                 hookConnected.value = false
@@ -496,7 +499,7 @@ fun MainUI(
                         batteryParams.value = BatteryParams()
                         ancMode.value = NoiseControlMode.UNKNOWN
                         huaweiAncLevel.value = route.defaultAncSubMode
-                            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+                            ?: UNKNOWN_HUAWEI_ANC_SUBMODE
                         hasHuaweiAncLevel.value = false
                         huaweiTransparencySubMode.value = -1
                         hookConnectionState = "disconnected"
@@ -680,7 +683,7 @@ fun MainUI(
         batteryParams.value = BatteryParams()
         ancMode.value = NoiseControlMode.UNKNOWN
         huaweiAncLevel.value = route.defaultAncSubMode
-            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+            ?: UNKNOWN_HUAWEI_ANC_SUBMODE
         hasHuaweiAncLevel.value = false
         huaweiTransparencySubMode.value = -1
         hookConnected.value = false
@@ -700,7 +703,7 @@ fun MainUI(
         connectingDeviceAddress = device.address
         ancMode.value = NoiseControlMode.UNKNOWN
         huaweiAncLevel.value = route.defaultAncSubMode
-            ?: HuaweiAncLevel.ADAPTIVE.protocolValue
+            ?: UNKNOWN_HUAWEI_ANC_SUBMODE
         hasHuaweiAncLevel.value = false
         huaweiTransparencySubMode.value = -1
         pendingOpenEarphonesAfterPickerLoaded = false
@@ -911,6 +914,13 @@ fun MainUI(
                 onIslandModeChange = {
                     islandMode.value = it
                     ConfigManager.updateIslandMode(prefs, xposedService, it)
+                    broadcastConfigChanged(context, "com.android.bluetooth")
+                    broadcastConfigChanged(context, "com.xiaomi.bluetooth")
+                },
+                lockscreenNotificationEnabled = lockscreenNotificationEnabled,
+                onLockscreenNotificationEnabledChange = {
+                    lockscreenNotificationEnabled.value = it
+                    ConfigManager.updateLockscreenNotificationEnabled(prefs, xposedService, it)
                     broadcastConfigChanged(context, "com.android.bluetooth")
                     broadcastConfigChanged(context, "com.xiaomi.bluetooth")
                 },

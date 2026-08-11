@@ -1,6 +1,5 @@
 package moe.chenxy.huaweipods.hook.milink
 
-import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
 import org.junit.Assert.assertEquals
@@ -17,14 +16,24 @@ class MiLinkAncRoutingTest {
             freeClip2SpatialModeForMiLinkAudioEffect(0),
         )
         assertEquals(
-            FreeClip2SpatialAudioMode.FIXED,
+            FreeClip2SpatialAudioMode.HEAD_TRACKING,
             freeClip2SpatialModeForMiLinkAudioEffect(21),
         )
         assertEquals(
-            FreeClip2SpatialAudioMode.HEAD_TRACKING,
+            FreeClip2SpatialAudioMode.FIXED,
             freeClip2SpatialModeForMiLinkAudioEffect(32),
         )
         assertNull(freeClip2SpatialModeForMiLinkAudioEffect(3))
+    }
+
+    @Test
+    fun `FreeClip2 spatial effect round trips MiLink order without swapping fixed and tracking`() {
+        FreeClip2SpatialAudioMode.entries.forEach { mode ->
+            val hostValue = miLinkAudioEffectForFreeClip2SpatialMode(mode)
+            assertEquals(mode, freeClip2SpatialModeForMiLinkAudioEffect(hostValue))
+        }
+        assertEquals(2, miLinkAudioEffectForFreeClip2SpatialMode(FreeClip2SpatialAudioMode.FIXED))
+        assertEquals(1, miLinkAudioEffectForFreeClip2SpatialMode(FreeClip2SpatialAudioMode.HEAD_TRACKING))
     }
 
     @Test
@@ -134,7 +143,7 @@ class MiLinkAncRoutingTest {
     @Test
     fun `three-state models use their captured submode defaults`() {
         assertEquals(
-            HuaweiAncLevel.ADAPTIVE.protocolValue,
+            0x03,
             normalizeMiLinkAncSubMode(
                 HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
                 huaweiStatus = 2,

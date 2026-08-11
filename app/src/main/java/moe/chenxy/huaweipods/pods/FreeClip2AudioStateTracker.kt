@@ -57,6 +57,20 @@ internal class FreeClip2AudioStateTracker {
         return true
     }
 
+    /** 接受同一次写事务中由耳机 CRC 校验通过的回包，或官方 AAM 成功回读。 */
+    fun acceptWriteConfirmation(
+        token: WriteToken,
+        update: FreeClip2AudioState,
+    ): FreeClip2AudioState? {
+        val pending = pendingWrite ?: return null
+        if (pending.version != token.version || !update.observes(pending.update)) return null
+        confirmedState = mergeFreeClip2AudioState(confirmedState, update)
+        pendingWrite = null
+        return confirmedState
+    }
+
+    fun isPending(token: WriteToken): Boolean = pendingWrite?.version == token.version
+
     fun beginQuery(): QueryToken = QueryToken(++queryVersion, mutationVersion)
 
     /**
@@ -71,13 +85,32 @@ internal class FreeClip2AudioStateTracker {
         return confirmedState
     }
 
+    /**
+     * 接受智慧音频从官方状态回调中取得的权威值。
+     *
+     * 外部确认会使已发出的旧查询失效，避免较晚返回的 RFCOMM 缓存把官方刚刚选择的
+     * 状态覆盖回去；它只会结束自己实际观测到的待确认字段。
+     */
+    fun acceptExternalConfirmation(update: FreeClip2AudioState): FreeClip2AudioState? {
+        if (!update.hasAnyField()) return null
+        mutationVersion++
+        queryVersion++
+        confirmedState = mergeFreeClip2AudioState(confirmedState, update)
+        pendingWrite?.takeIf { update.observes(it.update) }?.let { pendingWrite = null }
+        return confirmedState
+    }
+
     internal fun pendingUpdate(): FreeClip2AudioState? = pendingWrite?.update
 }
 
 private fun FreeClip2AudioState.hasExactlyOneField(): Boolean =
-    listOf(mode, scene, effect).count { it != null } == 1
+    listOf(mode, scene, effect, equalizer).count { it != null } == 1
+
+private fun FreeClip2AudioState.hasAnyField(): Boolean =
+    mode != null || scene != null || effect != null || equalizer != null
 
 private fun FreeClip2AudioState.observes(pending: FreeClip2AudioState): Boolean =
     (pending.mode != null && mode != null) ||
         (pending.scene != null && scene != null) ||
-        (pending.effect != null && effect != null)
+        (pending.effect != null && effect != null) ||
+        (pending.equalizer != null && equalizer != null)

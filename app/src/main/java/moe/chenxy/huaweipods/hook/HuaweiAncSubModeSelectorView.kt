@@ -1,18 +1,20 @@
 package moe.chenxy.huaweipods.hook
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
 
-/** 融合设备中心宿主中使用的紧凑轨道式二级降噪选项。 */
+/** 系统设置与融合设备中心共用的紧凑分段选择器。 */
 internal class HuaweiAncSubModeSelectorView(
     context: Context,
     private val onSelected: (Int) -> Unit,
@@ -33,42 +35,28 @@ internal class HuaweiAncSubModeSelectorView(
     ) {
         removeAllViews()
         if (options.isEmpty()) return
-        setPadding(context.dp(5), context.dp(2), context.dp(5), context.dp(2))
+        setPadding(context.dp(5), context.dp(3), context.dp(5), context.dp(3))
         addView(
-            FrameLayout(context).apply {
-                addView(
-                    View(context).apply {
-                        background = roundedTrack(darkSurface)
-                    },
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        context.dp(6),
-                    ).apply {
-                        gravity = Gravity.TOP
-                        topMargin = context.dp(8)
-                        marginStart = context.dp(18)
-                        marginEnd = context.dp(18)
-                    },
+            LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(context.dp(3), context.dp(3), context.dp(3), context.dp(3))
+                background = roundedBackground(
+                    if (darkSurface) Color.argb(42, 255, 255, 255)
+                    else Color.argb(18, 35, 49, 75),
+                    13,
                 )
-                addView(
-                    LinearLayout(context).apply {
-                        orientation = HORIZONTAL
-                        options.forEachIndexed { index, option ->
-                            addView(
-                                optionView(option, option.value == selectedValue, darkSurface),
-                                LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                                    if (index > 0) marginStart = context.dp(1)
-                                },
-                            )
-                        }
-                    },
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
+
+                options.forEachIndexed { index, option ->
+                    addView(
+                        optionView(option, option.value == selectedValue, darkSurface),
+                        LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                            if (index > 0) marginStart = context.dp(3)
+                        },
+                    )
+                }
             },
-            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(45)),
+            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(42)),
         )
     }
 
@@ -76,63 +64,69 @@ internal class HuaweiAncSubModeSelectorView(
         option: Option,
         selected: Boolean,
         darkSurface: Boolean,
-    ): View = LinearLayout(context).apply {
-        orientation = VERTICAL
-        gravity = Gravity.CENTER_HORIZONTAL
+    ): TextView = TextView(context).apply {
+        text = option.label
+        gravity = Gravity.CENTER
         isClickable = true
         isFocusable = true
+        isSelected = selected
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
         contentDescription = option.label
-        setOnClickListener { onSelected(option.value) }
-        addView(
-            FrameLayout(context).apply {
-                addView(
-                    View(context).apply {
-                        background = GradientDrawable().apply {
-                            shape = GradientDrawable.OVAL
-                            setColor(optionPointColor(selected, darkSurface))
-                        }
-                    },
-                    FrameLayout.LayoutParams(
-                        context.dp(if (selected) 18 else 7),
-                        context.dp(if (selected) 18 else 7),
-                    ).apply {
-                        gravity = Gravity.CENTER
-                    },
-                )
-            },
-            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(24)),
+        if (selected) {
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        setTextColor(
+            if (selected) Color.WHITE else optionTextColor(darkSurface),
         )
-        addView(
-            TextView(context).apply {
-                text = option.label
-                gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                setTextColor(optionTextColor(selected, darkSurface))
-            },
-            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        setAutoSizeTextTypeUniformWithConfiguration(
+            9,
+            12,
+            1,
+            TypedValue.COMPLEX_UNIT_SP,
+        )
+        background = segmentBackground(selected, darkSurface)
+        setOnClickListener {
+            if (!selected) onSelected(option.value)
+        }
+    }
+
+    private fun segmentBackground(selected: Boolean, darkSurface: Boolean): RippleDrawable {
+        val accent = resolveAccentColor()
+        val fill = if (selected) {
+            accent
+        } else {
+            if (darkSurface) Color.argb(8, 255, 255, 255) else Color.TRANSPARENT
+        }
+        val ripple = if (selected) {
+            Color.argb(40, 255, 255, 255)
+        } else {
+            Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }
+        return RippleDrawable(
+            ColorStateList.valueOf(ripple),
+            roundedBackground(fill, 10),
+            null,
         )
     }
 
-    private fun roundedTrack(darkSurface: Boolean) = GradientDrawable().apply {
+    private fun roundedBackground(color: Int, radiusDp: Int) = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        setColor(
-            if (darkSurface) Color.argb(42, 255, 255, 255)
-            else Color.argb(24, 0, 0, 0),
-        )
-        cornerRadius = context.dp(4).toFloat()
+        setColor(color)
+        cornerRadius = context.dp(radiusDp).toFloat()
     }
 
-    private fun optionPointColor(selected: Boolean, darkSurface: Boolean): Int = when {
-        selected -> Color.rgb(33, 150, 243)
-        darkSurface -> Color.rgb(176, 184, 196)
-        else -> Color.rgb(145, 165, 190)
+    private fun resolveAccentColor(): Int {
+        val attributes = context.obtainStyledAttributes(intArrayOf(android.R.attr.colorAccent))
+        return try {
+            attributes.getColor(0, Color.rgb(33, 150, 243))
+        } finally {
+            attributes.recycle()
+        }
     }
 
-    private fun optionTextColor(selected: Boolean, darkSurface: Boolean): Int = when {
-        selected -> Color.rgb(33, 150, 243)
-        darkSurface -> Color.rgb(210, 214, 222)
-        else -> Color.rgb(105, 115, 132)
-    }
+    private fun optionTextColor(darkSurface: Boolean): Int =
+        if (darkSurface) Color.rgb(205, 210, 220) else Color.rgb(93, 101, 116)
 
     private fun Context.dp(value: Int): Int =
         (value * resources.displayMetrics.density).roundToInt()

@@ -11,6 +11,8 @@ data class AppConfig(
     val fakeDeviceId: String = ConfigManager.DEFAULT_FAKE_DEVICE_ID,
     val logLevel: Int = ConfigManager.LOG_LEVEL_BASIC,
     val islandMode: Int = ConfigManager.ISLAND_MODE_OFFICIAL,
+    val superIslandEnabled: Boolean = true,
+    val lockscreenNotificationEnabled: Boolean = true,
     val notificationClickAction: Int = ConfigManager.NOTIFICATION_CLICK_MODULE_POPUP,
     val moreClickAction: Int = ConfigManager.MORE_CLICK_MODULE,
 )
@@ -23,6 +25,8 @@ object ConfigManager {
     const val PREF_KEY_FAKE_DEVICE_ID = "fake_device_id"
     const val PREF_KEY_LOG_LEVEL = "log_level"
     const val PREF_KEY_ISLAND_MODE = "island_mode"
+    const val PREF_KEY_SUPER_ISLAND_ENABLED = "super_island_enabled"
+    const val PREF_KEY_LOCKSCREEN_NOTIFICATION_ENABLED = "lockscreen_notification_enabled"
     const val PREF_KEY_NOTIFICATION_CLICK_ACTION = "notification_click_action"
     const val PREF_KEY_MORE_CLICK_ACTION = "more_click_action"
     const val DEFAULT_FAKE_DEVICE_ID = "01010607"
@@ -65,7 +69,14 @@ object ConfigManager {
 
     fun logLevel(): Int = current().logLevel.coerceIn(LOG_LEVEL_OFF, LOG_LEVEL_DEBUG)
 
-    fun islandMode(): Int = current().islandMode.coerceIn(ISLAND_MODE_NONE, ISLAND_MODE_MODULE)
+    fun islandMode(): Int = NotificationPresentationPolicy.effectiveIslandMode(
+        enabled = current().superIslandEnabled,
+        style = current().islandMode,
+    )
+
+    fun superIslandEnabled(): Boolean = current().superIslandEnabled
+
+    fun lockscreenNotificationEnabled(): Boolean = current().lockscreenNotificationEnabled
 
     fun notificationClickAction(): Int = current().notificationClickAction.normalizedNotificationClickAction()
 
@@ -89,8 +100,31 @@ object ConfigManager {
     }
 
     fun updateIslandMode(prefs: SharedPreferences, service: XposedService?, islandMode: Int) {
-        val config = current().copy(islandMode = islandMode.coerceIn(ISLAND_MODE_NONE, ISLAND_MODE_MODULE))
+        val config = if (islandMode == ISLAND_MODE_NONE) {
+            current().copy(superIslandEnabled = false)
+        } else {
+            current().copy(
+                islandMode = NotificationPresentationPolicy.normalizedIslandStyle(islandMode),
+                superIslandEnabled = true,
+            )
+        }
         save(prefs, service, config)
+    }
+
+    fun updateSuperIslandEnabled(
+        prefs: SharedPreferences,
+        service: XposedService?,
+        enabled: Boolean,
+    ) {
+        save(prefs, service, current().copy(superIslandEnabled = enabled))
+    }
+
+    fun updateLockscreenNotificationEnabled(
+        prefs: SharedPreferences,
+        service: XposedService?,
+        enabled: Boolean,
+    ) {
+        save(prefs, service, current().copy(lockscreenNotificationEnabled = enabled))
     }
 
     fun updateNotificationClickAction(prefs: SharedPreferences, service: XposedService?, action: Int) {
@@ -129,6 +163,8 @@ object ConfigManager {
             .putString(PREF_KEY_FAKE_DEVICE_ID, config.fakeDeviceId)
             .putInt(PREF_KEY_LOG_LEVEL, config.logLevel)
             .putInt(PREF_KEY_ISLAND_MODE, config.islandMode)
+            .putBoolean(PREF_KEY_SUPER_ISLAND_ENABLED, config.superIslandEnabled)
+            .putBoolean(PREF_KEY_LOCKSCREEN_NOTIFICATION_ENABLED, config.lockscreenNotificationEnabled)
             .putInt(PREF_KEY_NOTIFICATION_CLICK_ACTION, config.notificationClickAction)
             .putInt(PREF_KEY_MORE_CLICK_ACTION, config.moreClickAction)
             .commit()
@@ -138,6 +174,10 @@ object ConfigManager {
         val directFakeDeviceId = prefs.getString(PREF_KEY_FAKE_DEVICE_ID, null)
         val directLogLevel = prefs.getInt(PREF_KEY_LOG_LEVEL, Int.MIN_VALUE)
         val directIslandMode = prefs.getInt(PREF_KEY_ISLAND_MODE, Int.MIN_VALUE)
+        val directSuperIslandEnabled = prefs.booleanOrNull(PREF_KEY_SUPER_ISLAND_ENABLED)
+        val directLockscreenNotificationEnabled = prefs.booleanOrNull(
+            PREF_KEY_LOCKSCREEN_NOTIFICATION_ENABLED,
+        )
         val directNotificationClickAction = prefs.getInt(PREF_KEY_NOTIFICATION_CLICK_ACTION, Int.MIN_VALUE)
         val directMoreClickAction = prefs.getInt(PREF_KEY_MORE_CLICK_ACTION, Int.MIN_VALUE)
         val raw = prefs.getString(PREF_KEY_CONFIG_JSON, null)
@@ -145,11 +185,20 @@ object ConfigManager {
         val config = raw?.let {
             runCatching { json.decodeFromString(AppConfig.serializer(), it) }.getOrNull()
         } ?: AppConfig()
+        val selectedIslandMode = directIslandMode.takeIf { it != Int.MIN_VALUE } ?: config.islandMode
+        val islandEnabled = NotificationPresentationPolicy.resolveSuperIslandEnabled(
+            explicitValue = directSuperIslandEnabled,
+            storedValue = config.superIslandEnabled,
+            storedMode = selectedIslandMode,
+        )
         if (!directFakeDeviceId.isNullOrBlank()) {
             return config.copy(
                 fakeDeviceId = directFakeDeviceId.normalizedFakeDeviceId(),
                 logLevel = directLogLevel.takeIf { it != Int.MIN_VALUE } ?: config.logLevel,
-                islandMode = directIslandMode.takeIf { it != Int.MIN_VALUE } ?: config.islandMode,
+                islandMode = selectedIslandMode,
+                superIslandEnabled = islandEnabled,
+                lockscreenNotificationEnabled = directLockscreenNotificationEnabled
+                    ?: config.lockscreenNotificationEnabled,
                 notificationClickAction = directNotificationClickAction.takeIf { it != Int.MIN_VALUE } ?: config.notificationClickAction,
                 moreClickAction = directMoreClickAction.takeIf { it != Int.MIN_VALUE } ?: config.moreClickAction,
             ).normalized()
@@ -157,7 +206,10 @@ object ConfigManager {
         return config.copy(
             fakeDeviceId = config.fakeDeviceId.normalizedFakeDeviceId(),
             logLevel = directLogLevel.takeIf { it != Int.MIN_VALUE } ?: config.logLevel,
-            islandMode = directIslandMode.takeIf { it != Int.MIN_VALUE } ?: config.islandMode,
+            islandMode = selectedIslandMode,
+            superIslandEnabled = islandEnabled,
+            lockscreenNotificationEnabled = directLockscreenNotificationEnabled
+                ?: config.lockscreenNotificationEnabled,
             notificationClickAction = directNotificationClickAction.takeIf { it != Int.MIN_VALUE } ?: config.notificationClickAction,
             moreClickAction = directMoreClickAction.takeIf { it != Int.MIN_VALUE } ?: config.moreClickAction,
         ).normalized()
@@ -166,7 +218,7 @@ object ConfigManager {
     private fun AppConfig.normalized(): AppConfig = copy(
         fakeDeviceId = fakeDeviceId.normalizedFakeDeviceId(),
         logLevel = logLevel.coerceIn(LOG_LEVEL_OFF, LOG_LEVEL_DEBUG),
-        islandMode = islandMode.coerceIn(ISLAND_MODE_NONE, ISLAND_MODE_MODULE),
+        islandMode = NotificationPresentationPolicy.normalizedIslandStyle(islandMode),
         notificationClickAction = notificationClickAction.normalizedNotificationClickAction(),
         moreClickAction = moreClickAction.normalizedMoreClickAction(),
     )
@@ -178,6 +230,9 @@ object ConfigManager {
 
     private fun Int.normalizedMoreClickAction(): Int =
         if (this == MORE_CLICK_SYSTEM_SETTINGS) MORE_CLICK_SYSTEM_SETTINGS else MORE_CLICK_MODULE
+
+    private fun SharedPreferences.booleanOrNull(key: String): Boolean? =
+        if (contains(key)) getBoolean(key, false) else null
 
     private fun logConfigChange(source: String, oldConfig: AppConfig, newConfig: AppConfig) {
         val changes = changedFields(oldConfig, newConfig)
@@ -207,6 +262,15 @@ object ConfigManager {
             }
             if (oldConfig.islandMode != newConfig.islandMode) {
                 add("islandMode=${oldConfig.islandMode}->${newConfig.islandMode}")
+            }
+            if (oldConfig.superIslandEnabled != newConfig.superIslandEnabled) {
+                add("superIslandEnabled=${oldConfig.superIslandEnabled}->${newConfig.superIslandEnabled}")
+            }
+            if (oldConfig.lockscreenNotificationEnabled != newConfig.lockscreenNotificationEnabled) {
+                add(
+                    "lockscreenNotificationEnabled=${oldConfig.lockscreenNotificationEnabled}->" +
+                        newConfig.lockscreenNotificationEnabled,
+                )
             }
             if (oldConfig.notificationClickAction != newConfig.notificationClickAction) {
                 add("notificationClickAction=${oldConfig.notificationClickAction}->${newConfig.notificationClickAction}")

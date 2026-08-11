@@ -99,8 +99,13 @@ object HuaweiFreeBuds7iController {
             }
         }
         request(context, device, SOUND_EFFECT_QUERY, "sound-effect-state") { response ->
-            HuaweiFreeBuds5Controller.parseSoundEffectState(response)?.let {
-                onState(FreeBuds7iSettingsState(soundEffect = it))
+            HuaweiEqualizerCodec.parseState(response)?.let { equalizer ->
+                onState(
+                    FreeBuds7iSettingsState(
+                        soundEffect = FreeBuds5SoundEffect.fromProtocolValue(equalizer.selectedId),
+                        equalizer = equalizer,
+                    ),
+                )
             }
         }
         request(context, device, HIGH_QUALITY_AUDIO_QUERY, "high-quality-audio-state") { response ->
@@ -171,33 +176,13 @@ object HuaweiFreeBuds7iController {
     fun buildCustomEqualizerPacket(
         gains: List<Int>,
         presetName: String = DEFAULT_CUSTOM_EQ_NAME,
-    ): ByteArray? {
-        if (gains.size != CUSTOM_EQ_BAND_COUNT || gains.any { it !in CUSTOM_EQ_GAIN_RANGE }) {
-            return null
-        }
-        val nameBytes = presetName.trim().toByteArray(StandardCharsets.UTF_8)
-        if (nameBytes.isEmpty() || nameBytes.size > MAX_CUSTOM_EQ_NAME_BYTES) return null
-        val body = buildList<Byte> {
-            add(0x2B)
-            add(0x49)
-            add(0x01)
-            add(0x01)
-            add(0x64)
-            add(0x02)
-            add(0x01)
-            add(CUSTOM_EQ_BAND_COUNT.toByte())
-            add(0x05)
-            add(0x01)
-            add(0x00)
-            add(0x03)
-            add(CUSTOM_EQ_BAND_COUNT.toByte())
-            gains.forEach { add(it.toByte()) }
-            add(0x04)
-            add(nameBytes.size.toByte())
-            addAll(nameBytes.toList())
-        }.toByteArray()
-        return framedPacket(body)
-    }
+    ): ByteArray? = HuaweiEqualizerCodec.buildCustomPacket(
+        gains = gains,
+        presetName = presetName,
+        operationValue = requireNotNull(
+            HuaweiEqualizerCodec.customWriteOperation(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I),
+        ),
+    )
 
     fun parseDualDevices(stream: ByteArray): List<FreeBuds7iDualDevice> {
         val devices = linkedMapOf<String, FreeBuds7iDualDevice>()
@@ -289,6 +274,7 @@ data class FreeBuds7iSettingsState(
     val headMotionControl: Boolean? = null,
     val spatialAudioMode: FreeClip2SpatialAudioMode? = null,
     val soundEffect: FreeBuds5SoundEffect? = null,
+    val equalizer: HuaweiEqualizerState? = null,
     val highQualityAudio: Boolean? = null,
 )
 
@@ -300,6 +286,7 @@ fun mergeFreeBuds7iSettingsState(
     headMotionControl = update.headMotionControl ?: current.headMotionControl,
     spatialAudioMode = update.spatialAudioMode ?: current.spatialAudioMode,
     soundEffect = update.soundEffect ?: current.soundEffect,
+    equalizer = update.equalizer ?: current.equalizer,
     highQualityAudio = update.highQualityAudio ?: current.highQualityAudio,
 )
 
@@ -336,9 +323,6 @@ enum class FreeBuds7iBooleanFeature(
 
 private const val HEADER_SIZE = 5
 private const val CHECKSUM_SIZE = 2
-private const val CUSTOM_EQ_BAND_COUNT = 10
-private val CUSTOM_EQ_GAIN_RANGE = -60..60
-private const val MAX_CUSTOM_EQ_NAME_BYTES = 32
 private const val DEFAULT_CUSTOM_EQ_NAME = "HuaweiPods EQ"
 private val MAC_ADDRESS = Regex("^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
 

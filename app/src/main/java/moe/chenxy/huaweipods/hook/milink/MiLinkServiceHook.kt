@@ -10,23 +10,34 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.ConfigManager
+import moe.chenxy.huaweipods.config.PodImageChangeNotifier
+import moe.chenxy.huaweipods.config.PodImagePrefs
+import moe.chenxy.huaweipods.config.PodImageResource
 import moe.chenxy.huaweipods.hook.HuaweiAncSubModeSelectorView
 import moe.chenxy.huaweipods.hook.FreeClip2AudioPendingGate
 import moe.chenxy.huaweipods.hook.HookContext
+import moe.chenxy.huaweipods.hook.HuaweiFreeClip2AudioControlsView
 import moe.chenxy.huaweipods.hook.Log
 import moe.chenxy.huaweipods.hook.callMethod
 import moe.chenxy.huaweipods.hook.getObjectField
+import moe.chenxy.huaweipods.hook.huaweiFreeClip2AudioLabels
 import moe.chenxy.huaweipods.hook.setObjectField
 import moe.chenxy.huaweipods.hook.shouldDispatchFreeClip2AudioSelection
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
@@ -55,6 +66,7 @@ import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.PodParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.normalizedEarbudAvailability
 import moe.chenxy.huaweipods.utils.ModuleResourceResolver
+import moe.chenxy.huaweipods.utils.PodImageLoader
 import java.lang.ref.WeakReference
 import java.lang.reflect.Modifier
 import java.util.Collections
@@ -62,6 +74,7 @@ import java.util.IdentityHashMap
 import java.util.WeakHashMap
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -97,6 +110,37 @@ private data class MiAudioEffectBinding(
     val detail: WeakReference<Any>,
 )
 
+private data class FreeClip2OptionOrderState(
+    val rootsInOriginalOrder: List<WeakReference<View>>,
+    val originalIndices: List<Int>,
+)
+
+private data class FreeClip2OptionLayout(
+    val parent: ViewGroup,
+    val off: View,
+    val fixed: View,
+    val headTracking: View,
+    val indices: List<Int>,
+)
+
+private data class FreeClip2SectionPlacement(
+    val parent: ViewGroup,
+    val audioHeadingRoot: View,
+    val spatialCardRoot: View,
+)
+
+private data class MiLinkHeadsetIconViewState(
+    val originalDrawable: Drawable?,
+    val originalScaleType: ImageView.ScaleType,
+    val originalAdjustViewBounds: Boolean,
+    var requestedKey: String? = null,
+)
+
+private data class MiLinkHeadsetIconBitmapCache(
+    val key: String,
+    val bitmap: Bitmap,
+)
+
 /** 将 Huawei 的 1/2/3 状态映射为融合设备中心的 0/1/2。无 ANC 的机型不参与接管。 */
 internal fun miLinkAncModeFor(
     route: HuaweiDeviceRoute,
@@ -119,15 +163,31 @@ internal fun miLinkHostAncStateFor(
     huaweiStatus: Int,
 ): Int = miLinkAncModeFor(route, huaweiStatus) ?: 0
 
-/** 融合设备中心在不同版本里可能给空间音频状态加 20/30 偏移。 */
+/**
+ * 融合设备中心使用 0=关闭、1=头部跟踪、2=固定；这与耳机 AAM 的
+ * 0=关闭、1=固定、2=头部跟踪不同。不同宿主版本还可能附加 20/30 偏移。
+ */
 internal fun freeClip2SpatialModeForMiLinkAudioEffect(value: Int): FreeClip2SpatialAudioMode? {
     val normalized = when (value) {
         in 20..22 -> value - 20
         in 30..32 -> value - 30
         else -> value
     }
-    return FreeClip2SpatialAudioMode.fromProtocolValue(normalized)
+    return when (normalized) {
+        0 -> FreeClip2SpatialAudioMode.OFF
+        1 -> FreeClip2SpatialAudioMode.HEAD_TRACKING
+        2 -> FreeClip2SpatialAudioMode.FIXED
+        else -> null
+    }
 }
+
+/** 将模块状态转换为融合设备中心自己的显示/回调枚举。 */
+internal fun miLinkAudioEffectForFreeClip2SpatialMode(mode: FreeClip2SpatialAudioMode): Int =
+    when (mode) {
+        FreeClip2SpatialAudioMode.OFF -> 0
+        FreeClip2SpatialAudioMode.FIXED -> 2
+        FreeClip2SpatialAudioMode.HEAD_TRACKING -> 1
+    }
 
 /** 只接受当前机型确实支持的融合设备中心状态。 */
 internal fun huaweiAncStatusForMiLink(
@@ -208,6 +268,8 @@ object MiLinkServiceHook : HookContext() {
     private const val CIRCULATE_SERVICE_HEADSET_FALLBACK = 524288
     private const val HEADSET_BOND_BONDED = 306
     private const val ANC_SUBMODE_SELECTOR_TAG = "huaweipods_milink_anc_submode"
+    private const val FREECLIP2_SOUND_EFFECT_CONTROLS_TAG =
+        "huaweipods_milink_freeclip2_sound_effect"
     private const val PREF_ANC_SUBMODE = "anc_submode"
     private const val PREF_ANC_SUBMODE_LEGACY_6I = "anc_level"
     private const val PREF_ANC_SUBMODE_LEGACY_PRO3 = "huawei_anc_level"
@@ -241,6 +303,27 @@ object MiLinkServiceHook : HookContext() {
     private val hiddenCapabilityViews = Collections.synchronizedMap(
         WeakHashMap<View, HiddenCapabilityView>(),
     )
+    private val freeClip2OriginalLabels = Collections.synchronizedMap(
+        WeakHashMap<TextView, CharSequence>(),
+    )
+    private val freeClip2OriginalTitleStyles = Collections.synchronizedMap(
+        WeakHashMap<TextView, HuaweiFreeClip2AudioControlsView.SectionTitleStyle>(),
+    )
+    private val freeClip2OriginalOptionOrders = Collections.synchronizedMap(
+        WeakHashMap<ViewGroup, FreeClip2OptionOrderState>(),
+    )
+    private val freeClip2AudioHeadingRoots = Collections.synchronizedMap(
+        WeakHashMap<View, Boolean>(),
+    )
+    private val miLinkHeadsetIconViewStates = Collections.synchronizedMap(
+        WeakHashMap<ImageView, MiLinkHeadsetIconViewState>(),
+    )
+    private val miLinkHeadsetIconLoads = ConcurrentHashMap.newKeySet<String>()
+    private val miLinkHeadsetIconExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "HuaweiPods-MiLinkIcon").apply { isDaemon = true }
+    }
+    @Volatile
+    private var miLinkHeadsetIconBitmapCache: MiLinkHeadsetIconBitmapCache? = null
     internal var context: Context? = null
     private var receiverRegistered = false
     internal var currentAddress: String? = null
@@ -568,7 +651,7 @@ object MiLinkServiceHook : HookContext() {
                     return@hookAfter
                 }
                 requestFreeClip2AudioState("controller-api-get")
-                result = currentFreeClip2SpatialMode.protocolValue
+                result = miLinkAudioEffectForFreeClip2SpatialMode(currentFreeClip2SpatialMode)
             }
             hookBefore(
                 controllerClass.getDeclaredMethod(
@@ -625,7 +708,7 @@ object MiLinkServiceHook : HookContext() {
                 if (freeClip2AudioInternalRenderDepth.get() == 0) {
                     requestFreeClip2AudioState("native-card-get")
                 }
-                proceedWithArgs(currentFreeClip2SpatialMode.protocolValue)
+                proceedWithArgs(miLinkAudioEffectForFreeClip2SpatialMode(currentFreeClip2SpatialMode))
             }
 
             hookBefore(
@@ -645,7 +728,7 @@ object MiLinkServiceHook : HookContext() {
                     // second device command.
                     return@hookBefore
                 }
-                val mode = FreeClip2SpatialAudioMode.fromProtocolValue(args[1] as? Int ?: -1)
+                val mode = freeClip2SpatialModeForMiLinkAudioEffect(args[1] as? Int ?: -1)
                     ?: run {
                         result = null
                         return@hookBefore
@@ -692,7 +775,15 @@ object MiLinkServiceHook : HookContext() {
                 )
             }
         }
-        if (routeForAncCardDetail(detail) != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        val detailView = detail as? View
+        if (routeForAncCardDetail(detail) != HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            detailView?.let(::restoreFreeClip2CardPresentation)
+            return
+        }
+        detailView?.let { root ->
+            applyFreeClip2CardPresentation(root)
+            syncFreeClip2SoundEffectControls(root)
+        }
         if (reason == "constructor") {
             requestFreeClip2AudioState("native-card-configure-$reason", force = true)
         }
@@ -716,10 +807,441 @@ object MiLinkServiceHook : HookContext() {
     ) {
         freeClip2AudioInternalRenderDepth.incrementAndGet()
         try {
-            callMethod(section, "o", mode.protocolValue)
+            callMethod(section, "o", miLinkAudioEffectForFreeClip2SpatialMode(mode))
         } finally {
             freeClip2AudioInternalRenderDepth.decrementAndGet()
         }
+    }
+
+    private fun applyFreeClip2CardPresentation(root: View) {
+        val labels = collectTextViews(root)
+        reorderFreeClip2SpatialOptions(labels)
+        labels.forEach { textView ->
+            val semantic = FreeClip2MiLinkUiPolicy.classify(
+                freeClip2OriginalLabels[textView] ?: textView.text,
+            ) ?: return@forEach
+            val replacement = when (semantic) {
+                FreeClip2MiLinkLabel.AUDIO_SETTINGS ->
+                    moduleString(R.string.freeclip2_audio_settings, "音效")
+                FreeClip2MiLinkLabel.FIXED ->
+                    moduleString(R.string.freeclip2_spatial_fixed, "固定")
+                FreeClip2MiLinkLabel.HEAD_TRACKING ->
+                    moduleString(R.string.freeclip2_spatial_head_tracking, "头部跟踪")
+                FreeClip2MiLinkLabel.OFF -> return@forEach
+            }
+            if (textView.text.toString() == replacement) return@forEach
+            freeClip2OriginalLabels.putIfAbsent(textView, textView.text)
+            textView.text = replacement
+        }
+    }
+
+    /**
+     * 宿主原来的“噪声控制”标题对 FreeClip 2 没有含义。将它折叠后，把真实音效
+     * 选择器放到原生空间音频卡片下方，保持“空间音频 → 音效”的官方顺序。
+     */
+    private fun syncFreeClip2SoundEffectControls(root: View) {
+        val labels = collectTextViews(root)
+        val optionLayout = findFreeClip2OptionLayout(labels) ?: return
+        val audioHeading = labels.firstOrNull { textView ->
+            FreeClip2MiLinkUiPolicy.classify(
+                freeClip2OriginalLabels[textView] ?: textView.text,
+            ) == FreeClip2MiLinkLabel.AUDIO_SETTINGS
+        } ?: return
+        val placement = findFreeClip2SectionPlacement(audioHeading, optionLayout.fixed) ?: return
+
+        freeClip2AudioHeadingRoots[placement.audioHeadingRoot] = true
+        setCapabilityViewVisible(placement.audioHeadingRoot, visible = false)
+
+        val existing = findTaggedView(root, FREECLIP2_SOUND_EFFECT_CONTROLS_TAG)
+            as? HuaweiFreeClip2AudioControlsView
+        val controls = existing ?: HuaweiFreeClip2AudioControlsView(
+            context = root.context,
+            onSpatialModeSelected = {},
+            onSpatialSceneSelected = {},
+            onSoundEffectSelected = { effect ->
+                requestFreeClip2SoundEffectSelection(effect, "native-sound-effect-selected")
+            },
+        ).apply {
+            tag = FREECLIP2_SOUND_EFFECT_CONTROLS_TAG
+        }
+
+        if (controls.parent !== placement.parent) {
+            (controls.parent as? ViewGroup)?.removeView(controls)
+            addFreeClip2SoundEffectControls(placement, controls)
+        } else {
+            val desiredIndex = placement.parent.indexOfChild(placement.spatialCardRoot) + 1
+            val currentIndex = placement.parent.indexOfChild(controls)
+            if (desiredIndex > 0 && currentIndex != desiredIndex) {
+                placement.parent.removeView(controls)
+                addFreeClip2SoundEffectControls(placement, controls)
+            }
+        }
+
+        val darkSurface = isDarkSurface(placement.spatialCardRoot)
+        val titleStyle = matchFreeClip2SectionTitleTypography(labels)
+        controls.setSectionTitleStyle(titleStyle)
+        controls.render(
+            spatialMode = currentFreeClip2SpatialMode,
+            spatialScene = currentFreeClip2SpatialScene,
+            soundEffect = currentFreeClip2SoundEffect,
+            labels = huaweiFreeClip2AudioLabels { resId, fallback ->
+                moduleString(resId, fallback)
+            },
+            darkSurface = darkSurface,
+            showSpatialMode = false,
+            showSpatialScene = false,
+            showSoundEffect = true,
+            compact = true,
+        )
+        matchFreeClip2SoundEffectCardPresentation(placement, controls)
+        controls.visibility = View.VISIBLE
+    }
+
+    /**
+     * 以同一详情卡内的原生“音量”标题为基准，统一空间音频与模块音效标题。
+     * 找不到音量标题时退回原生空间音频标题；两者都不存在则完全不改宿主样式。
+     */
+    private fun matchFreeClip2SectionTitleTypography(
+        labels: List<TextView>,
+    ): HuaweiFreeClip2AudioControlsView.SectionTitleStyle? {
+        val volumeHeading = labels.firstOrNull { textView ->
+            FreeClip2MiLinkUiPolicy.isVolumeHeading(textView.text)
+        }
+        val spatialHeadings = labels.filter { textView ->
+            FreeClip2MiLinkUiPolicy.isSpatialAudioHeading(
+                freeClip2OriginalLabels[textView] ?: textView.text,
+            )
+        }
+        val reference = volumeHeading ?: spatialHeadings.firstOrNull() ?: return null
+        val style = HuaweiFreeClip2AudioControlsView.SectionTitleStyle.capture(reference)
+        if (volumeHeading != null) {
+            spatialHeadings.forEach { heading ->
+                if (heading === volumeHeading) return@forEach
+                freeClip2OriginalTitleStyles.putIfAbsent(
+                    heading,
+                    HuaweiFreeClip2AudioControlsView.SectionTitleStyle.capture(heading),
+                )
+                style.applyTo(heading)
+            }
+        }
+        return style
+    }
+
+    private fun addFreeClip2SoundEffectControls(
+        placement: FreeClip2SectionPlacement,
+        controls: HuaweiFreeClip2AudioControlsView,
+    ) {
+        val params = matchingCardLayoutParams(placement.spatialCardRoot)
+        val index = (placement.parent.indexOfChild(placement.spatialCardRoot) + 1)
+            .coerceIn(0, placement.parent.childCount)
+        placement.parent.addView(controls, index, params)
+        placement.parent.requestLayout()
+    }
+
+    /** 复用宿主原生空间音频卡的外框与间距，保持“空间音频 → 音效”视觉一致。 */
+    private fun matchFreeClip2SoundEffectCardPresentation(
+        placement: FreeClip2SectionPlacement,
+        controls: HuaweiFreeClip2AudioControlsView,
+    ) {
+        controls.layoutParams = matchingCardLayoutParams(placement.spatialCardRoot)
+        controls.background = placement.spatialCardRoot.background
+            ?.constantState
+            ?.newDrawable()
+            ?.mutate()
+            ?: controls.background
+        controls.minimumHeight = placement.spatialCardRoot.minimumHeight
+        controls.elevation = placement.spatialCardRoot.elevation
+        controls.gravity = Gravity.CENTER_VERTICAL
+        val horizontalPadding = (6f * controls.resources.displayMetrics.density).toInt()
+        controls.setPadding(horizontalPadding, 0, horizontalPadding, 0)
+        controls.requestLayout()
+    }
+
+    private fun matchingCardLayoutParams(source: View): ViewGroup.LayoutParams {
+        val sourceParams = source.layoutParams
+        return when (sourceParams) {
+            is LinearLayout.LayoutParams -> LinearLayout.LayoutParams(sourceParams).apply {
+                height = ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+            is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(sourceParams).apply {
+                height = ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+            null -> ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            else -> ViewGroup.LayoutParams(sourceParams).apply {
+                height = ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+        }
+    }
+
+    private fun findFreeClip2SectionPlacement(
+        audioHeading: View,
+        spatialOption: View,
+    ): FreeClip2SectionPlacement? {
+        var parent = spatialOption.parent as? ViewGroup
+        while (parent != null) {
+            val headingRoot = directChildUnder(parent, audioHeading)
+            val spatialRoot = directChildUnder(parent, spatialOption)
+            if (
+                headingRoot != null &&
+                spatialRoot != null &&
+                headingRoot !== spatialRoot &&
+                parent.indexOfChild(headingRoot) >= 0 &&
+                parent.indexOfChild(spatialRoot) >= 0
+            ) {
+                return FreeClip2SectionPlacement(parent, headingRoot, spatialRoot)
+            }
+            parent = parent.parent as? ViewGroup
+        }
+        return null
+    }
+
+    private fun restoreFreeClip2CardPresentation(root: View) {
+        findTaggedView(root, FREECLIP2_SOUND_EFFECT_CONTROLS_TAG)?.let { controls ->
+            (controls.parent as? ViewGroup)?.removeView(controls)
+        }
+        synchronized(freeClip2AudioHeadingRoots) {
+            freeClip2AudioHeadingRoots.keys.toList().forEach { headingRoot ->
+                if (!isDescendantOf(headingRoot, root)) return@forEach
+                restoreCapabilityView(headingRoot)
+                freeClip2AudioHeadingRoots.remove(headingRoot)
+            }
+        }
+        synchronized(freeClip2OriginalOptionOrders) {
+            freeClip2OriginalOptionOrders.entries.toList().forEach { (parent, state) ->
+                if (!isDescendantOf(parent, root)) return@forEach
+                val roots = state.rootsInOriginalOrder.mapNotNull(WeakReference<View>::get)
+                if (roots.size == 3 && roots.all { it.parent === parent }) {
+                    roots.forEach(parent::removeView)
+                    roots.zip(state.originalIndices).forEach { (view, index) ->
+                        parent.addView(view, index.coerceIn(0, parent.childCount))
+                    }
+                    parent.requestLayout()
+                }
+                freeClip2OriginalOptionOrders.remove(parent)
+            }
+        }
+        synchronized(freeClip2OriginalLabels) {
+            freeClip2OriginalLabels.entries.toList().forEach { (textView, original) ->
+                if (!isDescendantOf(textView, root)) return@forEach
+                textView.text = original
+                freeClip2OriginalLabels.remove(textView)
+            }
+        }
+        synchronized(freeClip2OriginalTitleStyles) {
+            freeClip2OriginalTitleStyles.entries.toList().forEach { (textView, originalStyle) ->
+                if (!isDescendantOf(textView, root)) return@forEach
+                originalStyle.applyTo(textView)
+                freeClip2OriginalTitleStyles.remove(textView)
+            }
+        }
+    }
+
+    private fun reorderFreeClip2SpatialOptions(labels: List<TextView>) {
+        val layout = findFreeClip2OptionLayout(labels) ?: return
+        if (freeClip2OriginalOptionOrders.containsKey(layout.parent)) return
+        val original = listOf(layout.off, layout.fixed, layout.headTracking)
+            .sortedBy(layout.parent::indexOfChild)
+        val originalIndices = original.map(layout.parent::indexOfChild)
+        freeClip2OriginalOptionOrders[layout.parent] = FreeClip2OptionOrderState(
+            rootsInOriginalOrder = original.map(::WeakReference),
+            originalIndices = originalIndices,
+        )
+        val firstIndex = originalIndices.min()
+        original.forEach(layout.parent::removeView)
+        listOf(layout.off, layout.fixed, layout.headTracking).forEachIndexed { offset, view ->
+            layout.parent.addView(view, (firstIndex + offset).coerceIn(0, layout.parent.childCount))
+        }
+        layout.parent.requestLayout()
+    }
+
+    private fun findFreeClip2OptionLayout(labels: List<TextView>): FreeClip2OptionLayout? {
+        val classified = labels.mapNotNull { textView ->
+            FreeClip2MiLinkUiPolicy.classify(
+                freeClip2OriginalLabels[textView] ?: textView.text,
+            )?.let { it to textView }
+        }
+        val off = classified.filter { it.first == FreeClip2MiLinkLabel.OFF }.map { it.second }
+        val fixed = classified.filter { it.first == FreeClip2MiLinkLabel.FIXED }.map { it.second }
+        val head = classified.filter { it.first == FreeClip2MiLinkLabel.HEAD_TRACKING }.map { it.second }
+        return sequence {
+            fixed.forEach { fixedLabel ->
+                head.forEach { headLabel ->
+                    off.forEach { offLabel ->
+                        optionLayout(offLabel, fixedLabel, headLabel)?.let { yield(it) }
+                    }
+                }
+            }
+        }.minByOrNull { it.indices.max() - it.indices.min() }
+    }
+
+    private fun optionLayout(
+        offLabel: TextView,
+        fixedLabel: TextView,
+        headLabel: TextView,
+    ): FreeClip2OptionLayout? {
+        var parent = fixedLabel.parent as? ViewGroup
+        while (parent != null) {
+            val off = directChildUnder(parent, offLabel)
+            val fixed = directChildUnder(parent, fixedLabel)
+            val head = directChildUnder(parent, headLabel)
+            if (off != null && fixed != null && head != null && setOf(off, fixed, head).size == 3) {
+                val indices = listOf(off, fixed, head).map(parent::indexOfChild)
+                if (indices.all { it >= 0 } && FreeClip2MiLinkUiPolicy.isSafeConsecutiveOrder(indices)) {
+                    return FreeClip2OptionLayout(parent, off, fixed, head, indices)
+                }
+            }
+            parent = parent.parent as? ViewGroup
+        }
+        return null
+    }
+
+    private fun directChildUnder(parent: ViewGroup, descendant: View): View? {
+        var current: View = descendant
+        while (current.parent is View && current.parent !== parent) {
+            current = current.parent as View
+        }
+        return current.takeIf { it.parent === parent }
+    }
+
+    private fun collectTextViews(root: View): List<TextView> {
+        val result = mutableListOf<TextView>()
+        fun visit(view: View) {
+            if (view is TextView) result += view
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) visit(view.getChildAt(index))
+            }
+        }
+        visit(root)
+        return result
+    }
+
+    /** 无 ANC 的耳机隐藏整条标题；只隐藏按钮行会留下空白“噪声控制”。 */
+    private fun syncUnsupportedAncHeading(root: View, route: HuaweiDeviceRoute) {
+        val heading = root.findHostViewByIdName("anc_card_title")
+            ?: collectTextViews(root).firstOrNull { textView ->
+                val title = textView.text?.toString()?.trim().orEmpty()
+                title.equals("噪声控制", ignoreCase = true) ||
+                    title.equals("Noise control", ignoreCase = true)
+            }
+        if (!route.isSupported) {
+            restoreCapabilityView(heading)
+            return
+        }
+        setCapabilityViewVisible(heading, route.supportsAnc)
+    }
+
+    /** 按当前地址异步加载手动图、官方图或机型内置图，替换融合设备中心通用耳机图标。 */
+    private fun syncMiLinkHeadsetIcon(root: View, route: HuaweiDeviceRoute) {
+        val iconViews = listOf("circulate_headset_icon", "circulate_single_battery_headset_icon")
+            .mapNotNull { name -> root.findHostViewByIdName(name) as? ImageView }
+            .distinct()
+        if (iconViews.isEmpty()) return
+
+        val address = currentAddress?.trim()?.uppercase()
+        if (!route.isSupported || address.isNullOrBlank()) {
+            iconViews.forEach(::restoreMiLinkHeadsetIcon)
+            return
+        }
+        val imagePreference = runCatching { PodImagePrefs.find(prefs, address) }.getOrNull()
+        val key = listOf(
+            address,
+            route.name,
+            imagePreference?.imagePath(PodImageResource.BOX).orEmpty(),
+            imagePreference?.cloudImagePath(PodImageResource.BOX).orEmpty(),
+        ).joinToString("|")
+
+        iconViews.forEach { imageView ->
+            val state = synchronized(miLinkHeadsetIconViewStates) {
+                miLinkHeadsetIconViewStates.getOrPut(imageView) {
+                    MiLinkHeadsetIconViewState(
+                        originalDrawable = imageView.drawable,
+                        originalScaleType = imageView.scaleType,
+                        originalAdjustViewBounds = imageView.adjustViewBounds,
+                    )
+                }
+            }
+            if (state.requestedKey != key) {
+                state.requestedKey = key
+                imageView.setImageDrawable(state.originalDrawable)
+                imageView.scaleType = state.originalScaleType
+                imageView.adjustViewBounds = state.originalAdjustViewBounds
+            }
+        }
+
+        miLinkHeadsetIconBitmapCache?.takeIf { it.key == key }?.let { cached ->
+            iconViews.forEach { applyMiLinkHeadsetIcon(it, key, cached.bitmap) }
+            return
+        }
+        if (!miLinkHeadsetIconLoads.add(key)) return
+        val hostContext = root.context.applicationContext ?: root.context
+        miLinkHeadsetIconExecutor.execute {
+            val bitmap = runCatching {
+                PodImageLoader.loadBoxBitmap(hostContext, prefs, address)
+            }.onFailure {
+                Log.w(TAG, "MiLink headset icon load failed route=$route", it)
+            }.getOrNull()
+            if (bitmap != null) {
+                miLinkHeadsetIconBitmapCache = MiLinkHeadsetIconBitmapCache(key, bitmap)
+            }
+            miLinkHeadsetIconLoads.remove(key)
+            iconViews.forEach { imageView ->
+                imageView.post {
+                    if (bitmap != null) applyMiLinkHeadsetIcon(imageView, key, bitmap)
+                }
+            }
+        }
+    }
+
+    private fun applyMiLinkHeadsetIcon(imageView: ImageView, key: String, bitmap: Bitmap) {
+        val requestedKey = synchronized(miLinkHeadsetIconViewStates) {
+            miLinkHeadsetIconViewStates[imageView]?.requestedKey
+        }
+        // 即使宿主卡片暂未 attach 也先写入；否则异步解码恰好提前完成时会漏掉本轮替换。
+        if (requestedKey != key) return
+        imageView.setImageBitmap(bitmap)
+        imageView.scaleType = ImageView.ScaleType.FIT_CENTER
+        imageView.adjustViewBounds = true
+        Log.d(TAG, "MiLink headset icon replaced size=${bitmap.width}x${bitmap.height}")
+    }
+
+    private fun restoreMiLinkHeadsetIcon(imageView: ImageView) {
+        val state = synchronized(miLinkHeadsetIconViewStates) {
+            miLinkHeadsetIconViewStates.remove(imageView)
+        } ?: return
+        imageView.setImageDrawable(state.originalDrawable)
+        imageView.scaleType = state.originalScaleType
+        imageView.adjustViewBounds = state.originalAdjustViewBounds
+    }
+
+    private fun invalidateMiLinkHeadsetIcons() {
+        miLinkHeadsetIconBitmapCache = null
+        synchronized(miLinkHeadsetIconViewStates) {
+            miLinkHeadsetIconViewStates.values.forEach { it.requestedKey = null }
+        }
+        val roots = synchronized(ancCards) {
+            Collections.newSetFromMap(IdentityHashMap<View, Boolean>()).apply {
+                ancCards.values.mapNotNull { it.detail.get() as? View }.forEach(::add)
+            }.toList()
+        }
+        val route = currentHuaweiRoute()
+        roots.forEach { root -> syncMiLinkHeadsetIcon(root, route) }
+    }
+
+    private fun View.findHostViewByIdName(name: String): View? {
+        val id = resources.getIdentifier(name, "id", context.packageName)
+        return id.takeIf { it != 0 }?.let(::findViewById)
+    }
+
+    private fun isDescendantOf(view: View, root: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === root) return true
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun safelyConfigureAncCard(
@@ -746,6 +1268,10 @@ object MiLinkServiceHook : HookContext() {
             binding = binding,
             forceResolve = reason.endsWith("-post"),
         )
+        (binding.detail.get() as? View)?.let { detail ->
+            syncMiLinkHeadsetIcon(detail, route)
+            syncUnsupportedAncHeading(detail, route)
+        }
         val clearView = runCatching { getObjectField(card, "f") as? View }.getOrNull()
             ?: binding.clearView?.get()
         clearView?.let { binding.clearView = WeakReference(it) }
@@ -816,6 +1342,9 @@ object MiLinkServiceHook : HookContext() {
         val capabilityContainer: View? = ancContainer ?: modeRow ?: clearView
 
         if (!route.supportsAnc) {
+            if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+                (binding.detail.get() as? View)?.let(::applyFreeClip2CardPresentation)
+            }
             // 只隐藏 ANC 按钮所在行。祖先容器可能同时承载详情页点击/展开入口，不能修改。
             val ancModeRow = modeRow ?: clearView
             ancModeRow?.let { binding.capabilityContainer = WeakReference(it) }
@@ -1494,6 +2023,7 @@ object MiLinkServiceHook : HookContext() {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_ANC_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_ANC_LEVEL_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONFIG_CHANGED)
         }
         context?.registerReceiver(object : BroadcastReceiver() {
@@ -1509,6 +2039,14 @@ object MiLinkServiceHook : HookContext() {
                         }
                         refreshAncCards("config-changed")
                         refreshFreeClip2AudioEffectSections("config-changed")
+                    }
+                    HuaweiPodsAction.ACTION_POD_IMAGES_CHANGED -> {
+                        val changedAddress = receivedIntent.getStringExtra(
+                            PodImageChangeNotifier.EXTRA_ADDRESS,
+                        )
+                        if (changedAddress == null || changedAddress.equals(currentAddress, ignoreCase = true)) {
+                            invalidateMiLinkHeadsetIcons()
+                        }
                     }
                     HuaweiPodsAction.ACTION_PODS_CONNECTED -> {
                         if (!rememberSupportedDevice(receivedIntent)) return
@@ -1811,27 +2349,55 @@ object MiLinkServiceHook : HookContext() {
     private fun requestFreeClip2AudioSelection(
         mode: FreeClip2SpatialAudioMode,
         source: String,
+    ) = requestFreeClip2AudioSelection(
+        kind = HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE,
+        value = mode.extraValue,
+        description = "spatial mode=$mode",
+        source = source,
+    )
+
+    private fun requestFreeClip2SoundEffectSelection(
+        effect: FreeClip2SoundEffect,
+        source: String,
+    ) {
+        if (!effect.isSelectable) {
+            Log.d(TAG, "MiLink FreeClip2 read-only sound effect ignored effect=$effect source=$source")
+            return
+        }
+        requestFreeClip2AudioSelection(
+            kind = HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SOUND_EFFECT,
+            value = effect.extraValue,
+            description = "sound effect=$effect",
+            source = source,
+        )
+    }
+
+    private fun requestFreeClip2AudioSelection(
+        kind: String,
+        value: String,
+        description: String,
+        source: String,
     ) {
         val now = SystemClock.elapsedRealtime()
         if (!freeClip2AudioPendingGate.tryBegin(
-                HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE,
-                mode.extraValue,
+                kind,
+                value,
                 now,
             )
         ) {
-            Log.d(TAG, "MiLink FreeClip2 duplicate spatial selection ignored mode=$mode source=$source")
+            Log.d(TAG, "MiLink FreeClip2 duplicate selection ignored $description source=$source")
             return
         }
         if (!sendFreeClip2AudioSetting(
-                kind = HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE,
-                value = mode.extraValue,
+                kind = kind,
+                value = value,
             )
         ) {
             freeClip2AudioPendingGate.clear()
-            Log.w(TAG, "MiLink FreeClip2 spatial selection send failed mode=$mode source=$source")
+            Log.w(TAG, "MiLink FreeClip2 selection send failed $description source=$source")
             return
         }
-        Log.d(TAG, "MiLink FreeClip2 spatial selection pending mode=$mode source=$source")
+        Log.d(TAG, "MiLink FreeClip2 selection pending $description source=$source")
     }
 
     private fun requestFreeClip2AudioState(reason: String, force: Boolean = false) {

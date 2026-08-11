@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
-import moe.chenxy.huaweipods.pods.HuaweiAncLevel
+import moe.chenxy.huaweipods.pods.UNKNOWN_HUAWEI_ANC_SUBMODE
 import moe.chenxy.huaweipods.pods.decodeHuaweiDeviceRouteFromBroadcast
 import moe.chenxy.huaweipods.pods.defaultAncSubMode
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
@@ -191,7 +191,7 @@ private fun PopupContent(
     val batteryParams = remember { mutableStateOf(BatteryParams()) }
     val ancMode = remember { mutableStateOf(NoiseControlMode.UNKNOWN) }
     val ancLevel = remember(target.route) {
-        mutableStateOf(target.route.defaultAncSubMode ?: HuaweiAncLevel.ADAPTIVE.protocolValue)
+        mutableStateOf(target.route.defaultAncSubMode ?: UNKNOWN_HUAWEI_ANC_SUBMODE)
     }
     val hasAncLevel = remember { mutableStateOf(false) }
     val transparencySubMode = remember { mutableStateOf(-1) }

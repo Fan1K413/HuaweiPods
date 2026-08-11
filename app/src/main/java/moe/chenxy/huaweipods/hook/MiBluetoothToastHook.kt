@@ -22,6 +22,7 @@ import moe.chenxy.huaweipods.utils.SystemApisUtils.cancelAsUser
 import moe.chenxy.huaweipods.utils.SystemApisUtils.notifyAsUser
 import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.config.DeviceRoutePrefs
+import moe.chenxy.huaweipods.config.NotificationPresentationPolicy
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.pods.supportsAnc
@@ -89,6 +90,14 @@ object MiBluetoothToastHook : HookContext() {
                 }
                 val deviceRoute = DeviceRoutePrefs.resolve(prefs, address, deviceName)
                 val offerAncAction = shouldOfferNotificationAncAction(deviceRoute)
+                val lockscreenVisibility = if (ConfigManager.lockscreenNotificationEnabled()) {
+                    Notification.VISIBILITY_PUBLIC
+                } else {
+                    Notification.VISIBILITY_SECRET
+                }
+                val attachOfficialIsland = NotificationPresentationPolicy.attachesOfficialIsland(
+                    ConfigManager.islandMode(),
+                )
 
                 val caseBattStr = if (batteryParams.case != null && batteryParams.case!!.isConnected)
                     "${context.resources.getString(miheadset_notification_Box)}${batteryParams.case!!.battery}%" +
@@ -114,6 +123,7 @@ object MiBluetoothToastHook : HookContext() {
                     ).apply {
                         setSound(null, null)
                         setAllowBubbles(true)
+                        setLockscreenVisibility(lockscreenVisibility)
                     }
                 )
                 val bundle = Bundle()
@@ -178,7 +188,7 @@ object MiBluetoothToastHook : HookContext() {
                 )
                 val focusExtras = FocusNotification.buildV3 {
                     val logo = createPicture("key_headset", headsetIcon)
-                    enableFloat = true
+                    enableFloat = attachOfficialIsland
                     ticker = alias ?: ""
                     updatable = true
 //                    tickerPic = logo
@@ -192,21 +202,23 @@ object MiBluetoothToastHook : HookContext() {
                         content = contentText
                     }
 
-                    island {
-                        islandProperty = 1
-                        bigIslandArea {
-                            imageTextInfoLeft {
-                                type = 1
-                                picInfo {
+                    if (attachOfficialIsland) {
+                        island {
+                            islandProperty = 1
+                            bigIslandArea {
+                                imageTextInfoLeft {
                                     type = 1
-                                    pic = logo
+                                    picInfo {
+                                        type = 1
+                                        pic = logo
+                                    }
                                 }
-                            }
-                            imageTextInfoRight {
-                                type = 2
-                                textInfo {
-                                    title = alias ?: ""
-                                    content = contentText
+                                imageTextInfoRight {
+                                    type = 2
+                                    textInfo {
+                                        title = alias ?: ""
+                                        content = contentText
+                                    }
                                 }
                             }
                         }
@@ -227,21 +239,23 @@ object MiBluetoothToastHook : HookContext() {
                         }
                     }
                 }
-                // AOD 息屏显示：左右耳电量拼合后注入 aodTitle
-                val aodParts = mutableListOf<String>()
-                if (batteryParams.left?.isConnected == true)
-                    aodParts.add("L ${batteryParams.left!!.battery}%")
-                if (batteryParams.right?.isConnected == true)
-                    aodParts.add("R ${batteryParams.right!!.battery}%")
-                val aodTitle = aodParts.joinToString(" | ")
-                try {
-                    val json = org.json.JSONObject(focusExtras.getString("miui.focus.param") ?: "{}")
-                    val pv2 = json.optJSONObject("param_v2") ?: org.json.JSONObject()
-                    pv2.put("aodTitle", aodTitle)
-                    pv2.put("aodPic", "key_headset")
-                    json.put("param_v2", pv2)
-                    focusExtras.putString("miui.focus.param", json.toString())
-                } catch (_: Exception) {}
+                if (attachOfficialIsland && ConfigManager.lockscreenNotificationEnabled()) {
+                    // AOD 息屏显示：左右耳电量拼合后注入 aodTitle。
+                    val aodParts = mutableListOf<String>()
+                    if (batteryParams.left?.isConnected == true)
+                        aodParts.add("L ${batteryParams.left!!.battery}%")
+                    if (batteryParams.right?.isConnected == true)
+                        aodParts.add("R ${batteryParams.right!!.battery}%")
+                    val aodTitle = aodParts.joinToString(" | ")
+                    try {
+                        val json = org.json.JSONObject(focusExtras.getString("miui.focus.param") ?: "{}")
+                        val pv2 = json.optJSONObject("param_v2") ?: org.json.JSONObject()
+                        pv2.put("aodTitle", aodTitle)
+                        pv2.put("aodPic", "key_headset")
+                        json.put("param_v2", pv2)
+                        focusExtras.putString("miui.focus.param", json.toString())
+                    } catch (_: Exception) {}
+                }
                 val notification = Notification.Builder(context, "BTHeadset$address")
                     .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                     .setWhen(0L)
@@ -255,7 +269,7 @@ object MiBluetoothToastHook : HookContext() {
                     .apply { ancAction?.let { addAction(it) } }
                     .addAction(disconnectAction)
                     .addExtras(focusExtras)
-                    .setVisibility(Notification.VISIBILITY_PUBLIC)
+                    .setVisibility(lockscreenVisibility)
                     .build()
                 notificationManager.notifyAsUser(
                     "BTHeadset$address",
@@ -310,6 +324,12 @@ object MiBluetoothToastHook : HookContext() {
                                         },
                                     )
                                 }
+                                HuaweiPodsAction.ACTION_CONFIG_CHANGED -> {
+                                    ConfigManager.refreshFromPrefs(prefs)
+                                    if (ConfigManager.islandMode() != ConfigManager.ISLAND_MODE_MODULE) {
+                                        FocusIslandUtil.cancelBatteryIsland(context)
+                                    }
+                                }
                                 HuaweiPodsAction.ACTION_SEND_STRONG_TOAST -> {
                                     if (ConfigManager.islandMode() != ConfigManager.ISLAND_MODE_MODULE) {
                                         Log.d("HuaweiPods", "skip module island mode=${ConfigManager.islandMode()}")
@@ -350,6 +370,7 @@ object MiBluetoothToastHook : HookContext() {
 
                 val intentFilter = IntentFilter().apply {
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_PODS_UI_INIT)
+                    addHuaweiPodsAction(HuaweiPodsAction.ACTION_CONFIG_CHANGED)
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_SEND_STRONG_TOAST)
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_UPDATE_PODS_NOTIFICATION)
                     addHuaweiPodsAction(HuaweiPodsAction.ACTION_CANCEL_PODS_NOTIFICATION)

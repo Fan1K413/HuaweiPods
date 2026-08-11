@@ -39,8 +39,20 @@ class FreeClip2AudioUiPolicyTest {
 
         assertEquals(
             current,
-            current.mergeExtraValues("unknown", "", "custom"),
+            current.mergeExtraValues("unknown", "", "future_custom"),
         )
+    }
+
+    @Test
+    fun `official custom EQ is preserved as a read only UI state`() {
+        val updated = FreeClip2AudioUiState().mergeExtraValues(
+            spatialModeValue = null,
+            spatialSceneValue = null,
+            soundEffectValue = FreeClip2SoundEffect.CUSTOM.extraValue,
+        )
+
+        assertEquals(FreeClip2SoundEffect.CUSTOM, updated.soundEffect)
+        assertFalse(updated.soundEffect.isSelectable)
     }
 
     @Test

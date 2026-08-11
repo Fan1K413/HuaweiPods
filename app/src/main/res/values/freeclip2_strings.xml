@@ -6,6 +6,7 @@
     <string name="freeclip2_adaptive_volume">Adaptive volume</string>
     <string name="freeclip2_head_motion">Head motion control</string>
     <string name="freeclip2_spatial_audio">Spatial audio</string>
+    <string name="freeclip2_audio_settings">Sound effect</string>
     <string name="freeclip2_spatial_mode">Spatial audio mode</string>
     <string name="freeclip2_spatial_fixed">Fixed</string>
     <string name="freeclip2_spatial_head_tracking">Head tracking</string>
@@ -16,10 +17,12 @@
     <string name="freeclip2_spatial_scene_concert">Concert hall</string>
     <string name="freeclip2_sound_and_connection">Sound and connection</string>
     <string name="freeclip2_sound_effect">Sound effect</string>
+    <string name="freeclip2_sound_effect_preset">Official presets</string>
     <string name="freeclip2_sound_effect_default">Default</string>
     <string name="freeclip2_sound_effect_sport">Sport boost</string>
     <string name="freeclip2_sound_effect_treble">Treble boost</string>
     <string name="freeclip2_sound_effect_clear_voice">Clear voice</string>
+    <string name="freeclip2_sound_effect_custom">Official/custom effect</string>
     <string name="freeclip2_sound_quality_priority">Prioritize sound quality</string>
     <string name="freeclip2_low_latency">Low latency mode</string>
     <string name="freeclip2_dual_device">Dual-device connection</string>

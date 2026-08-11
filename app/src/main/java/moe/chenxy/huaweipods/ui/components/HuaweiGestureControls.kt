@@ -52,6 +52,7 @@ import moe.chenxy.huaweipods.pods.HuaweiGestureKind
 import moe.chenxy.huaweipods.pods.HuaweiGestureSide
 import moe.chenxy.huaweipods.pods.HuaweiSwipeAction
 import moe.chenxy.huaweipods.pods.HuaweiTapAction
+import moe.chenxy.huaweipods.pods.HuaweiWearDetectionController
 import moe.chenxy.huaweipods.pods.encodeHuaweiDeviceRouteForBroadcast
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import top.yukonga.miuix.kmp.basic.Card
@@ -79,8 +80,15 @@ fun HuaweiGestureControls(
     var confirmedReadback by remember(route, address) {
         mutableStateOf(HuaweiGestureReadback())
     }
+    val wearDetectionKey = remember(route, address) {
+        "${gesturePreferencePrefix(route, address)}_wear_detection"
+    }
+    var wearDetection by remember(wearDetectionKey) {
+        mutableStateOf(prefs.getBoolean(wearDetectionKey, true))
+    }
     HuaweiGestureReadbackEffect(
-        enabled = route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+        enabled = route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+            route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
             route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         route = route,
         address = address,
@@ -88,6 +96,14 @@ fun HuaweiGestureControls(
         val merged = confirmedReadback.mergedWith(update)
         confirmedReadback = merged
         persistHuaweiGestureReadback(prefs, route, address, merged)
+    }
+    HuaweiWearDetectionReadbackEffect(
+        enabled = layout.hasWearDetection,
+        route = route,
+        address = address,
+    ) { confirmed ->
+        wearDetection = confirmed
+        prefs.edit().putBoolean(wearDetectionKey, confirmed).apply()
     }
 
     Card(modifier = modifier) {
@@ -129,12 +145,36 @@ fun HuaweiGestureControls(
             }
 
             if (layout.hasModernLongPressControls) {
-                ModernEarbudsGestureControls(route = route, address = address, prefs = prefs)
+                ModernEarbudsGestureControls(
+                    route = route,
+                    address = address,
+                    prefs = prefs,
+                    showSwipeVolumeToggle = layout.hasModernSwipeVolumeToggle,
+                )
+            }
+
+            if (layout.hasWearDetection) {
+                GestureSectionTitle(R.string.huawei_gesture_smart_wear_section)
+                GestureTogglePreference(
+                    stateKey = wearDetectionKey,
+                    title = stringResource(R.string.huawei_gesture_wear_detection),
+                    initialValue = wearDetection,
+                    onChange = { enabled, complete ->
+                        context.sendWearDetection(route, address, enabled) { success ->
+                            if (success) {
+                                wearDetection = enabled
+                                prefs.edit().putBoolean(wearDetectionKey, enabled).apply()
+                            }
+                            complete(success)
+                        }
+                    },
+                )
             }
 
             Text(
                 text = stringResource(
-                    if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+                    if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+                        route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
                         route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
                     ) {
                         R.string.huawei_gesture_readback_hint
@@ -237,7 +277,8 @@ private fun TapActionPreference(
                 if (success) {
                     localSelected = action
                     prefs.edit().putString(key, action.extraValue).apply()
-                    if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+                    if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+                        route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
                         route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I
                     ) {
                         context.requestHuaweiGestureState(
@@ -303,6 +344,7 @@ private fun ModernEarbudsGestureControls(
     route: HuaweiDeviceRoute,
     address: String,
     prefs: SharedPreferences,
+    showSwipeVolumeToggle: Boolean,
 ) {
     val context = LocalContext.current
     GestureSectionTitle(R.string.huawei_gesture_pro3_long_press_section)
@@ -328,18 +370,20 @@ private fun ModernEarbudsGestureControls(
         }
     }
 
-    val swipeKey = remember(route, address) { modernSwipePreferenceKey(route, address) }
-    GestureTogglePreference(
-        stateKey = swipeKey,
-        title = stringResource(R.string.huawei_gesture_pro3_swipe_volume),
-        initialValue = prefs.getBoolean(swipeKey, true),
-        onChange = { enabled, complete ->
-            context.sendModernSwipeVolume(route, address, enabled) { success ->
-                if (success) prefs.edit().putBoolean(swipeKey, enabled).apply()
-                complete(success)
-            }
-        },
-    )
+    if (showSwipeVolumeToggle) {
+        val swipeKey = remember(route, address) { modernSwipePreferenceKey(route, address) }
+        GestureTogglePreference(
+            stateKey = swipeKey,
+            title = stringResource(R.string.huawei_gesture_pro3_swipe_volume),
+            initialValue = prefs.getBoolean(swipeKey, true),
+            onChange = { enabled, complete ->
+                context.sendModernSwipeVolume(route, address, enabled) { success ->
+                    if (success) prefs.edit().putBoolean(swipeKey, enabled).apply()
+                    complete(success)
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -591,6 +635,48 @@ private fun Context.sendModernSwipeVolume(
     HuaweiGestureController.setModernEarbudsSwipeVolume(this, device, route, enabled, complete)
 }
 
+private fun Context.sendWearDetection(
+    route: HuaweiDeviceRoute,
+    address: String,
+    enabled: Boolean,
+    complete: (Boolean) -> Unit,
+) {
+    val device = gestureDevice(address) ?: return complete(false)
+    HuaweiWearDetectionController.setEnabled(this, device, route, enabled, complete)
+}
+
+@Composable
+private fun HuaweiWearDetectionReadbackEffect(
+    enabled: Boolean,
+    route: HuaweiDeviceRoute,
+    address: String,
+    onReadback: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val currentOnReadback by rememberUpdatedState(onReadback)
+    DisposableEffect(enabled, route, address, context) {
+        if (!enabled) return@DisposableEffect onDispose { }
+        val device = context.gestureDevice(address)
+            ?: return@DisposableEffect onDispose { }
+        var disposed = false
+        val request = {
+            HuaweiWearDetectionController.requestState(context, device, route) { value ->
+                if (!disposed && value != null) currentOnReadback(value)
+            }
+        }
+        val lifecycleOwner = context.findLifecycleOwner()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) request()
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        request()
+        onDispose {
+            disposed = true
+            lifecycleOwner?.lifecycle?.removeObserver(observer)
+        }
+    }
+}
+
 private fun Context.requestHuaweiGestureState(
     route: HuaweiDeviceRoute,
     address: String,
@@ -714,9 +800,11 @@ internal data class HuaweiGestureControlLayout(
     val tapKinds: List<HuaweiGestureKind> = emptyList(),
     val hasSwipe: Boolean = false,
     val hasModernLongPressControls: Boolean = false,
+    val hasModernSwipeVolumeToggle: Boolean = false,
+    val hasWearDetection: Boolean = false,
 ) {
     val isVisible: Boolean
-        get() = tapKinds.isNotEmpty() || hasSwipe || hasModernLongPressControls
+        get() = tapKinds.isNotEmpty() || hasSwipe || hasModernLongPressControls || hasWearDetection
 }
 
 internal fun huaweiGestureControlLayout(route: HuaweiDeviceRoute): HuaweiGestureControlLayout {
@@ -726,8 +814,13 @@ internal fun huaweiGestureControlLayout(route: HuaweiDeviceRoute): HuaweiGesture
     return HuaweiGestureControlLayout(
         tapKinds = tapKinds,
         hasSwipe = HuaweiSwipeAction.availableFor(route).isNotEmpty(),
-        hasModernLongPressControls = route == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 ||
+        hasModernLongPressControls = route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+            route == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 ||
             route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+        hasModernSwipeVolumeToggle = route == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3 ||
+            route == HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+        hasWearDetection = route == HuaweiDeviceRoute.HUAWEI_FREEBUDS6I ||
+            route == HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
     )
 }
 

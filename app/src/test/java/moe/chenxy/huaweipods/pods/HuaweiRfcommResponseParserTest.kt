@@ -250,6 +250,25 @@ class HuaweiRfcommResponseParserTest {
     }
 
     @Test
+    fun `FreeBuds 6i readback values keep their captured semantic levels`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+        val states = mapOf(
+            "5A0007002B2A010203015043" to HuaweiAncLevel.ADAPTIVE,
+            "5A0007002B2A010201013621" to HuaweiAncLevel.LIGHT,
+            "5A0007002B2A010200010510" to HuaweiAncLevel.BALANCED,
+            "5A0007002B2A010202016372" to HuaweiAncLevel.DEEP,
+        )
+
+        states.forEach { (frame, expectedLevel) ->
+            val state = HuaweiRfcommResponseParser.parseAncState(hex(frame))
+            assertEquals(
+                expectedLevel,
+                state?.subMode?.let(route::ancLevelOptionForProtocolValue)?.level,
+            )
+        }
+    }
+
+    @Test
     fun `FreeBuds 6i uses latest noise control frame from a combined read`() {
         val off = hex("5A0007002B2A010200001531")
         val unrelated = hex("5A0006002B040201003171")

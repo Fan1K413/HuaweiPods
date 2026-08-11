@@ -28,6 +28,8 @@ internal object OfficialSmartAudioResource {
     const val PATH_PREFIX = "/device/guide/AAM001/"
     const val MAX_CONFIG_BYTES = 512 * 1024
     const val MAX_ARCHIVE_BYTES = 64L * 1024L * 1024L
+    private const val MIN_ARCHIVE_SIZE_TOLERANCE_BYTES = 64L * 1024L
+    private const val ARCHIVE_SIZE_TOLERANCE_DIVISOR = 100L
 
     private val json = Json { ignoreUnknownKeys = true }
     private val subModelIdRegex = Regex("^[0-9A-F]{2}$")
@@ -124,8 +126,15 @@ internal object OfficialSmartAudioResource {
 
     fun isArchiveSizePlausible(actualBytes: Long, declaredSizeKb: Int): Boolean {
         if (actualBytes <= 0L || actualBytes > MAX_ARCHIVE_BYTES) return false
-        val actualSizeKb = (actualBytes + 1023L) / 1024L
-        return kotlin.math.abs(actualSizeKb - declaredSizeKb.toLong()) <= 1L
+        val declaredBytes = declaredSizeKb.toLong() * 1024L
+        if (declaredBytes <= 0L || declaredBytes > MAX_ARCHIVE_BYTES) return false
+        // 华为 CDN 偶尔会更新 ZIP 内容，但配置中的 KiB 数值不会同步到逐字节精度。
+        // 保留固定域名、总大小和 ZIP/PNG 完整校验，并只允许 1% 的小幅官方元数据漂移。
+        val toleranceBytes = maxOf(
+            MIN_ARCHIVE_SIZE_TOLERANCE_BYTES,
+            declaredBytes / ARCHIVE_SIZE_TOLERANCE_DIVISOR,
+        )
+        return kotlin.math.abs(actualBytes - declaredBytes) <= toleranceBytes
     }
 
     fun isAllowedUri(uri: URI): Boolean =

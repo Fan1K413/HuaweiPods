@@ -4,6 +4,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class HuaweiFreeClip2ControllerTest {
@@ -44,6 +45,10 @@ class HuaweiFreeClip2ControllerTest {
         assertPacket("5A0006002B4901010A9E71", FreeClip2SoundEffect.SPORT_ENHANCE.packet())
         assertPacket("5A0006002B490101030F58", FreeClip2SoundEffect.TREBLE_ENHANCE.packet())
         assertPacket("5A0006002B49010109AE12", FreeClip2SoundEffect.CLEAR_VOICE.packet())
+        assertFalse(FreeClip2SoundEffect.CUSTOM.isSelectable)
+        assertThrows(IllegalArgumentException::class.java) {
+            FreeClip2SoundEffect.CUSTOM.packet()
+        }
     }
 
     @Test
@@ -83,6 +88,22 @@ class HuaweiFreeClip2ControllerTest {
         assertEquals(FreeClip2SoundEffect.CLEAR_VOICE, state?.effect)
         assertNull(state?.mode)
         assertNull(state?.scene)
+    }
+
+    @Test
+    fun `parses a verified custom equalizer without pretending it is a built in preset`() {
+        val state = HuaweiFreeClip2Controller.parseSoundEffectState(
+            hex(FREEBUDS6I_CUSTOM_EQ_STATE),
+        )
+
+        requireNotNull(state)
+        assertEquals(FreeClip2SoundEffect.CUSTOM, state.effect)
+        assertEquals(0x64, state.equalizer?.selectedId)
+        assertEquals("全频校准", state.equalizer?.selectedName)
+        assertEquals(
+            listOf(40, 20, 10, 0, 10, 35, 25, 0, 10, 20),
+            state.equalizer?.selectedGains,
+        )
     }
 
     @Test
@@ -154,6 +175,20 @@ class HuaweiFreeClip2ControllerTest {
     }
 
     @Test
+    fun `AAM spatial write and state report values use one verified mapping`() {
+        assertEquals(1, FreeClip2SpatialAudioMode.FIXED.protocolValue)
+        assertEquals(2, FreeClip2SpatialAudioMode.HEAD_TRACKING.protocolValue)
+        assertEquals(
+            FreeClip2SpatialAudioMode.FIXED,
+            FreeClip2SpatialAudioMode.fromStateReportValue(1),
+        )
+        assertEquals(
+            FreeClip2SpatialAudioMode.HEAD_TRACKING,
+            FreeClip2SpatialAudioMode.fromStateReportValue(2),
+        )
+    }
+
+    @Test
     fun `packets are returned as defensive copies`() {
         val first = FreeClip2SpatialAudioMode.FIXED.packet()
         first[0] = 0
@@ -186,4 +221,13 @@ class HuaweiFreeClip2ControllerTest {
     private fun hex(value: String): ByteArray = value.chunked(2)
         .map { it.toInt(16).toByte() }
         .toByteArray()
+
+    private companion object {
+        const val FREEBUDS6I_CUSTOM_EQ_STATE =
+            "5A00A9002B4A01010102016403040102030904010105010A060A28140A000A2319000A14" +
+                "0718E585A8E9A291E6A0A1E58786000000000000000000000000086C640A28140A000A" +
+                "2319000A14E585A8E9A291E6A0A1E58786000000000000000000000000650A2314EC0A" +
+                "0AECEC00323CE6B581E8A18CE9A38EE59091000000000000000000000000660A0A0A0A" +
+                "0A00F1F1001414E59D87E8A1A1E4BABAE5A3B0000000000000000000000000CA62"
+    }
 }

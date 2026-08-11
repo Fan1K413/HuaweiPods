@@ -41,7 +41,25 @@ class HuaweiAncLevelProfileTest {
     }
 
     @Test
-    fun `FreeBuds 6i and Pro 3 retain the existing four-level mapping`() {
+    fun `FreeBuds 6i maps official dynamic light balanced and deep values from capture`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+        val expected = listOf(
+            HuaweiAncLevelOption(HuaweiAncLevel.ADAPTIVE, protocolValue = 0x03, miuiValue = 0x03),
+            HuaweiAncLevelOption(HuaweiAncLevel.LIGHT, protocolValue = 0x01, miuiValue = 0x01),
+            HuaweiAncLevelOption(HuaweiAncLevel.BALANCED, protocolValue = 0x00, miuiValue = 0x00),
+            HuaweiAncLevelOption(HuaweiAncLevel.DEEP, protocolValue = 0x02, miuiValue = 0x02),
+        )
+
+        assertEquals(expected, route.ancLevelOptions)
+        assertEquals(0x03, route.defaultAncSubMode)
+        expected.forEach { option ->
+            assertEquals(option.protocolValue, route.ancSubModeForMiuiLevel(option.miuiValue))
+            assertEquals(option.miuiValue, route.miuiLevelForAncSubMode(option.protocolValue))
+        }
+    }
+
+    @Test
+    fun `Pro 3 and 7i retain their existing four-level mapping`() {
         val expected = listOf(
             HuaweiAncLevelOption(HuaweiAncLevel.ADAPTIVE, protocolValue = 0x01, miuiValue = 0x03),
             HuaweiAncLevelOption(HuaweiAncLevel.LIGHT, protocolValue = 0x00, miuiValue = 0x01),
@@ -50,8 +68,8 @@ class HuaweiAncLevelProfileTest {
         )
 
         listOf(
-            HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
             HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
+            HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
         ).forEach { route ->
             assertEquals(route.name, expected, route.ancLevelOptions)
             assertEquals(route.name, 0x01, route.defaultAncSubMode)

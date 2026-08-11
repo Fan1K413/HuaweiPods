@@ -113,16 +113,16 @@ class HuaweiHfpAncStateTest {
     @Test
     fun `invalid FreeBuds 6i submodes fall back to previous valid state then model default`() {
         assertEquals(
-            HuaweiAncLevel.DEEP.protocolValue,
+            0x02,
             normalizeHuaweiAncSubMode(
                 HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
                 NoiseControlMode.NOISE_CANCELLATION,
                 0x7F,
-                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, HuaweiAncLevel.DEEP.protocolValue),
+                HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x02),
             ),
         )
         assertEquals(
-            HuaweiAncLevel.ADAPTIVE.protocolValue,
+            0x03,
             normalizeHuaweiAncSubMode(
                 HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
                 NoiseControlMode.NOISE_CANCELLATION,
@@ -159,6 +159,46 @@ class HuaweiHfpAncStateTest {
                 NoiseControlMode.TRANSPARENCY,
                 0x7F,
                 offState,
+            ),
+        )
+    }
+
+    @Test
+    fun `modern FreeBuds use generic FF only when entering a different mode`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREEBUDS6I
+        assertEquals(
+            0xFF,
+            huaweiAncCommandSubMode(
+                route,
+                NoiseControlMode.NOISE_CANCELLATION,
+                normalizedSubMode = 0x03,
+                previousState = offState,
+            ),
+        )
+        assertEquals(
+            0xFF,
+            huaweiAncCommandSubMode(
+                route,
+                NoiseControlMode.TRANSPARENCY,
+                normalizedSubMode = 0x02,
+                previousState = HuaweiAncState(NoiseControlMode.NOISE_CANCELLATION, 0x03),
+            ),
+        )
+        assertEquals(
+            0x01,
+            huaweiAncCommandSubMode(
+                route,
+                NoiseControlMode.TRANSPARENCY,
+                normalizedSubMode = 0x01,
+                previousState = HuaweiAncState(NoiseControlMode.TRANSPARENCY, 0x02),
+            ),
+        )
+        assertNull(
+            huaweiAncCommandSubMode(
+                route,
+                NoiseControlMode.OFF,
+                normalizedSubMode = null,
+                previousState = HuaweiAncState(NoiseControlMode.TRANSPARENCY, 0x02),
             ),
         )
     }

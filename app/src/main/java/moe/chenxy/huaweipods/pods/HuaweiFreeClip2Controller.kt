@@ -44,21 +44,48 @@ object HuaweiFreeClip2Controller {
         device: BluetoothDevice,
         mode: FreeClip2SpatialAudioMode,
         onComplete: ((Boolean) -> Unit)? = null,
-    ) = send(context, device, mode.packet(), "freeclip2 spatial mode=${mode.extraValue}", onComplete)
+        onState: ((FreeClip2AudioState?) -> Unit)? = null,
+    ) = transact(
+        context = context,
+        device = device,
+        packet = mode.packet(),
+        description = "freeclip2 spatial mode=${mode.extraValue}",
+        parser = ::parseSpatialAudioState,
+        onComplete = onComplete,
+        onState = onState,
+    )
 
     fun setSpatialScene(
         context: Context,
         device: BluetoothDevice,
         scene: FreeClip2SpatialScene,
         onComplete: ((Boolean) -> Unit)? = null,
-    ) = send(context, device, scene.packet(), "freeclip2 spatial scene=${scene.extraValue}", onComplete)
+        onState: ((FreeClip2AudioState?) -> Unit)? = null,
+    ) = transact(
+        context = context,
+        device = device,
+        packet = scene.packet(),
+        description = "freeclip2 spatial scene=${scene.extraValue}",
+        parser = ::parseSpatialAudioState,
+        onComplete = onComplete,
+        onState = onState,
+    )
 
     fun setSoundEffect(
         context: Context,
         device: BluetoothDevice,
         effect: FreeClip2SoundEffect,
         onComplete: ((Boolean) -> Unit)? = null,
-    ) = send(context, device, effect.packet(), "freeclip2 sound effect=${effect.extraValue}", onComplete)
+        onState: ((FreeClip2AudioState?) -> Unit)? = null,
+    ) = transact(
+        context = context,
+        device = device,
+        packet = effect.packet(),
+        description = "freeclip2 sound effect=${effect.extraValue}",
+        parser = ::parseSoundEffectState,
+        onComplete = onComplete,
+        onState = onState,
+    )
 
     fun requestSpatialAudioState(
         context: Context,
@@ -105,7 +132,7 @@ object HuaweiFreeClip2Controller {
             if (marker < 0 || marker + SPATIAL_AUDIO_RESPONSE_SIZE > frame.size - CHECKSUM_SIZE) {
                 return@forEach
             }
-            val mode = FreeClip2SpatialAudioMode.fromProtocolValue(frame.u8(marker + 7))
+            val mode = FreeClip2SpatialAudioMode.fromStateReportValue(frame.u8(marker + 7))
                 ?: return@forEach
             val scene = FreeClip2SpatialScene.fromProtocolValue(frame.u8(marker + 10))
                 ?: return@forEach
@@ -116,6 +143,13 @@ object HuaweiFreeClip2Controller {
 
     /** Parses the latest verified built-in sound-effect frame from a concatenated RFCOMM read. */
     fun parseSoundEffectState(stream: ByteArray): FreeClip2AudioState? {
+        HuaweiEqualizerCodec.parseState(stream)?.let { equalizer ->
+            val effect = FreeClip2SoundEffect.fromProtocolValue(equalizer.selectedId)
+                ?: FreeClip2SoundEffect.CUSTOM.takeIf { equalizer.isCustom }
+            if (effect != null) {
+                return FreeClip2AudioState(effect = effect, equalizer = equalizer)
+            }
+        }
         var latest: FreeClip2AudioState? = null
         frames(stream).forEach { frame ->
             if (frame.u8OrNull(4) != 0x2B || frame.u8OrNull(5) != 0x4A) return@forEach
@@ -153,12 +187,39 @@ object HuaweiFreeClip2Controller {
             onComplete = onComplete,
         )
     }
+
+    private fun transact(
+        context: Context,
+        device: BluetoothDevice,
+        packet: ByteArray,
+        description: String,
+        parser: (ByteArray) -> FreeClip2AudioState?,
+        onComplete: ((Boolean) -> Unit)?,
+        onState: ((FreeClip2AudioState?) -> Unit)?,
+    ) {
+        if (onState == null) {
+            send(context, device, packet, description, onComplete)
+            return
+        }
+        HuaweiL2capAncController.requestRawPacketOnce(
+            context = context,
+            device = device,
+            route = HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            packet = packet.copyOf(),
+            description = description,
+            responseWindowMs = 1_000L,
+            responseComplete = { parser(it) != null },
+            onComplete = onComplete,
+            onResponse = { onState(parser(it)) },
+        )
+    }
 }
 
 data class FreeClip2AudioState(
     val mode: FreeClip2SpatialAudioMode? = null,
     val scene: FreeClip2SpatialScene? = null,
     val effect: FreeClip2SoundEffect? = null,
+    val equalizer: HuaweiEqualizerState? = null,
 )
 
 fun mergeFreeClip2AudioState(
@@ -171,6 +232,7 @@ fun mergeFreeClip2AudioState(
         mode = update.mode ?: current.mode,
         scene = update.scene ?: current.scene,
         effect = update.effect ?: current.effect,
+        equalizer = update.equalizer ?: current.equalizer,
     )
 }
 
@@ -224,6 +286,10 @@ enum class FreeClip2BooleanFeature(
         (if (enabled) enabledPacket else disabledPacket).copyOf()
 }
 
+/**
+ * 耳机 AAM 空间音频协议：0=关闭、1=固定、2=头部跟踪。
+ * 智慧音频的独立 MBB API 使用另一套枚举，转换只允许发生在桥接策略中。
+ */
 enum class FreeClip2SpatialAudioMode(
     val extraValue: String,
     val protocolValue: Int,
@@ -241,6 +307,14 @@ enum class FreeClip2SpatialAudioMode(
 
         fun fromProtocolValue(value: Int): FreeClip2SpatialAudioMode? =
             entries.firstOrNull { it.protocolValue == value }
+
+        /** 耳机 AAM 状态回报与写命令一致：1=固定、2=头部跟踪。 */
+        fun fromStateReportValue(value: Int): FreeClip2SpatialAudioMode? = when (value) {
+            0 -> OFF
+            1 -> FIXED
+            2 -> HEAD_TRACKING
+            else -> null
+        }
     }
 }
 
@@ -268,21 +342,30 @@ enum class FreeClip2SpatialScene(
 enum class FreeClip2SoundEffect(
     val extraValue: String,
     val protocolValue: Int,
-    private val packetBytes: ByteArray,
+    private val packetBytes: ByteArray?,
 ) {
     DEFAULT("default", 0x01, hex("5A0006002B490101012F1A")),
     SPORT_ENHANCE("sport_enhance", 0x0A, hex("5A0006002B4901010A9E71")),
     TREBLE_ENHANCE("treble_enhance", 0x03, hex("5A0006002B490101030F58")),
-    CLEAR_VOICE("clear_voice", 0x09, hex("5A0006002B49010109AE12"));
+    CLEAR_VOICE("clear_voice", 0x09, hex("5A0006002B49010109AE12")),
+    /** 官方 App 的自定义或模块尚未提供的音效；只读展示，不能作为写命令。 */
+    CUSTOM("custom", -1, null);
 
-    fun packet(): ByteArray = packetBytes.copyOf()
+    val isSelectable: Boolean
+        get() = packetBytes != null
+
+    fun packet(): ByteArray = requireNotNull(packetBytes) {
+        "The custom/unsupported sound effect has no writable packet"
+    }.copyOf()
 
     companion object {
+        val selectableEntries: List<FreeClip2SoundEffect> = entries.filter { it.isSelectable }
+
         fun fromExtraValue(value: String?): FreeClip2SoundEffect? =
             entries.firstOrNull { it.extraValue == value }
 
         fun fromProtocolValue(value: Int): FreeClip2SoundEffect? =
-            entries.firstOrNull { it.protocolValue == value }
+            selectableEntries.firstOrNull { it.protocolValue == value }
     }
 }
 

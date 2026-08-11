@@ -14,10 +14,15 @@ import org.junit.Test
 class HuaweiGestureControlsTest {
     @Test
     fun `layout exposes only verified controls for each route`() {
+        val freeBuds6i = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I)
         assertEquals(
             listOf(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureKind.TRIPLE_TAP),
-            huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS6I).tapKinds,
+            freeBuds6i.tapKinds,
         )
+        assertTrue(freeBuds6i.hasSwipe)
+        assertTrue(freeBuds6i.hasModernLongPressControls)
+        assertFalse(freeBuds6i.hasModernSwipeVolumeToggle)
+        assertTrue(freeBuds6i.hasWearDetection)
 
         val freeClip2 = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREECLIP2)
         assertEquals(
@@ -32,6 +37,8 @@ class HuaweiGestureControlsTest {
 
         val pro3 = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3)
         assertTrue(pro3.hasModernLongPressControls)
+        assertTrue(pro3.hasModernSwipeVolumeToggle)
+        assertTrue(pro3.hasWearDetection)
 
         val freeBuds7i = huaweiGestureControlLayout(HuaweiDeviceRoute.HUAWEI_FREEBUDS7I)
         assertEquals(
@@ -39,6 +46,7 @@ class HuaweiGestureControlsTest {
             freeBuds7i.tapKinds,
         )
         assertTrue(freeBuds7i.hasModernLongPressControls)
+        assertTrue(freeBuds7i.hasModernSwipeVolumeToggle)
     }
 
     @Test

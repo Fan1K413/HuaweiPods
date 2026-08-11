@@ -31,6 +31,8 @@ fun SettingsPage(
     onLogLevelChange: (Int) -> Unit = {},
     islandMode: MutableState<Int> = mutableStateOf(ConfigManager.ISLAND_MODE_OFFICIAL),
     onIslandModeChange: (Int) -> Unit = {},
+    lockscreenNotificationEnabled: MutableState<Boolean> = mutableStateOf(true),
+    onLockscreenNotificationEnabledChange: (Boolean) -> Unit = {},
     appLanguage: MutableState<Int> = mutableStateOf(AppLocale.SYSTEM),
     onAppLanguageChange: (Int) -> Unit = {},
     notificationClickAction: MutableState<Int> = mutableStateOf(ConfigManager.NOTIFICATION_CLICK_MODULE_POPUP),
@@ -53,7 +55,11 @@ fun SettingsPage(
         stringResource(R.string.log_level_basic),
         stringResource(R.string.log_level_debug),
     )
-    val islandModeValues = listOf(ConfigManager.ISLAND_MODE_NONE, ConfigManager.ISLAND_MODE_OFFICIAL, ConfigManager.ISLAND_MODE_MODULE)
+    val islandModeValues = listOf(
+        ConfigManager.ISLAND_MODE_NONE,
+        ConfigManager.ISLAND_MODE_OFFICIAL,
+        ConfigManager.ISLAND_MODE_MODULE,
+    )
     val islandModeOptions = listOf(
         stringResource(R.string.island_mode_none),
         stringResource(R.string.island_mode_official),
@@ -127,13 +133,18 @@ fun SettingsPage(
 
         item {
             Card(modifier = Modifier.padding(top = 12.dp)) {
-
                 OverlayDropdownPreference(
                     title = stringResource(R.string.island_mode),
                     summary = stringResource(R.string.island_mode_summary),
                     items = islandModeOptions,
                     selectedIndex = islandModeValues.indexOf(islandMode.value).coerceAtLeast(0),
-                    onSelectedIndexChange = { onIslandModeChange(islandModeValues[it]) }
+                    onSelectedIndexChange = { onIslandModeChange(islandModeValues[it]) },
+                )
+                SwitchPreference(
+                    title = stringResource(R.string.lockscreen_notification),
+                    summary = stringResource(R.string.lockscreen_notification_summary),
+                    checked = lockscreenNotificationEnabled.value,
+                    onCheckedChange = onLockscreenNotificationEnabledChange,
                 )
                 OverlayDropdownPreference(
                     title = stringResource(R.string.notification_click_action),

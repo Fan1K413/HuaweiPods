@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import com.xzakota.hyper.notification.focus.FocusNotification
 import moe.chenxy.huaweipods.hook.Log
+import moe.chenxy.huaweipods.config.ConfigManager
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 
 @SuppressLint("NotificationPermission", "WrongConstant")
@@ -32,6 +33,7 @@ object FocusIslandUtil {
         address: String,
     ): Boolean {
         try {
+            if (!ConfigManager.superIslandEnabled()) return false
             val leftConnected = batteryParams.left?.isConnected == true
             val rightConnected = batteryParams.right?.isConnected == true
 
@@ -59,6 +61,13 @@ object FocusIslandUtil {
                     setSound(null, null)
                     enableVibration(false)
                     setAllowBubbles(true)
+                    setLockscreenVisibility(
+                        if (ConfigManager.lockscreenNotificationEnabled()) {
+                            Notification.VISIBILITY_PUBLIC
+                        } else {
+                            Notification.VISIBILITY_SECRET
+                        },
+                    )
                 }
             )
 
@@ -116,6 +125,13 @@ object FocusIslandUtil {
                 .setContentTitle("HuaweiPods")
                 .setContentText(contentText)
                 .setTicker("HuaweiPods")
+                .setVisibility(
+                    if (ConfigManager.lockscreenNotificationEnabled()) {
+                        Notification.VISIBILITY_PUBLIC
+                    } else {
+                        Notification.VISIBILITY_SECRET
+                    },
+                )
                 .addExtras(extras)
                 .build()
 

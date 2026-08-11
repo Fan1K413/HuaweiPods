@@ -9,7 +9,18 @@ internal data class HuaweiAncLevelOption(
     val miuiValue: Int,
 )
 
-private val fourLevelAncOptions = listOf(
+/**
+ * FreeBuds 6i 实机抓包与官方控件实现共同确认：智慧动态=3、轻度=1、均衡=0、深度=2。
+ * MIUI 菜单恰好使用相同的四个值，因此这里不能复用 Pro 3/7i 的既有映射。
+ */
+private val freeBuds6iAncOptions = listOf(
+    HuaweiAncLevelOption(HuaweiAncLevel.ADAPTIVE, protocolValue = 0x03, miuiValue = 0x03),
+    HuaweiAncLevelOption(HuaweiAncLevel.LIGHT, protocolValue = 0x01, miuiValue = 0x01),
+    HuaweiAncLevelOption(HuaweiAncLevel.BALANCED, protocolValue = 0x00, miuiValue = 0x00),
+    HuaweiAncLevelOption(HuaweiAncLevel.DEEP, protocolValue = 0x02, miuiValue = 0x02),
+)
+
+private val pro3AndFreeBuds7iAncOptions = listOf(
     HuaweiAncLevelOption(HuaweiAncLevel.ADAPTIVE, protocolValue = 0x01, miuiValue = 0x03),
     HuaweiAncLevelOption(HuaweiAncLevel.LIGHT, protocolValue = 0x00, miuiValue = 0x01),
     HuaweiAncLevelOption(HuaweiAncLevel.BALANCED, protocolValue = 0x02, miuiValue = 0x00),
@@ -25,10 +36,10 @@ private val freeBuds5AncOptions = listOf(
 internal val HuaweiDeviceRoute.ancLevelOptions: List<HuaweiAncLevelOption>
     get() = when (this) {
         HuaweiDeviceRoute.HUAWEI_FREEBUDS5 -> freeBuds5AncOptions
-        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I,
+        HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> freeBuds6iAncOptions
         HuaweiDeviceRoute.HUAWEI_FREEBUDS_PRO3,
         HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
-        -> fourLevelAncOptions
+        -> pro3AndFreeBuds7iAncOptions
         else -> emptyList()
     }
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,10 @@ import moe.chenxy.huaweipods.pods.FreeBuds7iDualDevice
 import moe.chenxy.huaweipods.pods.FreeBuds7iSettingsState
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
 import moe.chenxy.huaweipods.pods.HuaweiFreeBuds7iController
+import moe.chenxy.huaweipods.pods.HuaweiEqualizerCodec
+import moe.chenxy.huaweipods.pods.HuaweiEqualizerController
+import moe.chenxy.huaweipods.pods.HuaweiEqualizerState
+import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.mergeFreeBuds7iSettingsState
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
@@ -148,7 +153,12 @@ fun FreeBuds7iControls(address: String) {
                 }
             },
         )
-        FreeBuds7iEqualizerPreference(address, prefs, prefix)
+        HuaweiEqualizerPreference(
+            address = address,
+            route = HuaweiDeviceRoute.HUAWEI_FREEBUDS7I,
+            readback = state.equalizer,
+            requestOnMount = false,
+        )
         FreeBuds7iFeatureToggle(
             titleRes = R.string.freebuds7i_high_quality_audio,
             value = state.highQualityAudio,
@@ -292,41 +302,79 @@ private fun <T> FreeBuds7iChoicePreference(
 }
 
 @Composable
-private fun FreeBuds7iEqualizerPreference(
+internal fun HuaweiEqualizerPreference(
     address: String,
-    prefs: SharedPreferences,
-    prefix: String,
+    route: HuaweiDeviceRoute,
+    readback: HuaweiEqualizerState? = null,
+    requestOnMount: Boolean = true,
+    editable: Boolean = HuaweiEqualizerCodec.customWriteOperation(route) != null ||
+        route == HuaweiDeviceRoute.HUAWEI_FREECLIP2,
 ) {
     val context = LocalContext.current
+    val prefs = remember(context) {
+        context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
+    }
+    val prefix = remember(address) { "huawei_eq_${address.uppercase().ifBlank { "unknown" }}_" }
     val stored = remember(address) { readEqualizerGains(prefs, prefix) }
     var gains by remember(address) { mutableStateOf(stored) }
     var editing by remember(address) { mutableStateOf(stored) }
+    var currentState by remember(address) { mutableStateOf(readback) }
     var showDialog by remember(address) { mutableStateOf(false) }
     var pending by remember(address) { mutableStateOf(false) }
+
+    LaunchedEffect(readback) {
+        readback?.let { state ->
+            currentState = state
+            state.selectedGains?.takeIf { it.size == HuaweiEqualizerCodec.BAND_COUNT }?.let {
+                gains = it
+                editing = it
+                prefs.edit().putString(prefix + "equalizer", it.joinToString(",")).apply()
+            }
+        }
+    }
+    DisposableEffect(address, route, requestOnMount) {
+        if (!requestOnMount) return@DisposableEffect onDispose { }
+        val device = context.freeBuds7iDevice(address)
+            ?: return@DisposableEffect onDispose { }
+        var disposed = false
+        HuaweiEqualizerController.requestState(context, device, route) { state ->
+            if (!disposed && state != null) {
+                currentState = state
+                state.selectedGains?.takeIf { it.size == HuaweiEqualizerCodec.BAND_COUNT }?.let {
+                    gains = it
+                    editing = it
+                    prefs.edit().putString(prefix + "equalizer", it.joinToString(",")).apply()
+                }
+            }
+        }
+        onDispose { disposed = true }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(enabled = !pending, role = Role.Button) {
+            .clickable(enabled = editable && !pending, role = Role.Button) {
                 editing = gains
                 showDialog = true
             }
             .padding(horizontal = 24.dp, vertical = 14.dp),
     ) {
         Text(
-            stringResource(R.string.freebuds7i_custom_equalizer),
+            stringResource(R.string.huawei_equalizer_title),
             color = MiuixTheme.colorScheme.onSurface,
             style = MiuixTheme.textStyles.headline1,
         )
         Text(
-            stringResource(R.string.freebuds7i_custom_equalizer_summary),
+            currentState?.selectedName?.takeIf(String::isNotBlank)
+                ?: stringResource(R.string.huawei_equalizer_summary),
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             style = MiuixTheme.textStyles.body2,
         )
     }
     OverlayDialog(
-        title = stringResource(R.string.freebuds7i_custom_equalizer),
-        summary = stringResource(R.string.freebuds7i_custom_equalizer_summary),
+        title = stringResource(R.string.huawei_equalizer_title),
+        summary = currentState?.selectedName?.takeIf(String::isNotBlank)
+            ?: stringResource(R.string.huawei_equalizer_summary),
         show = showDialog,
         onDismissRequest = { if (!pending) showDialog = false },
     ) {
@@ -374,7 +422,7 @@ private fun FreeBuds7iEqualizerPreference(
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                     onClick = {
                         pending = true
-                        context.setFreeBuds7iCustomEqualizer(address, editing) { success ->
+                        val onComplete: (Boolean) -> Unit = { success ->
                             pending = false
                             if (success) {
                                 gains = editing
@@ -383,6 +431,24 @@ private fun FreeBuds7iEqualizerPreference(
                             } else {
                                 Toast.makeText(context, R.string.connect_failed, Toast.LENGTH_SHORT).show()
                             }
+                        }
+                        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+                            val selectedId = currentState?.selectedId
+                                ?.takeIf { it in 0x64..0x66 }
+                                ?: 0x64
+                            val presetName = currentState?.selectedName
+                                ?.takeIf(String::isNotBlank)
+                                ?: "HuaweiPods"
+                            SmartAudioEqualizerClient.setCustom(
+                                context = context,
+                                address = address,
+                                presetId = selectedId,
+                                name = presetName,
+                                gains = editing,
+                                complete = onComplete,
+                            )
+                        } else {
+                            context.setHuaweiCustomEqualizer(address, route, editing, onComplete)
                         }
                     },
                 )
@@ -571,13 +637,21 @@ private fun Context.setFreeBuds7iSoundEffect(
     HuaweiFreeBuds7iController.setSoundEffect(this, device, effect, complete)
 }
 
-private fun Context.setFreeBuds7iCustomEqualizer(
+private fun Context.setHuaweiCustomEqualizer(
     address: String,
+    route: HuaweiDeviceRoute,
     gains: List<Int>,
     complete: (Boolean) -> Unit,
 ) {
     val device = freeBuds7iDevice(address) ?: return complete(false)
-    HuaweiFreeBuds7iController.setCustomEqualizer(this, device, gains, onComplete = complete)
+    HuaweiEqualizerController.setCustom(
+        context = this,
+        device = device,
+        route = route,
+        gains = gains,
+        presetName = "HuaweiPods EQ",
+        onComplete = complete,
+    )
 }
 
 private fun persistFreeBuds7iState(

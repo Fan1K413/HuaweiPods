@@ -174,6 +174,35 @@ class OfficialSmartAudioResourceTest {
     }
 
     @Test
+    fun `accepts current FreeBuds Pro 5 CDN size drift`() {
+        val currentResources = listOf(
+            18_459_440L to 18_073,
+            26_107_560L to 25_571,
+            18_979_281L to 18_580,
+            15_892_453L to 15_566,
+            18_922_357L to 18_525,
+        )
+
+        currentResources.forEach { (actualBytes, declaredSizeKb) ->
+            assertTrue(
+                OfficialSmartAudioResource.isArchiveSizePlausible(actualBytes, declaredSizeKb),
+            )
+        }
+    }
+
+    @Test
+    fun `rejects archive sizes outside the bounded metadata tolerance`() {
+        assertFalse(OfficialSmartAudioResource.isArchiveSizePlausible(1_024L, 18_073))
+        assertFalse(OfficialSmartAudioResource.isArchiveSizePlausible(17_500_000L, 18_073))
+        assertFalse(
+            OfficialSmartAudioResource.isArchiveSizePlausible(
+                OfficialSmartAudioResource.MAX_ARCHIVE_BYTES + 1L,
+                18_073,
+            ),
+        )
+    }
+
+    @Test
     fun `allows only the fixed official host and path`() {
         assertTrue(OfficialSmartAudioResource.isAllowedUri(OfficialSmartAudioResource.configUri("000027")))
         assertFalse(

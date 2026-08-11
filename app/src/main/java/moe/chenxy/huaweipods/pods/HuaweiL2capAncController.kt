@@ -260,6 +260,8 @@ object HuaweiL2capAncController {
         packet: ByteArray,
         description: String,
         responseWindowMs: Long = 1_000L,
+        responseComplete: ((ByteArray) -> Boolean)? = null,
+        onComplete: ((Boolean) -> Unit)? = null,
         onResponse: (ByteArray) -> Unit,
     ) {
         enqueueWrite(
@@ -270,6 +272,8 @@ object HuaweiL2capAncController {
             description = description,
             keepSocket = false,
             responseWindowMs = responseWindowMs,
+            responseComplete = responseComplete,
+            onComplete = onComplete,
             onResponse = onResponse,
         )
     }

@@ -116,4 +116,101 @@ class FreeClip2AudioStateTrackerTest {
         assertNull(tracker.beginWrite(update, nowMs = 4_999L))
         requireNotNull(tracker.beginWrite(update, nowMs = 5_100L))
     }
+
+    @Test
+    fun `same transaction verified response confirms only its pending field`() {
+        val tracker = FreeClip2AudioStateTracker()
+        val token = requireNotNull(
+            tracker.beginWrite(
+                FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.FIXED),
+                nowMs = 100L,
+            ),
+        )
+
+        assertNull(
+            tracker.acceptWriteConfirmation(
+                token,
+                FreeClip2AudioState(effect = FreeClip2SoundEffect.DEFAULT),
+            ),
+        )
+        assertTrue(tracker.isPending(token))
+
+        val confirmed = tracker.acceptWriteConfirmation(
+            token,
+            FreeClip2AudioState(
+                mode = FreeClip2SpatialAudioMode.FIXED,
+                scene = FreeClip2SpatialScene.DEFAULT,
+            ),
+        )
+
+        assertEquals(FreeClip2SpatialAudioMode.FIXED, confirmed?.mode)
+        assertEquals(FreeClip2SpatialScene.DEFAULT, confirmed?.scene)
+        assertFalse(tracker.isPending(token))
+    }
+
+    @Test
+    fun `superseded write cannot be confirmed by an older bridge result`() {
+        val tracker = FreeClip2AudioStateTracker()
+        val old = requireNotNull(
+            tracker.beginWrite(
+                FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.FIXED),
+                nowMs = 100L,
+            ),
+        )
+        val latest = requireNotNull(
+            tracker.beginWrite(
+                FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.HEAD_TRACKING),
+                nowMs = 200L,
+            ),
+        )
+
+        assertNull(
+            tracker.acceptWriteConfirmation(
+                old,
+                FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.FIXED),
+            ),
+        )
+        assertTrue(tracker.isPending(latest))
+    }
+
+    @Test
+    fun `official external confirmation supersedes an older query`() {
+        val tracker = FreeClip2AudioStateTracker()
+        val staleQuery = tracker.beginQuery()
+
+        val confirmed = tracker.acceptExternalConfirmation(
+            FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.HEAD_TRACKING),
+        )
+
+        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, confirmed?.mode)
+        assertNull(
+            tracker.acceptQuery(
+                staleQuery,
+                FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.FIXED),
+            ),
+        )
+        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, tracker.confirmedState?.mode)
+    }
+
+    @Test
+    fun `official external confirmation clears only the observed pending field`() {
+        val tracker = FreeClip2AudioStateTracker()
+        requireNotNull(
+            tracker.beginWrite(
+                FreeClip2AudioState(effect = FreeClip2SoundEffect.DEFAULT),
+                nowMs = 100L,
+            ),
+        )
+
+        tracker.acceptExternalConfirmation(
+            FreeClip2AudioState(mode = FreeClip2SpatialAudioMode.FIXED),
+        )
+        assertEquals(FreeClip2SoundEffect.DEFAULT, tracker.pendingUpdate()?.effect)
+
+        val confirmed = tracker.acceptExternalConfirmation(
+            FreeClip2AudioState(effect = FreeClip2SoundEffect.CUSTOM),
+        )
+        assertEquals(FreeClip2SoundEffect.CUSTOM, confirmed?.effect)
+        assertNull(tracker.pendingUpdate())
+    }
 }

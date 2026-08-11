@@ -83,9 +83,15 @@ jobs:
             cp "$UNSIGNED_APK" "./$OUT_NAME"
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
+          RELEASE_NOTES=".github/release-notes/${VERSION_NAME}.md"
+          if [[ "$GITHUB_REF" == refs/tags/* ]] && [ ! -f "$RELEASE_NOTES" ]; then
+            echo "Release notes file not found: $RELEASE_NOTES" >&2
+            exit 1
+          fi
           echo "apk=$OUT_NAME" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "release_notes=$RELEASE_NOTES" >> "$GITHUB_OUTPUT"
 
       # Non-zipped artifact upload supported by GitHub Actions
       - name: Upload Release APK
@@ -103,5 +109,5 @@ jobs:
           token: ${{ github.token }}
           artifacts: "./${{ steps.sign.outputs.apk }}"
           name: ${{ steps.sign.outputs.version_name }}
-          generateReleaseNotes: true
+          bodyFile: ${{ steps.sign.outputs.release_notes }}
           makeLatest: true

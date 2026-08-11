@@ -107,6 +107,8 @@
     <string name="transparency_voice">Enhance voices</string>
     <string name="island_mode">Super Island</string>
     <string name="island_mode_summary">Choose which battery island is displayed</string>
+    <string name="lockscreen_notification">Lock screen notifications</string>
+    <string name="lockscreen_notification_summary">Allow the persistent headset notification to appear on the lock screen and AOD</string>
     <string name="island_mode_none">none</string>
     <string name="island_mode_official">System native (limited models)</string>
     <string name="island_mode_module">Module (recommended)</string>
@@ -123,6 +125,7 @@
     <string name="restart_scope_settings">Settings</string>
     <string name="restart_scope_milink_service">Interconnectivity Service</string>
     <string name="restart_scope_mi_bluetooth">Mi Bluetooth</string>
+    <string name="restart_scope_smart_audio">Smart Audio (spatial sync)</string>
     <string name="documentation_title">Documentation</string>
     <string name="documentation_load_failed">Documentation is unavailable</string>
     <string name="documentation_load_failed_summary">Check your connection and retry. Site pages stay in the app, while external links open in your browser.</string>
@@ -204,4 +207,6 @@
     <string name="onboarding_ready_pair">Pair the earphones in system Bluetooth settings first</string>
     <string name="onboarding_ready_model">Device identity is preferred; choose the model once only if detection fails</string>
     <string name="onboarding_ready_group">For help or testing, join QQ group %1$s</string>
+    <string name="huawei_equalizer_title">Custom equalizer</string>
+    <string name="huawei_equalizer_summary">Reads the current earphone curve before editing</string>
 </resources>
