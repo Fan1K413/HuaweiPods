@@ -62,6 +62,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
 @SuppressLint("MissingPermission")
@@ -91,6 +92,7 @@ object SettingsHeadsetHook : HookContext() {
     private const val PREFS_NAME = "huaweipods_milink_state"
     private const val PREF_DEVICE_ROUTE = "device_route"
     private const val SETTINGS_REFRESH_INTERVAL_MS = 5_000L
+    private const val SETTINGS_SCROLL_IDLE_DELAY_MS = 160L
     private const val SETTINGS_FREEBUDS_ANC_OPTIONS = "0100"
     private const val SETTINGS_FREEBUDS_SUPPORT_FLAGS = "000000000000000010000000"
     private const val HUAWEI_ANC_LEVEL_LAST = 8
@@ -151,7 +153,8 @@ object SettingsHeadsetHook : HookContext() {
     private val hiddenSettingsCapabilityViews = WeakHashMap<View, HiddenSettingsCapabilityView>()
     private val relabeledFreeBuds6iTransparencyTexts = WeakHashMap<TextView, CharSequence>()
     private val observedSettingsRoots = WeakHashMap<View, Boolean>()
-    private val pendingSettingsScrollPrunes = WeakHashMap<View, Boolean>()
+    private val pendingSettingsScrollPrunes = WeakHashMap<View, Runnable>()
+    private var huaweiSmartAudioLaunchIntent: Intent? = null
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var refreshLoopStarted = false
     private val refreshRunnable = object : Runnable {
@@ -1684,6 +1687,7 @@ object SettingsHeadsetHook : HookContext() {
     private fun schedulePruneFreeBudsUnsupportedViews(root: View?) {
         if (root == null) return
         observeSettingsScroll(root)
+        if (pendingSettingsScrollPrunes.containsKey(root)) return
         val expectedAddress = currentAddress?.takeIf(String::isNotBlank) ?: return
         val expectedRoute = currentHuaweiRoute()
         listOf(0L, 180L).forEach { delay ->
@@ -1701,13 +1705,21 @@ object SettingsHeadsetHook : HookContext() {
     private fun observeSettingsScroll(root: View) {
         if (observedSettingsRoots.put(root, true) == true) return
         root.viewTreeObserver.addOnScrollChangedListener {
-            if (!root.isAttachedToWindow || pendingSettingsScrollPrunes.put(root, true) == true) {
-                return@addOnScrollChangedListener
+            if (!root.isAttachedToWindow) return@addOnScrollChangedListener
+            val task = object : Runnable {
+                private val rootReference = WeakReference(root)
+
+                override fun run() {
+                    val target = rootReference.get() ?: return
+                    if (pendingSettingsScrollPrunes[target] !== this) return
+                    pendingSettingsScrollPrunes.remove(target)
+                    if (!target.isAttachedToWindow) return
+                    runCatching { pruneFreeBudsUnsupportedViews(target) }
+                        .onFailure { Log.w(TAG, "Settings prune after scroll failed", it) }
+                }
             }
-            root.postDelayed({
-                pendingSettingsScrollPrunes.remove(root)
-                if (root.isAttachedToWindow) schedulePruneFreeBudsUnsupportedViews(root)
-            }, 80L)
+            pendingSettingsScrollPrunes.put(root, task)?.let(root::removeCallbacks)
+            root.postDelayed(task, SETTINGS_SCROLL_IDLE_DELAY_MS)
         }
     }
 
@@ -1758,8 +1770,10 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun redirectMoreSettingsToHuaweiSmartAudio(root: View) {
-        val launchIntent = root.context.packageManager
-            .getLaunchIntentForPackage(HUAWEI_SMART_AUDIO_PACKAGE)
+        val launchIntent = huaweiSmartAudioLaunchIntent
+            ?: root.context.packageManager
+                .getLaunchIntentForPackage(HUAWEI_SMART_AUDIO_PACKAGE)
+                ?.also { huaweiSmartAudioLaunchIntent = it }
             ?: return
         val matches = mutableListOf<TextView>()
         collectExactTextMatches(root, moreSettingsKeywords, matches)
