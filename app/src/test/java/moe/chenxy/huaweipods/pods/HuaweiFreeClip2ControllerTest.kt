@@ -61,6 +61,75 @@ class HuaweiFreeClip2ControllerTest {
             "5A0005002B4A02008C46",
             HuaweiFreeClip2Controller.soundEffectStateQueryPacket(),
         )
+        val booleanQueries = mapOf(
+            FreeClip2BooleanFeature.WEAR_DETECTION to "5A0005002B110100772A",
+            FreeClip2BooleanFeature.DROP_REMINDER to "5A0008002BB40101070200DDE9",
+            FreeClip2BooleanFeature.ADAPTIVE_VOLUME to "5A0008002BB401010202003619",
+            FreeClip2BooleanFeature.HEAD_MOTION_CONTROL to "5A0006002BB401010B289B",
+            FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY to "5A0005002B8801009182",
+            FreeClip2BooleanFeature.LOW_LATENCY to "5A0005002B6C0200B820",
+            FreeClip2BooleanFeature.DUAL_DEVICE to "5A0005002B2F0100A98E",
+            FreeClip2BooleanFeature.CASE_PROMPT_SOUND to "5A0007002BB1020003007FAB",
+        )
+        booleanQueries.forEach { (feature, expected) ->
+            assertPacket(expected, feature.stateQueryPacket())
+        }
+    }
+
+    @Test
+    fun `parses current boolean feature states reported by the earbuds`() {
+        val enabledReports = mapOf(
+            FreeClip2BooleanFeature.WEAR_DETECTION to "5A0006002B11010101",
+            FreeClip2BooleanFeature.DROP_REMINDER to "5A0009002BB4010107020101",
+            FreeClip2BooleanFeature.ADAPTIVE_VOLUME to "5A0009002BB4010102020101",
+            FreeClip2BooleanFeature.HEAD_MOTION_CONTROL to "5A0009002BB401010B020101",
+            FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY to "5A0006002B88010101",
+            FreeClip2BooleanFeature.LOW_LATENCY to "5A0006002B6C020101",
+            FreeClip2BooleanFeature.DUAL_DEVICE to "5A0006002B2F010101",
+            FreeClip2BooleanFeature.CASE_PROMPT_SOUND to "5A0009002BB1020101030101",
+        )
+        enabledReports.forEach { (feature, report) ->
+            assertEquals(
+                true,
+                HuaweiFreeClip2Controller.parseBooleanFeatureState(feature, frameWithCrc(report)),
+            )
+        }
+
+        val disabledWear = frameWithCrc("5A0006002B11010100")
+        val enabledWear = frameWithCrc("5A0006002B11010101")
+        val unknownWear = frameWithCrc("5A0006002B1101017F")
+        assertEquals(
+            true,
+            HuaweiFreeClip2Controller.parseBooleanFeatureState(
+                FreeClip2BooleanFeature.WEAR_DETECTION,
+                disabledWear + enabledWear + unknownWear,
+            ),
+        )
+    }
+
+    @Test
+    fun `rejects unrelated malformed or unknown boolean feature reports`() {
+        assertNull(
+            HuaweiFreeClip2Controller.parseBooleanFeatureState(
+                FreeClip2BooleanFeature.DROP_REMINDER,
+                frameWithCrc("5A0009002BB4010102020101"),
+            ),
+        )
+        assertNull(
+            HuaweiFreeClip2Controller.parseBooleanFeatureState(
+                FreeClip2BooleanFeature.LOW_LATENCY,
+                frameWithCrc("5A0006002B6C02017F"),
+            ),
+        )
+        val badCrc = frameWithCrc("5A0006002B2F010101").also {
+            it[it.lastIndex] = (it.last().toInt() xor 0x01).toByte()
+        }
+        assertNull(
+            HuaweiFreeClip2Controller.parseBooleanFeatureState(
+                FreeClip2BooleanFeature.DUAL_DEVICE,
+                badCrc,
+            ),
+        )
     }
 
     @Test
@@ -171,6 +240,9 @@ class HuaweiFreeClip2ControllerTest {
         }
         FreeClip2SoundEffect.entries.forEach {
             assertEquals(it, FreeClip2SoundEffect.fromExtraValue(it.extraValue))
+        }
+        FreeClip2BooleanFeature.entries.forEach {
+            assertEquals(it, FreeClip2BooleanFeature.fromExtraValue(it.extraValue))
         }
     }
 

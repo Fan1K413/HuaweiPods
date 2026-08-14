@@ -2,9 +2,13 @@
 <resources>
     <string name="freeclip2_smart_features">Smart features</string>
     <string name="freeclip2_wear_detection">Wear detection</string>
+    <string name="freeclip2_wear_detection_summary">Pause when removed and resume when worn again</string>
     <string name="freeclip2_drop_reminder">Drop reminder</string>
+    <string name="freeclip2_drop_reminder_summary">Alert you when an earbud falls</string>
     <string name="freeclip2_adaptive_volume">Adaptive volume</string>
+    <string name="freeclip2_adaptive_volume_summary">Adjust playback volume based on ambient noise</string>
     <string name="freeclip2_head_motion">Head motion control</string>
+    <string name="freeclip2_head_motion_summary">Control calls by nodding or shaking your head</string>
     <string name="freeclip2_spatial_audio">Spatial audio</string>
     <string name="freeclip2_audio_settings">Sound effect</string>
     <string name="freeclip2_spatial_mode">Spatial audio mode</string>
@@ -24,8 +28,15 @@
     <string name="freeclip2_sound_effect_clear_voice">Clear voice</string>
     <string name="freeclip2_sound_effect_custom">Official/custom effect</string>
     <string name="freeclip2_sound_quality_priority">Prioritize sound quality</string>
+    <string name="freeclip2_sound_quality_priority_summary">Prefer higher-quality Bluetooth audio transmission</string>
     <string name="freeclip2_low_latency">Low latency mode</string>
+    <string name="freeclip2_low_latency_summary">Reduce audio delay for games and similar scenarios</string>
     <string name="freeclip2_dual_device">Dual-device connection</string>
+    <string name="freeclip2_dual_device_summary">Allow the earbuds to connect to two devices at once</string>
     <string name="freeclip2_case_prompt_sound">Case prompt sound</string>
+    <string name="freeclip2_case_prompt_sound_summary">Control charging-case opening and charging sounds</string>
+    <string name="freeclip2_state_loading">Reading current state…</string>
+    <string name="freeclip2_state_applying">Applying…</string>
+    <string name="freeclip2_state_failed">Couldn’t read or apply the setting. Try again.</string>
     <string name="freeclip2_state_hint">Low latency is reapplied after every connection when enabled. Other unreadable switches still reflect the last value set by this module.</string>
 </resources>

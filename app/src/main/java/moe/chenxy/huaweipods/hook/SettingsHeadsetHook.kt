@@ -15,17 +15,18 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.ResultReceiver
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.TextView
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.PodImageChangeNotifier
 import moe.chenxy.huaweipods.config.PodImagePrefs
+import moe.chenxy.huaweipods.pods.FreeClip2BooleanFeature
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.NoiseControlMode
@@ -63,6 +64,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import java.lang.ref.WeakReference
+import java.lang.reflect.Proxy
 import java.util.WeakHashMap
 
 @SuppressLint("MissingPermission")
@@ -106,6 +108,12 @@ object SettingsHeadsetHook : HookContext() {
     private const val SETTINGS_HUAWEI_ANC_SELECTOR_TAG = "huaweipods_settings_anc_selector"
     private const val SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG =
         "huaweipods_settings_freeclip2_audio_controls"
+    private const val SETTINGS_FREECLIP2_SMART_CATEGORY_KEY =
+        "huaweipods_freeclip2_smart_category"
+    private const val SETTINGS_FREECLIP2_SOUND_CATEGORY_KEY =
+        "huaweipods_freeclip2_sound_category"
+    private const val SETTINGS_FREECLIP2_FEATURE_KEY_PREFIX =
+        "huaweipods_freeclip2_feature_"
     private const val HUAWEI_SMART_AUDIO_PACKAGE = "com.huawei.smartaudio"
     private val moreSettingsKeywords = listOf("更多设置", "More settings")
     private val gestureEntryKeywords = listOf(
@@ -113,6 +121,18 @@ object SettingsHeadsetHook : HookContext() {
         "手势控制",
         "Gesture control",
         "Gestures",
+    )
+    private val freeClip2SmartFeatures = listOf(
+        FreeClip2BooleanFeature.WEAR_DETECTION,
+        FreeClip2BooleanFeature.DROP_REMINDER,
+        FreeClip2BooleanFeature.ADAPTIVE_VOLUME,
+        FreeClip2BooleanFeature.HEAD_MOTION_CONTROL,
+    )
+    private val freeClip2SoundFeatures = listOf(
+        FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY,
+        FreeClip2BooleanFeature.LOW_LATENCY,
+        FreeClip2BooleanFeature.DUAL_DEVICE,
+        FreeClip2BooleanFeature.CASE_PROMPT_SOUND,
     )
     private val ancLevelKeywords = listOf("自适应", "智能", "轻度", "均衡", "深度", "Smart", "Adaptive", "Light", "Medium", "Deep")
     private val ancLevelAnchorKeywords = listOf("轻度", "均衡", "深度", "Light", "Medium", "Deep")
@@ -142,6 +162,10 @@ object SettingsHeadsetHook : HookContext() {
     private var currentHuaweiAncLevel = UNKNOWN_HUAWEI_ANC_SUBMODE
     private var currentTransparencySubMode = 0x02
     private var currentFreeClip2AudioState = FreeClip2AudioUiState()
+    private val currentFreeClip2FeatureStates = linkedMapOf<FreeClip2BooleanFeature, Boolean>()
+    private val confirmedFreeClip2Features = linkedSetOf<FreeClip2BooleanFeature>()
+    private val pendingFreeClip2Features = linkedSetOf<FreeClip2BooleanFeature>()
+    private val failedFreeClip2Features = linkedSetOf<FreeClip2BooleanFeature>()
     private val freeClip2AudioPendingGate = FreeClip2AudioPendingGate()
     private val settingsAncPendingGate = SettingsAncPendingGate()
     private var settingsAncInternalRenderDepth = 0
@@ -156,6 +180,12 @@ object SettingsHeadsetHook : HookContext() {
     private val pendingSettingsScrollPrunes = WeakHashMap<View, Runnable>()
     private var huaweiSmartAudioLaunchIntent: Intent? = null
     private val refreshHandler = Handler(Looper.getMainLooper())
+    private val freeClip2FeatureResultReceiver = object : ResultReceiver(refreshHandler) {
+        override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+            val data = resultData ?: return
+            handleFreeClip2FeatureState(Intent().putExtras(data))
+        }
+    }
     private var refreshLoopStarted = false
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -435,11 +465,26 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookFragmentState() {
         runCatching {
+            hookAfter(
+                findMethod(
+                    "com.android.settings.bluetooth.MiuiHeadsetFragment",
+                    "onCreate",
+                    Bundle::class.java,
+                ),
+            ) {
+                if (!isHuaweiFragment(instance)) return@hookAfter
+                instance?.let { headsetFragments[it] = true }
+                installFreeClip2FeaturePreferences(instance)
+            }
+        }.onFailure { Log.w(TAG, "hook MiuiHeadsetFragment.onCreate skipped", it) }
+
+        runCatching {
             hookAfter(findMethodByParamCount("com.android.settings.bluetooth.MiuiHeadsetFragment", "onCreateView", 3)) {
                 registerStatusReceiver(runCatching { getObjectField(instance, "mActivity") as? Context }.getOrNull())
                 Log.d(TAG, "Fragment.onCreateView after ${fragmentDebug(instance)} isHuawei=${isHuaweiFragment(instance)}")
                 if (!isHuaweiFragment(instance)) return@hookAfter
                 instance?.let { headsetFragments[it] = true }
+                installFreeClip2FeaturePreferences(instance)
                 schedulePruneFreeBudsUnsupportedViews(result as? View)
                 requestBluetoothStatus("fragment-create")
                 startPeriodicRefresh()
@@ -790,6 +835,39 @@ object SettingsHeadsetHook : HookContext() {
         Log.d(TAG, "registered status receiver context=$context")
     }
 
+    private fun handleFreeClip2FeatureState(receivedIntent: Intent) {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+            !targetsCurrentHuaweiDevice(receivedIntent)
+        ) {
+            return
+        }
+        if (!rememberSupportedDevice(receivedIntent)) return
+        val feature = FreeClip2BooleanFeature.fromExtraValue(
+            receivedIntent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE),
+        ) ?: return
+        pendingFreeClip2Features.remove(feature)
+        val success = receivedIntent.getBooleanExtra(
+            HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_SUCCESS,
+            false,
+        )
+        if (receivedIntent.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_ENABLED)) {
+            currentFreeClip2FeatureStates[feature] = receivedIntent.getBooleanExtra(
+                HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_ENABLED,
+                false,
+            )
+            confirmedFreeClip2Features.add(feature)
+            saveCurrentFreeClip2FeatureState(context, feature)
+            if (success) {
+                failedFreeClip2Features.remove(feature)
+            } else {
+                failedFreeClip2Features.add(feature)
+            }
+        } else {
+            failedFreeClip2Features.add(feature)
+        }
+        updateFreeClip2FeaturePreferences()
+    }
+
     private fun requestBluetoothStatus(reason: String) {
         val ctx = context ?: return
         listOf(HuaweiPodsAction.ACTION_PODS_UI_INIT, HuaweiPodsAction.ACTION_REFRESH_STATUS).forEach { action ->
@@ -799,6 +877,7 @@ object SettingsHeadsetHook : HookContext() {
             })
         }
         requestFreeClip2AudioState(reason)
+        requestFreeClip2FeatureStates(reason)
         Log.d(TAG, "requested bluetooth status reason=$reason")
     }
 
@@ -819,6 +898,34 @@ object SettingsHeadsetHook : HookContext() {
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
         Log.d(TAG, "FreeClip 2 audio state requested reason=$reason address=$address")
+    }
+
+    private fun requestFreeClip2FeatureStates(reason: String) {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        if (reason == "settings-periodic" &&
+            confirmedFreeClip2Features.size == FreeClip2BooleanFeature.entries.size
+        ) {
+            return
+        }
+        val ctx = context ?: return
+        val address = currentAddress?.takeIf(String::isNotBlank) ?: run {
+            Log.w(TAG, "FreeClip 2 feature refresh skipped: missing address reason=$reason")
+            return
+        }
+        ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_REFRESH).apply {
+            putExtra("address", address)
+            putExtra("device_name", currentName.orEmpty())
+            encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
+                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
+            putExtra(
+                HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_RESULT_RECEIVER,
+                freeClip2FeatureResultReceiver,
+            )
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+        })
+        Log.d(TAG, "FreeClip 2 feature states requested reason=$reason address=$address")
     }
 
     private fun startPeriodicRefresh() {
@@ -1008,6 +1115,14 @@ object SettingsHeadsetHook : HookContext() {
         if (identityChanged || currentFreeClip2AudioState == FreeClip2AudioUiState()) {
             loadCurrentFreeClip2AudioState()
         }
+        if (identityChanged ||
+            (currentFreeClip2FeatureStates.isEmpty() &&
+                confirmedFreeClip2Features.isEmpty() &&
+                pendingFreeClip2Features.isEmpty() &&
+                failedFreeClip2Features.isEmpty())
+        ) {
+            loadCurrentFreeClip2FeatureStates()
+        }
     }
 
     private fun resetCurrentDeviceState(route: HuaweiDeviceRoute) {
@@ -1017,6 +1132,10 @@ object SettingsHeadsetHook : HookContext() {
         currentHuaweiAncLevel = route.defaultAncSubMode ?: UNKNOWN_HUAWEI_ANC_SUBMODE
         currentTransparencySubMode = defaultTransparencySubMode(route)
         currentFreeClip2AudioState = FreeClip2AudioUiState()
+        currentFreeClip2FeatureStates.clear()
+        confirmedFreeClip2Features.clear()
+        pendingFreeClip2Features.clear()
+        failedFreeClip2Features.clear()
         freeClip2AudioPendingGate.clear()
         settingsAncPendingGate.reset()
     }
@@ -1043,6 +1162,10 @@ object SettingsHeadsetHook : HookContext() {
         currentHuaweiAncLevel = UNKNOWN_HUAWEI_ANC_SUBMODE
         currentTransparencySubMode = 0x02
         currentFreeClip2AudioState = FreeClip2AudioUiState()
+        currentFreeClip2FeatureStates.clear()
+        confirmedFreeClip2Features.clear()
+        pendingFreeClip2Features.clear()
+        failedFreeClip2Features.clear()
         freeClip2AudioPendingGate.clear()
         settingsAncPendingGate.reset()
         (ctx ?: context)?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)?.edit()
@@ -1890,6 +2013,331 @@ object SettingsHeadsetHook : HookContext() {
         }
         schedulePruneFreeBudsUnsupportedViews(root)
         Log.i(TAG, "Settings FreeClip 2 audio requested address=$address kind=$kind value=$value")
+    }
+
+    private fun installFreeClip2FeaturePreferences(fragment: Any?) {
+        if (fragment == null || currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        runCatching {
+            val screen = callCompatibleMethod(fragment, "getPreferenceScreen") ?: return@runCatching
+            val propertyCategory = nativePreference(fragment, "ldac_container") ?: return@runCatching
+            val rowTemplate = nativePreference(fragment, "notificationdisplay")
+                ?: nativePreference(fragment, "abs_volume_pre")
+                ?: return@runCatching
+            val existingSmart = nativePreference(fragment, SETTINGS_FREECLIP2_SMART_CATEGORY_KEY)
+            val existingSound = nativePreference(fragment, SETTINGS_FREECLIP2_SOUND_CATEGORY_KEY)
+            val propertyOrder = (callCompatibleMethod(propertyCategory, "getOrder") as? Int) ?: 4
+            val firstFeatureOrder = when {
+                existingSmart != null ->
+                    (callCompatibleMethod(existingSmart, "getOrder") as? Int) ?: propertyOrder
+                existingSound != null ->
+                    ((callCompatibleMethod(existingSound, "getOrder") as? Int) ?: propertyOrder) - 1
+                else -> {
+                    // 原生 switchConfig 和 ldac_container 相邻；先为两个同级分类腾出顺序。
+                    shiftNativePreferenceOrders(screen, propertyOrder, 2)
+                    propertyOrder
+                }
+            }
+            val smartCategory = existingSmart ?: createFreeClip2FeatureCategory(
+                screen = screen,
+                categoryTemplate = propertyCategory,
+                rowTemplate = rowTemplate,
+                key = SETTINGS_FREECLIP2_SMART_CATEGORY_KEY,
+                title = moduleString(
+                    preferenceContext(rowTemplate),
+                    R.string.freeclip2_smart_features,
+                    "智能功能",
+                ),
+                order = firstFeatureOrder,
+            )
+            val soundCategory = existingSound ?: createFreeClip2FeatureCategory(
+                screen = screen,
+                categoryTemplate = propertyCategory,
+                rowTemplate = rowTemplate,
+                key = SETTINGS_FREECLIP2_SOUND_CATEGORY_KEY,
+                title = moduleString(
+                    preferenceContext(rowTemplate),
+                    R.string.freeclip2_sound_and_connection,
+                    "声音与连接",
+                ),
+                order = firstFeatureOrder + 1,
+            )
+            ensureFreeClip2FeaturePreferences(
+                fragment,
+                smartCategory,
+                rowTemplate,
+                freeClip2SmartFeatures,
+            )
+            ensureFreeClip2FeaturePreferences(
+                fragment,
+                soundCategory,
+                rowTemplate,
+                freeClip2SoundFeatures,
+            )
+            renderFreeClip2FeaturePreferences(fragment)
+            Log.d(TAG, "Settings FreeClip 2 native preference categories installed")
+        }.onFailure { Log.w(TAG, "Settings FreeClip 2 native preference install failed", it) }
+    }
+
+    private fun shiftNativePreferenceOrders(screen: Any, firstOrder: Int, amount: Int) {
+        val count = callCompatibleMethod(screen, "getPreferenceCount") as? Int ?: return
+        (0 until count)
+            .mapNotNull { index ->
+                val preference = callCompatibleMethod(screen, "getPreference", index) ?: return@mapNotNull null
+                val order = callCompatibleMethod(preference, "getOrder") as? Int ?: return@mapNotNull null
+                preference to order
+            }
+            .filter { (_, order) -> order >= firstOrder && order <= Int.MAX_VALUE - amount }
+            .sortedByDescending { (_, order) -> order }
+            .forEach { (preference, order) ->
+                callCompatibleMethod(preference, "setOrder", order + amount)
+            }
+    }
+
+    private fun createFreeClip2FeatureCategory(
+        screen: Any,
+        categoryTemplate: Any,
+        rowTemplate: Any,
+        key: String,
+        title: String,
+        order: Int,
+    ): Any {
+        val preferenceContext = preferenceContext(rowTemplate)
+        val category = newHostPreference(categoryTemplate, preferenceContext)
+        callCompatibleMethod(category, "setKey", key)
+        callCompatibleMethod(category, "setTitle", title)
+        callCompatibleMethod(category, "setOrder", order)
+        check(callCompatibleMethod(screen, "addPreference", category) != false)
+        return category
+    }
+
+    private fun ensureFreeClip2FeaturePreferences(
+        fragment: Any,
+        category: Any,
+        rowTemplate: Any,
+        features: List<FreeClip2BooleanFeature>,
+    ) {
+        val preferenceContext = preferenceContext(rowTemplate)
+        features.forEachIndexed { index, feature ->
+            val existing = nativePreference(fragment, freeClip2FeaturePreferenceKey(feature))
+            if (existing != null) {
+                renderFreeClip2FeaturePreference(existing, feature)
+                return@forEachIndexed
+            }
+            val preference = newHostPreference(rowTemplate, preferenceContext)
+            callCompatibleMethod(preference, "setKey", freeClip2FeaturePreferenceKey(feature))
+            callCompatibleMethod(preference, "setOrder", index)
+            callCompatibleMethod(preference, "setPersistent", false)
+            callCompatibleMethod(
+                preference,
+                "setOnPreferenceChangeListener",
+                freeClip2FeaturePreferenceListener(feature),
+            )
+            callCompatibleMethod(category, "addPreference", preference)
+            renderFreeClip2FeaturePreference(preference, feature)
+        }
+    }
+
+    private fun newHostPreference(template: Any, context: Context): Any {
+        return template.javaClass.getConstructor(Context::class.java).newInstance(context)
+    }
+
+    private fun preferenceContext(preference: Any): Context {
+        return callCompatibleMethod(preference, "getContext") as? Context
+            ?: context
+            ?: error("Settings preference context is unavailable")
+    }
+
+    private fun freeClip2FeaturePreferenceListener(feature: FreeClip2BooleanFeature): Any {
+        val listenerClass = findClass("androidx.preference.Preference\$OnPreferenceChangeListener")
+        return Proxy.newProxyInstance(appClassLoader, arrayOf(listenerClass)) { proxy, method, arguments ->
+            when (method.name) {
+                "onPreferenceChange" -> {
+                    val enabled = arguments?.getOrNull(1) as? Boolean
+                    enabled != null && onFreeClip2FeatureSelected(feature, enabled)
+                }
+                "equals" -> proxy === arguments?.firstOrNull()
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "HuaweiPodsFreeClip2PreferenceListener(${feature.extraValue})"
+                else -> null
+            }
+        }
+    }
+
+    private fun freeClip2FeaturePreferenceKey(feature: FreeClip2BooleanFeature): String {
+        return SETTINGS_FREECLIP2_FEATURE_KEY_PREFIX + feature.extraValue
+    }
+
+    private fun renderFreeClip2FeaturePreferences(fragment: Any?) {
+        FreeClip2BooleanFeature.entries.forEach { feature ->
+            nativePreference(fragment, freeClip2FeaturePreferenceKey(feature))?.let { preference ->
+                renderFreeClip2FeaturePreference(preference, feature)
+            }
+        }
+    }
+
+    private fun updateFreeClip2FeaturePreferences() {
+        headsetFragments.keys.toList().forEach(::renderFreeClip2FeaturePreferences)
+    }
+
+    private fun renderFreeClip2FeaturePreference(
+        preference: Any,
+        feature: FreeClip2BooleanFeature,
+    ) {
+        val preferenceContext = preferenceContext(preference)
+        val pending = feature in pendingFreeClip2Features
+        val confirmed = feature in confirmedFreeClip2Features
+        val failed = feature in failedFreeClip2Features
+        callCompatibleMethod(
+            preference,
+            "setTitle",
+            freeClip2FeatureTitle(preferenceContext, feature),
+        )
+        callCompatibleMethod(
+            preference,
+            "setSummary",
+            when {
+                pending -> moduleString(
+                    preferenceContext,
+                    R.string.freeclip2_state_applying,
+                    "正在应用…",
+                )
+                failed -> moduleString(
+                    preferenceContext,
+                    R.string.freeclip2_state_failed,
+                    "读取或设置失败，请重试",
+                )
+                confirmed -> freeClip2FeatureSummary(preferenceContext, feature)
+                else -> moduleString(
+                    preferenceContext,
+                    R.string.freeclip2_state_loading,
+                    "正在读取当前状态…",
+                )
+            },
+        )
+        if (!pending) {
+            callCompatibleMethod(
+                preference,
+                "setChecked",
+                currentFreeClip2FeatureStates[feature] == true,
+            )
+        }
+        callCompatibleMethod(preference, "setEnabled", !pending && (confirmed || failed))
+    }
+
+    private fun freeClip2FeatureTitle(
+        context: Context,
+        feature: FreeClip2BooleanFeature,
+    ): String = when (feature) {
+        FreeClip2BooleanFeature.WEAR_DETECTION ->
+            moduleString(context, R.string.freeclip2_wear_detection, "佩戴检测")
+        FreeClip2BooleanFeature.DROP_REMINDER ->
+            moduleString(context, R.string.freeclip2_drop_reminder, "掉落提醒")
+        FreeClip2BooleanFeature.ADAPTIVE_VOLUME ->
+            moduleString(context, R.string.freeclip2_adaptive_volume, "智感音量自适应")
+        FreeClip2BooleanFeature.HEAD_MOTION_CONTROL ->
+            moduleString(context, R.string.freeclip2_head_motion, "头动控制")
+        FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY ->
+            moduleString(context, R.string.freeclip2_sound_quality_priority, "声音质量优先")
+        FreeClip2BooleanFeature.LOW_LATENCY ->
+            moduleString(context, R.string.freeclip2_low_latency, "低时延模式")
+        FreeClip2BooleanFeature.DUAL_DEVICE ->
+            moduleString(context, R.string.freeclip2_dual_device, "双设备连接")
+        FreeClip2BooleanFeature.CASE_PROMPT_SOUND ->
+            moduleString(context, R.string.freeclip2_case_prompt_sound, "充电盒提示音")
+    }
+
+    private fun freeClip2FeatureSummary(
+        context: Context,
+        feature: FreeClip2BooleanFeature,
+    ): String = when (feature) {
+        FreeClip2BooleanFeature.WEAR_DETECTION -> moduleString(
+            context,
+            R.string.freeclip2_wear_detection_summary,
+            "摘下耳机时自动暂停，重新佩戴时继续播放",
+        )
+        FreeClip2BooleanFeature.DROP_REMINDER -> moduleString(
+            context,
+            R.string.freeclip2_drop_reminder_summary,
+            "耳机掉落时发出提醒",
+        )
+        FreeClip2BooleanFeature.ADAPTIVE_VOLUME -> moduleString(
+            context,
+            R.string.freeclip2_adaptive_volume_summary,
+            "根据环境噪声自动调节播放音量",
+        )
+        FreeClip2BooleanFeature.HEAD_MOTION_CONTROL -> moduleString(
+            context,
+            R.string.freeclip2_head_motion_summary,
+            "通过点头或摇头控制来电",
+        )
+        FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY -> moduleString(
+            context,
+            R.string.freeclip2_sound_quality_priority_summary,
+            "优先使用高音质蓝牙传输",
+        )
+        FreeClip2BooleanFeature.LOW_LATENCY -> moduleString(
+            context,
+            R.string.freeclip2_low_latency_summary,
+            "降低声音延迟，适合游戏等场景",
+        )
+        FreeClip2BooleanFeature.DUAL_DEVICE -> moduleString(
+            context,
+            R.string.freeclip2_dual_device_summary,
+            "允许耳机同时连接两台设备",
+        )
+        FreeClip2BooleanFeature.CASE_PROMPT_SOUND -> moduleString(
+            context,
+            R.string.freeclip2_case_prompt_sound_summary,
+            "控制充电盒开盖、充电等提示音",
+        )
+    }
+
+    private fun onFreeClip2FeatureSelected(
+        feature: FreeClip2BooleanFeature,
+        enabled: Boolean,
+    ): Boolean {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return false
+        if (!pendingFreeClip2Features.add(feature)) return false
+        failedFreeClip2Features.remove(feature)
+        updateFreeClip2FeaturePreferences()
+        val ctx = context ?: run {
+            pendingFreeClip2Features.remove(feature)
+            failedFreeClip2Features.add(feature)
+            updateFreeClip2FeaturePreferences()
+            return false
+        }
+        val address = currentAddress?.takeIf(String::isNotBlank) ?: run {
+            pendingFreeClip2Features.remove(feature)
+            failedFreeClip2Features.add(feature)
+            updateFreeClip2FeaturePreferences()
+            return false
+        }
+        val sent = runCatching {
+            ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_SET).apply {
+                putExtra("address", address)
+                putExtra("device_name", currentName.orEmpty())
+                encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
+                    putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+                }
+                putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE, feature.extraValue)
+                putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_ENABLED, enabled)
+                putExtra(
+                    HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_RESULT_RECEIVER,
+                    freeClip2FeatureResultReceiver,
+                )
+                setPackage("com.android.bluetooth")
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            })
+        }.isSuccess
+        if (!sent) {
+            pendingFreeClip2Features.remove(feature)
+            failedFreeClip2Features.add(feature)
+            updateFreeClip2FeaturePreferences()
+            Log.w(TAG, "Settings FreeClip 2 feature request send failed feature=$feature")
+            return false
+        }
+        Log.i(TAG, "Settings FreeClip 2 feature requested address=$address feature=$feature enabled=$enabled")
+        return true
     }
 
     private fun configureTransparencyModeView(
@@ -2938,6 +3386,35 @@ object SettingsHeadsetHook : HookContext() {
         )
     }
 
+    private fun saveCurrentFreeClip2FeatureState(
+        ctx: Context?,
+        feature: FreeClip2BooleanFeature,
+    ) {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        val enabled = currentFreeClip2FeatureStates[feature] ?: return
+        val prefix = freeClip2AudioPreferencePrefix(currentAddress, currentName) ?: return
+        val prefs = (ctx ?: context)?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
+        prefs.edit()
+            .putBoolean(prefix + "feature_" + feature.extraValue, enabled)
+            .apply()
+    }
+
+    private fun loadCurrentFreeClip2FeatureStates() {
+        currentFreeClip2FeatureStates.clear()
+        confirmedFreeClip2Features.clear()
+        pendingFreeClip2Features.clear()
+        failedFreeClip2Features.clear()
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        val prefix = freeClip2AudioPreferencePrefix(currentAddress, currentName) ?: return
+        val prefs = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
+        FreeClip2BooleanFeature.entries.forEach { feature ->
+            val key = prefix + "feature_" + feature.extraValue
+            if (prefs.contains(key)) {
+                currentFreeClip2FeatureStates[feature] = prefs.getBoolean(key, false)
+            }
+        }
+    }
+
     private fun loadState() {
         val prefs = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
         val hasPersistedIdentity = prefs.contains("address") || prefs.contains("name")
@@ -2974,6 +3451,10 @@ object SettingsHeadsetHook : HookContext() {
             currentHuaweiAncLevel = UNKNOWN_HUAWEI_ANC_SUBMODE
             currentTransparencySubMode = 0x02
             currentFreeClip2AudioState = FreeClip2AudioUiState()
+            currentFreeClip2FeatureStates.clear()
+            confirmedFreeClip2Features.clear()
+            pendingFreeClip2Features.clear()
+            failedFreeClip2Features.clear()
             freeClip2AudioPendingGate.clear()
             knownHuaweiAddresses.clear()
             prefs.edit()
@@ -3014,6 +3495,13 @@ object SettingsHeadsetHook : HookContext() {
         }
         currentTransparencySubMode = prefs.getInt("transparency_submode", currentTransparencySubMode)
         loadCurrentFreeClip2AudioState()
+        if (currentFreeClip2FeatureStates.isEmpty() &&
+            confirmedFreeClip2Features.isEmpty() &&
+            pendingFreeClip2Features.isEmpty() &&
+            failedFreeClip2Features.isEmpty()
+        ) {
+            loadCurrentFreeClip2FeatureStates()
+        }
         currentAddress?.takeIf(String::isNotBlank)?.let { address ->
             currentRoute?.takeIf { it.isSupported }?.let { route ->
                 knownHuaweiAddresses[address.uppercase()] = route

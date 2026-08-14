@@ -6,9 +6,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.ResultReceiver
 import android.os.SystemClock
 import java.util.UUID
 import moe.chenxy.huaweipods.BuildConfig
@@ -34,6 +36,7 @@ object HuaweiHfpController {
     private const val FREECLIP2_AUDIO_CONFIRM_DELAY_MS = 450L
     private const val FREECLIP2_SMART_AUDIO_BRIDGE_TIMEOUT_MS = 1_500L
     private const val FREECLIP2_AUDIO_REFRESH_MIN_INTERVAL_MS = 2_500L
+    private const val FREECLIP2_FEATURE_REFRESH_MIN_INTERVAL_MS = 5_000L
     private const val DEVICE_INFO_REFRESH_MIN_INTERVAL_MS = 60_000L
     private const val LOW_LATENCY_AUTO_APPLY_DELAY_MS = 2_500L
     private const val LOW_LATENCY_AUTO_APPLY_RETRY_DELAY_MS = 2_500L
@@ -61,6 +64,7 @@ object HuaweiHfpController {
     private var lastAncRequestAt = 0L
     private var lastGestureStateRequestAt = 0L
     private var lastFreeClip2AudioStateRequestAt = 0L
+    private var lastFreeClip2FeatureStateRequestAt = 0L
     private var lastDeviceInfoRequestAt = 0L
     private var batteryRequestInFlight = false
     private var ancRequestInFlight = false
@@ -236,6 +240,20 @@ object HuaweiHfpController {
                         force = receivedIntent.getBooleanExtra("force", false),
                     )
                 }
+                HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_SET -> {
+                    if (!targetsCurrentFreeClip2Session(receivedIntent)) return
+                    setFreeClip2Feature(
+                        receivedIntent,
+                        receivedIntent.freeClip2FeatureResultReceiver(),
+                    )
+                }
+                HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_REFRESH -> {
+                    if (!targetsCurrentFreeClip2Session(receivedIntent)) return
+                    requestFreeClip2FeatureStates(
+                        force = receivedIntent.getBooleanExtra("force", false),
+                        resultReceiver = receivedIntent.freeClip2FeatureResultReceiver(),
+                    )
+                }
                 HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_RESULT -> {
                     handleSmartAudioFreeClip2Result(receivedIntent, sentFromPackage)
                 }
@@ -304,6 +322,7 @@ object HuaweiHfpController {
             lastAncRequestAt = 0L
             lastGestureStateRequestAt = 0L
             lastFreeClip2AudioStateRequestAt = 0L
+            lastFreeClip2FeatureStateRequestAt = 0L
             lastDeviceInfoRequestAt = 0L
             batteryRequestInFlight = false
             ancRequestInFlight = false
@@ -529,7 +548,7 @@ object HuaweiHfpController {
         ) {
             Log.w(
                 TAG,
-                "FreeClip 2 audio command ignored: target mismatch action=${intent.action} " +
+                "FreeClip 2 command ignored: target mismatch action=${intent.action} " +
                     "requestedAddress=$requestedAddress requestedRoute=$requestedRoute " +
                     "currentAddress=${activeDevice.address} currentRoute=$sessionRoute",
             )
@@ -596,6 +615,123 @@ object HuaweiHfpController {
             dispatchSmartAudioSpatialWrite(request, update.mode)
         } else {
             dispatchDirectFreeClip2AudioWrite(request)
+        }
+    }
+
+    private fun setFreeClip2Feature(intent: Intent, resultReceiver: ResultReceiver?) {
+        val feature = FreeClip2BooleanFeature.fromExtraValue(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE),
+        ) ?: run {
+            Log.w(TAG, "FreeClip 2 feature skipped: invalid feature")
+            return
+        }
+        if (!intent.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_ENABLED)) {
+            Log.w(TAG, "FreeClip 2 feature skipped: missing enabled value feature=$feature")
+            return
+        }
+        val currentContext = context ?: return
+        val currentDevice = device ?: return
+        val requestedGeneration = sessionGeneration
+        val requestedAddress = currentDevice.address
+        val enabled = intent.getBooleanExtra(
+            HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_ENABLED,
+            false,
+        )
+        HuaweiFreeClip2Controller.setBooleanFeature(
+            context = currentContext,
+            device = currentDevice,
+            feature = feature,
+            enabled = enabled,
+        ) { success ->
+            if (!isCurrentSession(
+                    requestedGeneration,
+                    requestedAddress,
+                    HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                )
+            ) {
+                return@setBooleanFeature
+            }
+            if (!success) {
+                sendFreeClip2FeatureState(
+                    feature = feature,
+                    enabled = null,
+                    success = false,
+                    address = requestedAddress,
+                    resultReceiver = resultReceiver,
+                )
+                return@setBooleanFeature
+            }
+            requestFreeClip2FeatureState(
+                context = currentContext,
+                device = currentDevice,
+                generation = requestedGeneration,
+                address = requestedAddress,
+                feature = feature,
+                keepSocket = false,
+                expectedEnabled = enabled,
+                resultReceiver = resultReceiver,
+            )
+        }
+    }
+
+    private fun requestFreeClip2FeatureStates(
+        force: Boolean = false,
+        resultReceiver: ResultReceiver? = null,
+    ) {
+        val currentContext = context ?: return
+        val currentDevice = device ?: return
+        if (sessionRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastFreeClip2FeatureStateRequestAt < FREECLIP2_FEATURE_REFRESH_MIN_INTERVAL_MS) {
+            return
+        }
+        lastFreeClip2FeatureStateRequestAt = now
+        val requestedGeneration = sessionGeneration
+        val requestedAddress = currentDevice.address
+        FreeClip2BooleanFeature.entries.forEachIndexed { index, feature ->
+            requestFreeClip2FeatureState(
+                context = currentContext,
+                device = currentDevice,
+                generation = requestedGeneration,
+                address = requestedAddress,
+                feature = feature,
+                keepSocket = index < FreeClip2BooleanFeature.entries.lastIndex,
+                resultReceiver = resultReceiver,
+            )
+        }
+    }
+
+    private fun requestFreeClip2FeatureState(
+        context: Context,
+        device: BluetoothDevice,
+        generation: Long,
+        address: String,
+        feature: FreeClip2BooleanFeature,
+        keepSocket: Boolean,
+        expectedEnabled: Boolean? = null,
+        resultReceiver: ResultReceiver? = null,
+    ) {
+        HuaweiFreeClip2Controller.requestBooleanFeatureState(
+            context = context,
+            device = device,
+            feature = feature,
+            keepSocket = keepSocket,
+        ) state@{ enabled ->
+            if (!isCurrentSession(
+                    generation,
+                    address,
+                    HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+                )
+            ) {
+                return@state
+            }
+            sendFreeClip2FeatureState(
+                feature = feature,
+                enabled = enabled,
+                success = enabled != null && (expectedEnabled == null || enabled == expectedEnabled),
+                address = address,
+                resultReceiver = resultReceiver,
+            )
         }
     }
 
@@ -1148,6 +1284,7 @@ object HuaweiHfpController {
             lastAncRequestAt = 0L
             lastGestureStateRequestAt = 0L
             lastFreeClip2AudioStateRequestAt = 0L
+            lastFreeClip2FeatureStateRequestAt = 0L
             lastDeviceInfoRequestAt = 0L
             batteryRequestInFlight = false
             ancRequestInFlight = false
@@ -1754,6 +1891,8 @@ object HuaweiHfpController {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_HUAWEI_GESTURE_REFRESH)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_SET)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_REFRESH)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_SET)
+            addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_REFRESH)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_RESULT)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_QUERY_RESULT)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_STATE)
@@ -1895,6 +2034,38 @@ object HuaweiHfpController {
         sendAppBroadcast(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED, fillState)
         sendExternalBroadcast(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_CHANGED, fillState)
     }
+
+    private fun sendFreeClip2FeatureState(
+        feature: FreeClip2BooleanFeature,
+        enabled: Boolean?,
+        success: Boolean,
+        address: String,
+        resultReceiver: ResultReceiver?,
+    ) {
+        val state = Bundle().apply {
+            putString("vendor", "huawei")
+            putString("address", address)
+            putString("device_name", device?.let { it.name ?: it.alias }.orEmpty())
+            encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
+                putString(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
+            }
+            putString(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE, feature.extraValue)
+            putBoolean(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_SUCCESS, success)
+            enabled?.let {
+                putBoolean(HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_ENABLED, it)
+            }
+        }
+        runCatching { resultReceiver?.send(0, state) }
+            .onFailure { Log.w(TAG, "FreeClip 2 feature result callback failed feature=$feature", it) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun Intent.freeClip2FeatureResultReceiver(): ResultReceiver? =
+        runCatching {
+            getParcelableExtra<ResultReceiver>(
+                HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_RESULT_RECEIVER,
+            )
+        }.getOrNull()
 
     private fun sendAppBroadcast(action: String, fill: Intent.() -> Unit = {}) {
         val ctx = context ?: return

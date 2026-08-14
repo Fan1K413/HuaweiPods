@@ -8,8 +8,8 @@ import moe.chenxy.huaweipods.pods.supportsLowLatencyControl
 /**
  * 低时延模式的期望策略。
  *
- * 耳机协议没有提供已验证的低时延回读，因此这里保存的是“连接后自动重新应用”的用户意图，
- * 不是耳机当前状态。沿用旧版 UI 的键名，升级后无需用户重新开启。
+ * 这里保存的是“连接后自动重新应用”的用户意图，不是耳机当前状态。
+ * 状态回读只用于界面显示，不能在注入进程中反写只读的远程偏好。
  */
 object LowLatencyPrefs {
     private const val FREEBUDS5_PREFIX = "freebuds5_"

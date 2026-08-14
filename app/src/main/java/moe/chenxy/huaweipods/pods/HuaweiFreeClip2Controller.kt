@@ -39,6 +39,28 @@ object HuaweiFreeClip2Controller {
         )
     }
 
+    fun requestBooleanFeatureState(
+        context: Context,
+        device: BluetoothDevice,
+        feature: FreeClip2BooleanFeature,
+        keepSocket: Boolean = false,
+        onState: (Boolean?) -> Unit,
+    ) {
+        val parser = { response: ByteArray -> parseBooleanFeatureState(feature, response) }
+        HuaweiL2capAncController.requestRawPacketOnce(
+            context = context,
+            device = device,
+            route = HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            packet = feature.stateQueryPacket(),
+            description = "freeclip2 ${feature.extraValue} state-query",
+            keepSocket = keepSocket,
+            responseWindowMs = 1_000L,
+            responseComplete = { parser(it) != null },
+            onComplete = { success -> if (!success) onState(null) },
+            onResponse = { onState(parser(it)) },
+        )
+    }
+
     fun setSpatialAudioMode(
         context: Context,
         device: BluetoothDevice,
@@ -120,6 +142,28 @@ object HuaweiFreeClip2Controller {
     fun spatialAudioStateQueryPacket(): ByteArray = SPATIAL_AUDIO_STATE_QUERY.copyOf()
 
     fun soundEffectStateQueryPacket(): ByteArray = SOUND_EFFECT_STATE_QUERY.copyOf()
+
+    fun parseBooleanFeatureState(
+        feature: FreeClip2BooleanFeature,
+        stream: ByteArray,
+    ): Boolean? = when (feature) {
+        FreeClip2BooleanFeature.WEAR_DETECTION ->
+            parseLatestBooleanState(stream, command = 0x11, field = 0x01)
+        FreeClip2BooleanFeature.DROP_REMINDER ->
+            parseLatestB4BooleanState(stream, featureId = 0x07)
+        FreeClip2BooleanFeature.ADAPTIVE_VOLUME ->
+            parseLatestB4BooleanState(stream, featureId = 0x02)
+        FreeClip2BooleanFeature.HEAD_MOTION_CONTROL ->
+            parseLatestB4BooleanState(stream, featureId = 0x0B)
+        FreeClip2BooleanFeature.SOUND_QUALITY_PRIORITY ->
+            parseLatestBooleanState(stream, command = 0x88, field = 0x01)
+        FreeClip2BooleanFeature.LOW_LATENCY ->
+            parseLatestBooleanState(stream, command = 0x6C, field = 0x02)
+        FreeClip2BooleanFeature.DUAL_DEVICE ->
+            parseLatestBooleanState(stream, command = 0x2F, field = 0x01)
+        FreeClip2BooleanFeature.CASE_PROMPT_SOUND ->
+            parseLatestBooleanState(stream, command = 0xB1, field = 0x02)
+    }
 
     /**
      * Parses the latest verified spatial-audio frame from a possibly concatenated RFCOMM read.
@@ -240,50 +284,66 @@ enum class FreeClip2BooleanFeature(
     val extraValue: String,
     private val disabledPacket: ByteArray,
     private val enabledPacket: ByteArray,
+    private val queryPacket: ByteArray,
 ) {
     WEAR_DETECTION(
         "wear_detection",
         hex("5A0006002B10010100B977"),
         hex("5A0006002B10010101A956"),
+        hex("5A0005002B110100772A"),
     ),
     DROP_REMINDER(
         "drop_reminder",
         hex("5A0009002BB4010107020100AFA4"),
         hex("5A0009002BB4010107020101BF85"),
+        hex("5A0008002BB40101070200DDE9"),
     ),
     ADAPTIVE_VOLUME(
         "adaptive_volume",
         hex("5A0009002BB401010202010013E1"),
         hex("5A0009002BB401010202010103C0"),
+        hex("5A0008002BB401010202003619"),
     ),
     HEAD_MOTION_CONTROL(
         "head_motion_control",
         hex("5A0009002BB401010B020100E096"),
         hex("5A0009002BB401010B020101F0B7"),
+        hex("5A0006002BB401010B289B"),
     ),
     SOUND_QUALITY_PRIORITY(
         "sound_quality_priority",
         hex("5A0006002B870101002EC5"),
         hex("5A0006002B870101013EE4"),
+        hex("5A0005002B8801009182"),
     ),
     LOW_LATENCY(
         "low_latency",
         hex("5A0006002B6C010100B430"),
         hex("5A0006002B6C010101A411"),
+        hex("5A0005002B6C0200B820"),
     ),
     DUAL_DEVICE(
         "dual_device",
         hex("5A0006002B2E01010037C4"),
         hex("5A0006002B2E01010127E5"),
+        hex("5A0005002B2F0100A98E"),
     ),
     CASE_PROMPT_SOUND(
         "case_prompt_sound",
         hex("5A0006002BB101010025B5"),
         hex("5A0006002BB10101013594"),
+        hex("5A0007002BB1020003007FAB"),
     );
 
     fun packet(enabled: Boolean): ByteArray =
         (if (enabled) enabledPacket else disabledPacket).copyOf()
+
+    fun stateQueryPacket(): ByteArray = queryPacket.copyOf()
+
+    companion object {
+        fun fromExtraValue(value: String?): FreeClip2BooleanFeature? =
+            entries.firstOrNull { it.extraValue == value }
+    }
 }
 
 /**
@@ -375,6 +435,53 @@ private const val SPATIAL_AUDIO_RESPONSE_SIZE = 11
 private const val SOUND_EFFECT_RESPONSE_SIZE = 3
 private val SPATIAL_AUDIO_RESPONSE_PREFIX = hex("2BB40101180201")
 private val SOUND_EFFECT_RESPONSE_FIELD = hex("0201")
+
+private fun parseLatestBooleanState(
+    stream: ByteArray,
+    command: Int,
+    field: Int,
+): Boolean? {
+    var latest: Boolean? = null
+    frames(stream).forEach { frame ->
+        if (frame.u8OrNull(4) != 0x2B || frame.u8OrNull(5) != command) return@forEach
+        frame.booleanField(field)?.let { latest = it }
+    }
+    return latest
+}
+
+private fun parseLatestB4BooleanState(stream: ByteArray, featureId: Int): Boolean? {
+    var latest: Boolean? = null
+    frames(stream).forEach { frame ->
+        if (frame.u8OrNull(4) != 0x2B || frame.u8OrNull(5) != 0xB4) return@forEach
+        if (frame.tlvValue(0x01)?.singleOrNull()?.toInt()?.and(0xFF) != featureId) {
+            return@forEach
+        }
+        frame.booleanField(0x02)?.let { latest = it }
+    }
+    return latest
+}
+
+private fun ByteArray.booleanField(field: Int): Boolean? =
+    when (tlvValue(field)?.singleOrNull()?.toInt()?.and(0xFF)) {
+        0x00 -> false
+        0x01 -> true
+        else -> null
+    }
+
+private fun ByteArray.tlvValue(field: Int): ByteArray? {
+    val endExclusive = size - CHECKSUM_SIZE
+    var offset = 6
+    while (offset + 2 <= endExclusive) {
+        val type = u8(offset)
+        val length = u8(offset + 1)
+        val valueStart = offset + 2
+        val valueEnd = valueStart + length
+        if (valueEnd > endExclusive) return null
+        if (type == field) return copyOfRange(valueStart, valueEnd)
+        offset = valueEnd
+    }
+    return null
+}
 
 private fun frames(stream: ByteArray): Sequence<ByteArray> = sequence {
     var offset = 0

@@ -2,9 +2,13 @@
 <resources>
     <string name="freeclip2_smart_features">智能功能</string>
     <string name="freeclip2_wear_detection">佩戴检测</string>
+    <string name="freeclip2_wear_detection_summary">摘下耳机时自动暂停，重新佩戴时继续播放</string>
     <string name="freeclip2_drop_reminder">掉落提醒</string>
+    <string name="freeclip2_drop_reminder_summary">耳机掉落时发出提醒</string>
     <string name="freeclip2_adaptive_volume">智感音量自适应</string>
+    <string name="freeclip2_adaptive_volume_summary">根据环境噪声自动调节播放音量</string>
     <string name="freeclip2_head_motion">头动控制</string>
+    <string name="freeclip2_head_motion_summary">通过点头或摇头控制来电</string>
     <string name="freeclip2_spatial_audio">空间音频</string>
     <string name="freeclip2_audio_settings">音效</string>
     <string name="freeclip2_spatial_mode">空间音频模式</string>
@@ -24,8 +28,15 @@
     <string name="freeclip2_sound_effect_clear_voice">清晰人声</string>
     <string name="freeclip2_sound_effect_custom">官方/自定义音效</string>
     <string name="freeclip2_sound_quality_priority">声音质量优先</string>
+    <string name="freeclip2_sound_quality_priority_summary">优先使用高音质蓝牙传输</string>
     <string name="freeclip2_low_latency">低时延模式</string>
+    <string name="freeclip2_low_latency_summary">降低声音延迟，适合游戏等场景</string>
     <string name="freeclip2_dual_device">双设备连接</string>
+    <string name="freeclip2_dual_device_summary">允许耳机同时连接两台设备</string>
     <string name="freeclip2_case_prompt_sound">充电盒提示音</string>
+    <string name="freeclip2_case_prompt_sound_summary">控制充电盒开盖、充电等提示音</string>
+    <string name="freeclip2_state_loading">正在读取当前状态…</string>
+    <string name="freeclip2_state_applying">正在应用…</string>
+    <string name="freeclip2_state_failed">读取或设置失败，请重试</string>
     <string name="freeclip2_state_hint">低时延开启后会在每次连接时自动重新应用；其他无法回读的开关仍以本模块最后一次设置为准。</string>
 </resources>
