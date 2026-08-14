@@ -168,8 +168,8 @@ internal fun miLinkAncSwitchStateFor(route: HuaweiDeviceRoute): Int =
     if (route.supportsAnc) 1 else 0
 
 /**
- * 融合设备中心使用 0=关闭、1=头部跟踪、2=固定；这与耳机 AAM 的
- * 0=关闭、1=固定、2=头部跟踪不同。不同宿主版本还可能附加 20/30 偏移。
+ * 融合设备中心与 FreeClip 2 AAM 均使用 0=关闭、1=头部跟踪、2=固定。
+ * 不同宿主版本还可能附加 20/30 偏移。
  */
 internal fun freeClip2SpatialModeForMiLinkAudioEffect(value: Int): FreeClip2SpatialAudioMode? {
     val normalized = when (value) {

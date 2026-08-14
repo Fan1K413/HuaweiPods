@@ -44,7 +44,7 @@ class FreeClip2AudioUiPolicyTest {
     }
 
     @Test
-    fun `official custom EQ is preserved as a read only UI state`() {
+    fun `custom EQ is available in Settings and controls its editor entry`() {
         val updated = FreeClip2AudioUiState().mergeExtraValues(
             spatialModeValue = null,
             spatialSceneValue = null,
@@ -53,6 +53,29 @@ class FreeClip2AudioUiPolicyTest {
 
         assertEquals(FreeClip2SoundEffect.CUSTOM, updated.soundEffect)
         assertFalse(updated.soundEffect.isSelectable)
+        assertEquals(FreeClip2SoundEffect.CUSTOM, freeClip2SettingsSoundEffects().last())
+        assertTrue(shouldShowFreeClip2EqualizerEntry(updated.soundEffect))
+        assertFalse(shouldShowFreeClip2EqualizerEntry(FreeClip2SoundEffect.DEFAULT))
+    }
+
+    @Test
+    fun `custom EQ readback keeps only complete valid curves`() {
+        val gains = List(10) { it - 5 }
+        val updated = FreeClip2AudioUiState().mergeExtraValues(
+            spatialModeValue = null,
+            spatialSceneValue = null,
+            soundEffectValue = FreeClip2SoundEffect.CUSTOM.extraValue,
+            equalizerPresetIdValue = 0x65,
+            equalizerNameValue = "My EQ",
+            equalizerGainsValue = gains,
+        )
+
+        assertEquals(0x65, updated.equalizerPresetId)
+        assertEquals("My EQ", updated.equalizerName)
+        assertEquals(gains, updated.equalizerGains)
+        assertEquals(gains, parseFreeClip2EqualizerGains(gains.joinToString(",")))
+        assertNull(parseFreeClip2EqualizerGains("1,2,3"))
+        assertNull(parseFreeClip2EqualizerGains("0,1,2,3,4,5,6,7,8,invalid,9"))
     }
 
     @Test

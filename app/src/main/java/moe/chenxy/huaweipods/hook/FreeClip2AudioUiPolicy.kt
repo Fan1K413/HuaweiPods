@@ -3,6 +3,7 @@ package moe.chenxy.huaweipods.hook
 import moe.chenxy.huaweipods.pods.FreeClip2SoundEffect
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
 import moe.chenxy.huaweipods.pods.FreeClip2SpatialScene
+import moe.chenxy.huaweipods.pods.HuaweiEqualizerCodec
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 
 /** FreeClip 2 在系统宿主界面中展示的、可按设备持久化的音频状态。 */
@@ -10,16 +11,50 @@ internal data class FreeClip2AudioUiState(
     val spatialMode: FreeClip2SpatialAudioMode = FreeClip2SpatialAudioMode.OFF,
     val spatialScene: FreeClip2SpatialScene = FreeClip2SpatialScene.DEFAULT,
     val soundEffect: FreeClip2SoundEffect = FreeClip2SoundEffect.DEFAULT,
+    val equalizerPresetId: Int = 0x64,
+    val equalizerName: String = "HuaweiPods",
+    val equalizerGains: List<Int> = List(HuaweiEqualizerCodec.BAND_COUNT) { 0 },
 ) {
     fun mergeExtraValues(
         spatialModeValue: String?,
         spatialSceneValue: String?,
         soundEffectValue: String?,
+        equalizerPresetIdValue: Int? = null,
+        equalizerNameValue: String? = null,
+        equalizerGainsValue: List<Int>? = null,
     ): FreeClip2AudioUiState = copy(
         spatialMode = FreeClip2SpatialAudioMode.fromExtraValue(spatialModeValue) ?: spatialMode,
         spatialScene = FreeClip2SpatialScene.fromExtraValue(spatialSceneValue) ?: spatialScene,
         soundEffect = FreeClip2SoundEffect.fromExtraValue(soundEffectValue) ?: soundEffect,
+        equalizerPresetId = equalizerPresetIdValue
+            ?.takeIf { it in 0x64..0x66 }
+            ?: equalizerPresetId,
+        equalizerName = equalizerNameValue
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: equalizerName,
+        equalizerGains = equalizerGainsValue
+            ?.takeIf(::isValidFreeClip2EqualizerGains)
+            ?: equalizerGains,
     )
+}
+
+internal fun freeClip2SettingsSoundEffects(): List<FreeClip2SoundEffect> =
+    FreeClip2SoundEffect.selectableEntries + FreeClip2SoundEffect.CUSTOM
+
+internal fun shouldShowFreeClip2EqualizerEntry(effect: FreeClip2SoundEffect): Boolean =
+    effect == FreeClip2SoundEffect.CUSTOM
+
+internal fun isValidFreeClip2EqualizerGains(gains: List<Int>): Boolean =
+    gains.size == HuaweiEqualizerCodec.BAND_COUNT &&
+        gains.all { it in HuaweiEqualizerCodec.GAIN_RANGE }
+
+internal fun parseFreeClip2EqualizerGains(value: String?): List<Int>? {
+    val gains = value
+        ?.split(',')
+        ?.map { it.toIntOrNull() ?: return null }
+        ?: return null
+    return gains.takeIf(::isValidFreeClip2EqualizerGains)
 }
 
 internal fun freeClip2AudioPreferencePrefix(address: String?, name: String?): String? {

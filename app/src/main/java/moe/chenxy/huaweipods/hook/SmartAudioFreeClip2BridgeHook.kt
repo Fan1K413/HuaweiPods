@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Bundle
+import android.os.ResultReceiver
 import java.lang.reflect.Proxy
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
@@ -191,6 +193,10 @@ internal object SmartAudioFreeClip2BridgeHook : HookContext() {
                 return
             }
             if (request.action == HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_EQ_SET) {
+                sentFromPackage
+                    ?.takeIf(SmartAudioFreeClip2BridgePolicy::isTrustedEqualizerRequestSender)
+                    ?: return
+                val resultReceiver = request.freeClip2EqualizerResultReceiver() ?: return
                 val presetId = request.getIntExtra(
                     HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_PRESET_ID,
                     0x64,
@@ -206,7 +212,13 @@ internal object SmartAudioFreeClip2BridgeHook : HookContext() {
                         it.size == HuaweiEqualizerCodec.BAND_COUNT &&
                             it.all { gain -> gain in HuaweiEqualizerCodec.GAIN_RANGE }
                     } ?: return
-                handleEqualizerSetRequest(appContext, nonce, address, presetId, name, gains)
+                handleEqualizerSetRequest(
+                    address,
+                    presetId,
+                    name,
+                    gains,
+                    resultReceiver,
+                )
                 return
             }
             val mode = FreeClip2SpatialAudioMode.fromProtocolValue(
@@ -235,12 +247,11 @@ internal object SmartAudioFreeClip2BridgeHook : HookContext() {
     }
 
     private fun handleEqualizerSetRequest(
-        context: Context,
-        nonce: String,
         address: String,
         presetId: Int,
         name: String,
         gains: List<Int>,
+        resultReceiver: ResultReceiver,
     ) {
         val pendingResult = requestReceiver.goAsync()
         executor.execute {
@@ -248,17 +259,8 @@ internal object SmartAudioFreeClip2BridgeHook : HookContext() {
                 setOfficialEqualizer(address, presetId, name, gains)
             }.onFailure { Log.w(TAG, "Official FreeClip 2 equalizer write failed", it) }
                 .getOrDefault(false)
-            runCatching {
-                context.sendIdentitySharingBroadcast(
-                    Intent(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_EQ_RESULT).apply {
-                        putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE, nonce)
-                        putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ADDRESS, address)
-                        putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_ACCEPTED, accepted)
-                        setPackage(SmartAudioFreeClip2BridgePolicy.MODULE_PACKAGE)
-                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-                    },
-                )
-            }.onFailure { Log.w(TAG, "Unable to return FreeClip 2 equalizer result", it) }
+            runCatching { resultReceiver.send(if (accepted) 1 else 0, Bundle.EMPTY) }
+                .onFailure { Log.w(TAG, "Unable to return FreeClip 2 equalizer result", it) }
             pendingResult.finish()
         }
     }
@@ -289,9 +291,6 @@ internal object SmartAudioFreeClip2BridgeHook : HookContext() {
             gains.map(Int::toByte).toByteArray(),
             1,
         )
-        service.javaClass.methods.first { method ->
-            method.name == "getEqAdjust" && method.parameterTypes.size == 2
-        }.apply { isAccessible = true }.invoke(service, address, false)
         Log.i(TAG, "Official FreeClip 2 equalizer write dispatched preset=$presetId")
         return true
     }
@@ -498,6 +497,13 @@ internal object SmartAudioFreeClip2BridgeHook : HookContext() {
         .firstOrNull { it.name == methodName && it.parameterTypes.isEmpty() }
         ?.apply { isAccessible = true }
         ?.invoke(target)
+
+    @Suppress("DEPRECATION")
+    private fun Intent.freeClip2EqualizerResultReceiver(): ResultReceiver? = runCatching {
+        getParcelableExtra<ResultReceiver>(
+            HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_RESULT_RECEIVER,
+        )
+    }.getOrNull()
 
     private fun resolveApplicationContext(): Context? = runCatching {
         val activityThread = Class.forName("android.app.ActivityThread")

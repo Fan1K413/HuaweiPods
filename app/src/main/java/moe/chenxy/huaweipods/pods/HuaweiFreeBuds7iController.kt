@@ -20,6 +20,11 @@ object HuaweiFreeBuds7iController {
     private val WEAR_DETECTION_QUERY = hex("5A0005002B110100772A")
     private val HEAD_MOTION_QUERY = hex("5A0006002BB401010B289B")
     private val SPATIAL_AUDIO_QUERY = hex("5A000A002BB4010118020003009B3F")
+    private val SPATIAL_AUDIO_MODE_PACKETS = mapOf(
+        FreeClip2SpatialAudioMode.OFF to hex("5A0009002BB401011802010060ED"),
+        FreeClip2SpatialAudioMode.FIXED to hex("5A0009002BB401011802010170CC"),
+        FreeClip2SpatialAudioMode.HEAD_TRACKING to hex("5A0009002BB401011802010240AF"),
+    )
     private val SOUND_EFFECT_QUERY = hex("5A0005002B4A02008C46")
     private val HIGH_QUALITY_AUDIO_QUERY = hex("5A0005002BA30101F794")
     private val DUAL_DEVICE_QUERY = hex("5A0008002B3101000D0100AEEE")
@@ -46,7 +51,7 @@ object HuaweiFreeBuds7iController {
     ) = send(
         context,
         device,
-        mode.packet(),
+        spatialAudioModePacket(mode),
         "freebuds7i spatial-mode=${mode.extraValue}",
         onComplete,
     )
@@ -94,7 +99,7 @@ object HuaweiFreeBuds7iController {
             }
         }
         request(context, device, SPATIAL_AUDIO_QUERY, "spatial-audio-state") { response ->
-            HuaweiFreeClip2Controller.parseSpatialAudioState(response)?.mode?.let {
+            parseSpatialAudioMode(response)?.let {
                 onState(FreeBuds7iSettingsState(spatialAudioMode = it))
             }
         }
@@ -146,6 +151,18 @@ object HuaweiFreeBuds7iController {
     fun headMotionQueryPacket(): ByteArray = HEAD_MOTION_QUERY.copyOf()
 
     fun spatialAudioQueryPacket(): ByteArray = SPATIAL_AUDIO_QUERY.copyOf()
+
+    /** FreeBuds 7i 的模式值为 1=固定、2=头部跟踪，与 FreeClip 2 相反。 */
+    fun spatialAudioModePacket(mode: FreeClip2SpatialAudioMode): ByteArray =
+        requireNotNull(SPATIAL_AUDIO_MODE_PACKETS[mode]).copyOf()
+
+    fun parseSpatialAudioMode(stream: ByteArray): FreeClip2SpatialAudioMode? =
+        when (HuaweiFreeClip2Controller.parseSpatialAudioState(stream)?.mode) {
+            FreeClip2SpatialAudioMode.OFF -> FreeClip2SpatialAudioMode.OFF
+            FreeClip2SpatialAudioMode.FIXED -> FreeClip2SpatialAudioMode.HEAD_TRACKING
+            FreeClip2SpatialAudioMode.HEAD_TRACKING -> FreeClip2SpatialAudioMode.FIXED
+            null -> null
+        }
 
     fun soundEffectQueryPacket(): ByteArray = SOUND_EFFECT_QUERY.copyOf()
 

@@ -26,7 +26,7 @@
     <string name="freeclip2_sound_effect_sport">运动增效</string>
     <string name="freeclip2_sound_effect_treble">高音增强</string>
     <string name="freeclip2_sound_effect_clear_voice">清晰人声</string>
-    <string name="freeclip2_sound_effect_custom">官方/自定义音效</string>
+    <string name="freeclip2_sound_effect_custom">自定义</string>
     <string name="freeclip2_sound_quality_priority">声音质量优先</string>
     <string name="freeclip2_sound_quality_priority_summary">优先使用高音质蓝牙传输</string>
     <string name="freeclip2_low_latency">低时延模式</string>

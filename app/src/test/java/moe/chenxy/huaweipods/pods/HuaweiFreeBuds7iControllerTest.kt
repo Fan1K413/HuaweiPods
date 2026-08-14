@@ -36,7 +36,9 @@ class HuaweiFreeBuds7iControllerTest {
         )
         assertArrayEquals(
             hex("5A0009002BB401011802010240AF"),
-            FreeClip2SpatialAudioMode.HEAD_TRACKING.packet(),
+            HuaweiFreeBuds7iController.spatialAudioModePacket(
+                FreeClip2SpatialAudioMode.HEAD_TRACKING,
+            ),
         )
         assertArrayEquals(
             hex("5A0006002B49010109AE12"),
@@ -87,6 +89,16 @@ class HuaweiFreeBuds7iControllerTest {
         assertNull(
             HuaweiFreeBuds7iController.parseHeadMotionState(
                 hex("5A000F002BB401010B020101030101040102C55A"),
+            ),
+        )
+    }
+
+    @Test
+    fun `spatial mode parser keeps the verified 7i value order`() {
+        assertEquals(
+            FreeClip2SpatialAudioMode.HEAD_TRACKING,
+            HuaweiFreeBuds7iController.parseSpatialAudioMode(
+                hex("5A000C002BB40101180201020301030A21"),
             ),
         )
     }

@@ -43,6 +43,11 @@ class SmartAudioFreeClip2BridgePolicyTest {
         )
         assertFalse(
             SmartAudioFreeClip2BridgePolicy.isTrustedEqualizerRequestSender(
+                "com.android.settings",
+            ),
+        )
+        assertTrue(
+            SmartAudioFreeClip2BridgePolicy.isTrustedEqualizerRequestSender(
                 "com.android.bluetooth",
             ),
         )

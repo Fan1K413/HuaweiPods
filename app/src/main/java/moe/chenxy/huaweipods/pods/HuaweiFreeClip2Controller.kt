@@ -347,8 +347,8 @@ enum class FreeClip2BooleanFeature(
 }
 
 /**
- * 耳机 AAM 空间音频协议：0=关闭、1=固定、2=头部跟踪。
- * 智慧音频的独立 MBB API 使用另一套枚举，转换只允许发生在桥接策略中。
+ * FreeClip 2 的 AAM 空间音频协议：0=关闭、1=头部跟踪、2=固定。
+ * 智慧音频的独立 MBB API 使用相同顺序，桥接层仍保留显式转换。
  */
 enum class FreeClip2SpatialAudioMode(
     val extraValue: String,
@@ -356,8 +356,8 @@ enum class FreeClip2SpatialAudioMode(
     private val packetBytes: ByteArray,
 ) {
     OFF("off", 0x00, hex("5A0009002BB401011802010060ED")),
-    FIXED("fixed", 0x01, hex("5A0009002BB401011802010170CC")),
-    HEAD_TRACKING("head_tracking", 0x02, hex("5A0009002BB401011802010240AF"));
+    FIXED("fixed", 0x02, hex("5A0009002BB401011802010240AF")),
+    HEAD_TRACKING("head_tracking", 0x01, hex("5A0009002BB401011802010170CC"));
 
     fun packet(): ByteArray = packetBytes.copyOf()
 
@@ -368,11 +368,11 @@ enum class FreeClip2SpatialAudioMode(
         fun fromProtocolValue(value: Int): FreeClip2SpatialAudioMode? =
             entries.firstOrNull { it.protocolValue == value }
 
-        /** 耳机 AAM 状态回报与写命令一致：1=固定、2=头部跟踪。 */
+        /** 耳机 AAM 状态回报与写命令一致：1=头部跟踪、2=固定。 */
         fun fromStateReportValue(value: Int): FreeClip2SpatialAudioMode? = when (value) {
             0 -> OFF
-            1 -> FIXED
-            2 -> HEAD_TRACKING
+            1 -> HEAD_TRACKING
+            2 -> FIXED
             else -> null
         }
     }
@@ -408,7 +408,7 @@ enum class FreeClip2SoundEffect(
     SPORT_ENHANCE("sport_enhance", 0x0A, hex("5A0006002B4901010A9E71")),
     TREBLE_ENHANCE("treble_enhance", 0x03, hex("5A0006002B490101030F58")),
     CLEAR_VOICE("clear_voice", 0x09, hex("5A0006002B49010109AE12")),
-    /** 官方 App 的自定义或模块尚未提供的音效；只读展示，不能作为写命令。 */
+    /** 官方 App 的自定义或模块尚未提供的音效；没有固定包，需通过均衡器接口写入。 */
     CUSTOM("custom", -1, null);
 
     val isSelectable: Boolean

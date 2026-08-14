@@ -28,6 +28,7 @@ object HuaweiPodsAction {
     const val EXTRA_FREECLIP2_BRIDGE_EQ_NAME = "freeclip2_bridge_eq_name"
     const val EXTRA_FREECLIP2_BRIDGE_EQ_GAINS = "freeclip2_bridge_eq_gains"
     const val EXTRA_FREECLIP2_BRIDGE_EQ_PRESET_ID = "freeclip2_bridge_eq_preset_id"
+    const val EXTRA_FREECLIP2_BRIDGE_RESULT_RECEIVER = "freeclip2_bridge_result_receiver"
     const val EXTRA_MODULE_BUILD_ID = "module_build_id"
     const val EXTRA_RESTORE_NOTIFICATION = "restore_notification"
     const val EXTRA_ROUTE_PROBE_ADDRESS = "route_probe_address"
@@ -39,6 +40,7 @@ object HuaweiPodsAction {
     const val FREECLIP2_AUDIO_KIND_SPATIAL_MODE = "spatial_mode"
     const val FREECLIP2_AUDIO_KIND_SPATIAL_SCENE = "spatial_scene"
     const val FREECLIP2_AUDIO_KIND_SOUND_EFFECT = "sound_effect"
+    const val FREECLIP2_AUDIO_KIND_EQUALIZER = "equalizer"
 
     const val ACTION_SHOW_PODS_UI = PREFIX + ".show_pods_ui"
     const val ACTION_SEND_STRONG_TOAST = PREFIX + ".sendstrongtoast"
@@ -82,7 +84,6 @@ object HuaweiPodsAction {
     const val ACTION_SMART_AUDIO_FREECLIP2_QUERY_RESULT =
         PREFIX + ".smart_audio_freeclip2_query_result"
     const val ACTION_SMART_AUDIO_FREECLIP2_EQ_SET = PREFIX + ".smart_audio_freeclip2_eq_set"
-    const val ACTION_SMART_AUDIO_FREECLIP2_EQ_RESULT = PREFIX + ".smart_audio_freeclip2_eq_result"
     const val ACTION_SMART_AUDIO_IMAGE_PROVIDER_READY =
         PREFIX + ".smart_audio_image_provider_ready"
     const val ACTION_POD_IMAGES_CHANGED = PREFIX + ".pod_images_changed"

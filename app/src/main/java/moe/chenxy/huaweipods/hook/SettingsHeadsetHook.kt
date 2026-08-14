@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -22,12 +23,17 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import moe.chenxy.huaweipods.BuildConfig
 import moe.chenxy.huaweipods.R
 import moe.chenxy.huaweipods.config.PodImageChangeNotifier
 import moe.chenxy.huaweipods.config.PodImagePrefs
 import moe.chenxy.huaweipods.pods.FreeClip2BooleanFeature
+import moe.chenxy.huaweipods.pods.FreeClip2SoundEffect
+import moe.chenxy.huaweipods.pods.FreeClip2SpatialAudioMode
+import moe.chenxy.huaweipods.pods.FreeClip2SpatialScene
 import moe.chenxy.huaweipods.pods.HuaweiDeviceRoute
+import moe.chenxy.huaweipods.pods.HuaweiEqualizerCodec
 import moe.chenxy.huaweipods.pods.HuaweiAncLevel
 import moe.chenxy.huaweipods.pods.NoiseControlMode
 import moe.chenxy.huaweipods.pods.UNKNOWN_HUAWEI_ANC_SUBMODE
@@ -50,6 +56,7 @@ import moe.chenxy.huaweipods.pods.supportsAncSubMode
 import moe.chenxy.huaweipods.pods.supportsDiscreteAncLevels
 import moe.chenxy.huaweipods.pods.supportsGestureConfiguration
 import moe.chenxy.huaweipods.pods.supportsTransparency
+import moe.chenxy.huaweipods.ui.components.SmartAudioEqualizerClient
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.HuaweiPodsAction
 import moe.chenxy.huaweipods.utils.miuiStrongToast.data.addHuaweiPodsAction
@@ -65,6 +72,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
+import java.util.Locale
 import java.util.WeakHashMap
 
 @SuppressLint("MissingPermission")
@@ -106,8 +114,16 @@ object SettingsHeadsetHook : HookContext() {
     private const val SETTINGS_HUAWEI_TRANSPARENCY_SELECTOR_TAG =
         "huaweipods_settings_transparency_selector"
     private const val SETTINGS_HUAWEI_ANC_SELECTOR_TAG = "huaweipods_settings_anc_selector"
-    private const val SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG =
-        "huaweipods_settings_freeclip2_audio_controls"
+    private const val SETTINGS_FREECLIP2_AUDIO_CATEGORY_KEY =
+        "huaweipods_freeclip2_audio_category"
+    private const val SETTINGS_FREECLIP2_SOUND_EFFECT_KEY =
+        "huaweipods_freeclip2_sound_effect"
+    private const val SETTINGS_FREECLIP2_EQUALIZER_ENTRY_KEY =
+        "huaweipods_freeclip2_equalizer"
+    private const val SETTINGS_FREECLIP2_EQUALIZER_BAND_KEY_PREFIX =
+        "huaweipods_freeclip2_equalizer_band_"
+    private const val SETTINGS_FREECLIP2_EQUALIZER_PAGE_ARGUMENT =
+        "huaweipods_freeclip2_equalizer_page"
     private const val SETTINGS_FREECLIP2_SMART_CATEGORY_KEY =
         "huaweipods_freeclip2_smart_category"
     private const val SETTINGS_FREECLIP2_SOUND_CATEGORY_KEY =
@@ -149,6 +165,7 @@ object SettingsHeadsetHook : HookContext() {
     private val batteryViews = WeakHashMap<Any, BluetoothDevice>()
     private val headsetFragments = WeakHashMap<Any, Boolean>()
     private val keyConfigFragments = WeakHashMap<Any, Boolean>()
+    private val freeClip2EqualizerFragments = WeakHashMap<Any, Boolean>()
     private val gestureActionCache = linkedMapOf<String, HuaweiTapAction>()
     private val swipeActionCache = linkedMapOf<String, HuaweiSwipeAction>()
     private var context: Context? = null
@@ -167,6 +184,7 @@ object SettingsHeadsetHook : HookContext() {
     private val pendingFreeClip2Features = linkedSetOf<FreeClip2BooleanFeature>()
     private val failedFreeClip2Features = linkedSetOf<FreeClip2BooleanFeature>()
     private val freeClip2AudioPendingGate = FreeClip2AudioPendingGate()
+    private var freeClip2EqualizerWriteGeneration = 0L
     private val settingsAncPendingGate = SettingsAncPendingGate()
     private var settingsAncInternalRenderDepth = 0
     private var proxyCheckSupportCalls = 0
@@ -474,6 +492,7 @@ object SettingsHeadsetHook : HookContext() {
             ) {
                 if (!isHuaweiFragment(instance)) return@hookAfter
                 instance?.let { headsetFragments[it] = true }
+                installFreeClip2AudioPreferences(instance)
                 installFreeClip2FeaturePreferences(instance)
             }
         }.onFailure { Log.w(TAG, "hook MiuiHeadsetFragment.onCreate skipped", it) }
@@ -484,6 +503,7 @@ object SettingsHeadsetHook : HookContext() {
                 Log.d(TAG, "Fragment.onCreateView after ${fragmentDebug(instance)} isHuawei=${isHuaweiFragment(instance)}")
                 if (!isHuaweiFragment(instance)) return@hookAfter
                 instance?.let { headsetFragments[it] = true }
+                installFreeClip2AudioPreferences(instance)
                 installFreeClip2FeaturePreferences(instance)
                 schedulePruneFreeBudsUnsupportedViews(result as? View)
                 requestBluetoothStatus("fragment-create")
@@ -496,6 +516,7 @@ object SettingsHeadsetHook : HookContext() {
             hookAfter(findMethodByParamCount("com.android.settings.bluetooth.MiuiHeadsetFragment", "onResume", 0)) {
                 Log.d(TAG, "Fragment.onResume after ${fragmentDebug(instance)} isHuawei=${isHuaweiFragment(instance)}")
                 if (!isHuaweiFragment(instance)) return@hookAfter
+                installFreeClip2AudioPreferences(instance)
                 schedulePruneFreeBudsUnsupportedViews(fragmentRootView(instance))
                 injectFragmentStatus(instance)
             }
@@ -543,17 +564,56 @@ object SettingsHeadsetHook : HookContext() {
             val level = commandArgs[0] as? String ?: ""
             huaweiAncFromLevelCommand(level)
         }
+        hookFreeClip2SpatialSceneChange()
         hookFragmentAncUiRender()
         hookKeyConfigFragmentState()
+    }
+
+    private fun hookFreeClip2SpatialSceneChange() {
+        runCatching {
+            hookBefore(
+                findMethod(
+                    "com.android.settings.bluetooth.MiuiHeadsetFragment",
+                    "onAncLevelChange",
+                    Int::class.javaPrimitiveType!!,
+                ),
+            ) {
+                if (!isHuaweiFragment(instance) ||
+                    currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2
+                ) {
+                    return@hookBefore
+                }
+                val scene = FreeClip2SpatialScene.entries.getOrNull(args[0] as? Int ?: -1)
+                    ?: return@hookBefore
+                if (currentFreeClip2AudioState.spatialScene != scene) {
+                    onFreeClip2AudioSelected(
+                        HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_SCENE,
+                        scene.extraValue,
+                    )
+                }
+                result = null
+            }
+        }.onFailure { Log.w(TAG, "hook FreeClip 2 native spatial scene selector skipped", it) }
     }
 
     private fun hookKeyConfigFragmentState() {
         hookNativeKeyConfigPreferenceChange()
 
         runCatching {
+            hookBefore(findMethodByParamCount("com.android.settings.bluetooth.MiuiHeadsetKeyConfigFragment", "onCreate", 1)) {
+                isFreeClip2EqualizerPage(instance)
+            }
+        }.onFailure { Log.w(TAG, "hook MiuiHeadsetKeyConfigFragment.onCreate skipped", it) }
+
+        runCatching {
             hookAfter(findMethodByParamCount("com.android.settings.bluetooth.MiuiHeadsetKeyConfigFragment", "onCreateView", 3)) {
                 Log.d(TAG, "MiuiHeadsetKeyConfigFragment.onCreateView after isHuawei=${isHuaweiKeyConfigFragment(instance)}")
                 if (!isHuaweiKeyConfigFragment(instance)) return@hookAfter
+                if (isFreeClip2EqualizerPage(instance)) {
+                    configureFreeClip2EqualizerPage(instance)
+                    requestFreeClip2AudioState("equalizer-create")
+                    return@hookAfter
+                }
                 configureFreeBudsNativeGesturePage(instance)
                 requestHuaweiGestureState(instance, "onCreateView")
             }
@@ -563,6 +623,11 @@ object SettingsHeadsetHook : HookContext() {
             hookAfter(findMethodByParamCount("com.android.settings.bluetooth.MiuiHeadsetKeyConfigFragment", "onResume", 0)) {
                 Log.d(TAG, "MiuiHeadsetKeyConfigFragment.onResume after isHuawei=${isHuaweiKeyConfigFragment(instance)}")
                 if (!isHuaweiKeyConfigFragment(instance)) return@hookAfter
+                if (isFreeClip2EqualizerPage(instance)) {
+                    configureFreeClip2EqualizerPage(instance)
+                    requestFreeClip2AudioState("equalizer-resume")
+                    return@hookAfter
+                }
                 configureFreeBudsNativeGesturePage(instance)
                 requestHuaweiGestureState(instance, "onResume")
             }
@@ -813,10 +878,26 @@ object SettingsHeadsetHook : HookContext() {
                         val soundEffectValue = receivedIntent.getStringExtra(
                             HuaweiPodsAction.EXTRA_FREECLIP2_SOUND_EFFECT,
                         )
+                        val equalizerPresetId = receivedIntent.takeIf {
+                            it.hasExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID)
+                        }?.getIntExtra(
+                            HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID,
+                            -1,
+                        )?.takeIf { it in 0x64..0x66 }
+                        val equalizerGains = receivedIntent.getIntArrayExtra(
+                            HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_GAINS,
+                        )?.toList()?.takeIf(::isValidFreeClip2EqualizerGains)
                         currentFreeClip2AudioState = currentFreeClip2AudioState.mergeExtraValues(
                             spatialModeValue = spatialModeValue,
                             spatialSceneValue = spatialSceneValue,
                             soundEffectValue = soundEffectValue,
+                            equalizerPresetIdValue = equalizerPresetId,
+                            equalizerNameValue = equalizerPresetId?.let {
+                                receivedIntent.getStringExtra(
+                                    HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME,
+                                )
+                            },
+                            equalizerGainsValue = equalizerGains,
                         )
                         freeClip2AudioPendingGate.observeConfirmed(
                             spatialModeValue,
@@ -953,9 +1034,11 @@ object SettingsHeadsetHook : HookContext() {
     private fun updateFragments() {
         headsetFragments.keys.toList().forEach { fragment ->
             if (isCurrentHuaweiFragment(fragment)) {
+                renderFreeClip2AudioPreferences(fragment)
                 injectFragmentStatus(fragment)
             }
         }
+        updateFreeClip2EqualizerFragments()
     }
 
     private fun clearBatteryViews(address: String?) {
@@ -1229,7 +1312,21 @@ object SettingsHeadsetHook : HookContext() {
     private fun updateGestureFragments() {
         keyConfigFragments.keys.toList().forEach { fragment ->
             if (isCurrentHuaweiKeyConfigFragment(fragment)) {
-                configureFreeBudsNativeGesturePage(fragment)
+                if (isFreeClip2EqualizerPage(fragment)) {
+                    configureFreeClip2EqualizerPage(fragment)
+                } else {
+                    configureFreeBudsNativeGesturePage(fragment)
+                }
+            }
+        }
+    }
+
+    private fun updateFreeClip2EqualizerFragments() {
+        keyConfigFragments.keys.toList().forEach { fragment ->
+            if (isCurrentHuaweiKeyConfigFragment(fragment) &&
+                isFreeClip2EqualizerPage(fragment)
+            ) {
+                configureFreeClip2EqualizerPage(fragment)
             }
         }
     }
@@ -1851,16 +1948,183 @@ object SettingsHeadsetHook : HookContext() {
         // 重新应用策略，避免一个已隐藏条目被复用后继续误伤无关设置。
         restoreTrackedSettingsCapabilityViews(root)
         replaceSettingsHeaderImage(root)
+        applyXiaomiHeadsetCardBackgrounds(root)
         val route = currentHuaweiRoute()
         val policy = settingsHeadsetUiPolicy(route)
         val modeContainer = modeButtonContainer(root)
-        modeContainer?.let { setSettingsCapabilityViewVisible(it, policy.showAnc) }
+        modeContainer?.let {
+            setSettingsCapabilityViewVisible(
+                it,
+                policy.showAnc || route == HuaweiDeviceRoute.HUAWEI_FREECLIP2,
+            )
+        }
         setSettingsRowsVisible(root, settingsEarTipFitKeywords, policy.showEarTipFitTest)
         setSettingsRowsVisible(root, gestureEntryKeywords, policy.showGestureConfiguration)
         redirectMoreSettingsToHuaweiSmartAudio(root)
-        syncFreeClip2AudioControls(root, modeContainer)
         if (policy.showAnc) configureTransparencyModeView(root, modeContainer, route)
         replaceHuaweiAncLevelsWithHuaweiDial(root)
+        configureFreeClip2SpatialModeView(root, modeContainer)
+    }
+
+    private fun applyXiaomiHeadsetCardBackgrounds(root: View) {
+        if (isSettingsDarkMode(root.context)) return
+        val resources = root.resources
+        val packageName = root.context.packageName
+        listOf("batteryCard", "ancCard", "renameCard", "otaCard").forEach { name ->
+            val viewId = resources.getIdentifier(name, "id", packageName)
+            val card = viewId.takeIf { it != 0 }?.let { root.findViewById<View>(it) } ?: return@forEach
+            runCatching {
+                val currentColor = (callCompatibleMethod(card, "getCardBackgroundColor") as? ColorStateList)?.defaultColor
+                if (currentColor != Color.WHITE) {
+                    callCompatibleMethod(card, "setCardBackgroundColor", Color.WHITE)
+                }
+            }
+                .onFailure { Log.w(TAG, "apply Xiaomi headset card background failed", it) }
+        }
+    }
+
+    /** 将宿主降噪卡片的三列结构复用于 FreeClip 2 空间音频。 */
+    private fun configureFreeClip2SpatialModeView(root: View, modeContainer: View?) {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2 || modeContainer == null) return
+        val labels = huaweiFreeClip2AudioLabels { resId, fallback ->
+            moduleString(root.context, resId, fallback)
+        }
+        configureFreeClip2SpatialOption(
+            root,
+            optionId = "transport",
+            imageId = "imageTransport",
+            textId = "transparents",
+            drawableName = "closeanc",
+            label = labels.spatialModeOff,
+            mode = FreeClip2SpatialAudioMode.OFF,
+        )
+        configureFreeClip2SpatialOption(
+            root,
+            optionId = "openAnc",
+            imageId = "imageopenAnc",
+            textId = "ancText",
+            drawableName = "openanc",
+            label = labels.spatialModeFixed,
+            mode = FreeClip2SpatialAudioMode.FIXED,
+        )
+        configureFreeClip2SpatialOption(
+            root,
+            optionId = "closeAnc",
+            imageId = "imageCloseAnc",
+            textId = "closeAncText",
+            drawableName = "transparent",
+            label = labels.spatialModeHeadTracking,
+            mode = FreeClip2SpatialAudioMode.HEAD_TRACKING,
+        )
+        configureFreeClip2SpatialSceneView(root, labels)
+    }
+
+    private fun configureFreeClip2SpatialOption(
+        root: View,
+        optionId: String,
+        imageId: String,
+        textId: String,
+        drawableName: String,
+        label: String,
+        mode: FreeClip2SpatialAudioMode,
+    ) {
+        val option = root.hostView(optionId) ?: return
+        val image = root.hostView(imageId) as? ImageView ?: return
+        val text = root.hostView(textId) as? TextView ?: return
+        val selected = currentFreeClip2AudioState.spatialMode == mode
+        val resources = root.resources
+        val packageName = root.context.packageName
+        val drawableId = resources.getIdentifier(
+            "${drawableName}_${if (selected) "on" else "off"}",
+            "drawable",
+            packageName,
+        )
+        if (drawableId != 0) {
+            image.clearColorFilter()
+            image.setImageResource(drawableId)
+        }
+        val imageHeightId = resources.getIdentifier(
+            if (selected) "headset_set_dimens" else "headset_unset_dimens",
+            "integer",
+            packageName,
+        )
+        if (imageHeightId != 0) {
+            image.layoutParams?.let { params ->
+                params.apply {
+                    width = ViewGroup.LayoutParams.MATCH_PARENT
+                    height = resources.getInteger(imageHeightId)
+                }
+                image.layoutParams = params
+            }
+        }
+        val textColorId = resources.getIdentifier(
+            if (selected) "anc_text_color" else "first_text_color",
+            "color",
+            packageName,
+        )
+        if (textColorId != 0) {
+            text.setTextColor(root.context.getColor(textColorId))
+        }
+        text.text = label
+        option.isSelected = selected
+        option.contentDescription = label
+        option.setOnClickListener {
+            if (currentFreeClip2AudioState.spatialMode != mode) {
+                onFreeClip2AudioSelected(
+                    HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE,
+                    mode.extraValue,
+                )
+            }
+        }
+    }
+
+    /** 使用宿主降噪卡片内置的四档调节区显示空间模式。 */
+    private fun configureFreeClip2SpatialSceneView(
+        root: View,
+        labels: HuaweiFreeClip2AudioControlsView.Labels,
+    ) {
+        val adjustContainer = root.hostView("ancAdjust") ?: return
+        val textContainer = root.hostView("ancAdjustText") ?: return
+        val adjustView = root.hostView("ancAdjustView") ?: return
+        root.hostView("ancAdjustView2")?.visibility = View.GONE
+        root.hostView("transparentAdjust")?.visibility = View.GONE
+        root.hostView("transparentAdjustText")?.visibility = View.GONE
+        val visible = currentFreeClip2AudioState.spatialMode != FreeClip2SpatialAudioMode.OFF
+        adjustContainer.visibility = if (visible) View.VISIBLE else View.GONE
+        textContainer.visibility = if (visible) View.VISIBLE else View.GONE
+        adjustView.visibility = if (visible) View.VISIBLE else View.GONE
+        adjustView.isEnabled = visible
+        if (!visible) return
+
+        val options = listOf(
+            "ancAdapterText" to labels.spatialSceneDefault,
+            "ancLowText" to labels.spatialSceneTheater,
+            "ancMediumText" to labels.spatialSceneCinema,
+            "ancHighText" to labels.spatialSceneConcert,
+        )
+        val selectedIndex = FreeClip2SpatialScene.entries.indexOf(
+            currentFreeClip2AudioState.spatialScene,
+        ).coerceAtLeast(0)
+        val resources = root.resources
+        val packageName = root.context.packageName
+        val selectedColorId = resources.getIdentifier("anc_text_color", "color", packageName)
+        val normalColorId = resources.getIdentifier("anc_text_unselect_color", "color", packageName)
+        options.forEachIndexed { index, (viewId, label) ->
+            (root.hostView(viewId) as? TextView)?.apply {
+                text = label
+                visibility = View.VISIBLE
+                val colorId = if (index == selectedIndex) selectedColorId else normalColorId
+                if (colorId != 0) setTextColor(context.getColor(colorId))
+            }
+        }
+        callCompatibleMethod(adjustView, "setPointCount", options.size)
+        callCompatibleMethod(adjustView, "setCurrentPointIndex", selectedIndex)
+        adjustView.contentDescription = labels.spatialScene
+    }
+
+    private fun View.hostView(name: String): View? {
+        val id = resources.getIdentifier(name, "id", context.packageName)
+        return id.takeIf { it != 0 }?.let { findViewById<View>(it) }
     }
 
     private fun setSettingsRowsVisible(
@@ -1913,87 +2177,354 @@ object SettingsHeadsetHook : HookContext() {
         }
     }
 
-    private fun syncFreeClip2AudioControls(root: View, modeContainer: View?) {
-        val existing = findTaggedView(root, SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG)
-        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
-            existing?.let { (it.parent as? ViewGroup)?.removeView(it) }
-            return
-        }
-        val anchor = modeContainer ?: run {
-            Log.d(TAG, "Settings FreeClip 2 audio controls anchor not found")
-            return
-        }
-        val parent = anchor.parent as? ViewGroup ?: run {
-            Log.d(TAG, "Settings FreeClip 2 audio controls parent not found")
-            return
-        }
-        val currentControls = existing as? HuaweiFreeClip2AudioControlsView
-        val controls = if (currentControls != null && currentControls.parent === parent) {
-            currentControls
-        } else {
-            existing?.let { (it.parent as? ViewGroup)?.removeView(it) }
-            HuaweiFreeClip2AudioControlsView(
-                context = anchor.context,
-                onSpatialModeSelected = { value ->
-                    onFreeClip2AudioSelected(
-                        root,
-                        HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE,
-                        value.extraValue,
-                    )
-                },
-                onSpatialSceneSelected = { value ->
-                    onFreeClip2AudioSelected(
-                        root,
-                        HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_SCENE,
-                        value.extraValue,
-                    )
-                },
-                onSoundEffectSelected = { value ->
-                    onFreeClip2AudioSelected(
-                        root,
-                        HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SOUND_EFFECT,
-                        value.extraValue,
-                    )
-                },
-            ).apply {
-                tag = SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG
-            }.also { newControls ->
-                val index = parent.indexOfChild(anchor).takeIf { it >= 0 } ?: parent.childCount - 1
-                parent.addView(
-                    newControls,
-                    (index + 1).coerceAtMost(parent.childCount),
-                    ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
+    /** 复用小米耳机页现有的下拉偏好项，不再动态创建自定义卡片。 */
+    private fun installFreeClip2AudioPreferences(fragment: Any?) {
+        if (fragment == null || currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        runCatching {
+            val screen = callCompatibleMethod(fragment, "getPreferenceScreen") ?: return@runCatching
+            val categoryTemplate = nativePreference(fragment, "switchConfig") ?: return@runCatching
+            val dropDownClass = nativePreference(fragment, "codecType")?.javaClass
+                ?: findClass("com.android.settingslib.miuisettings.preference.miuix.DropDownPreference")
+            val categoryOrder = (callCompatibleMethod(categoryTemplate, "getOrder") as? Int) ?: 3
+            val category = nativePreference(fragment, SETTINGS_FREECLIP2_AUDIO_CATEGORY_KEY)
+                ?: newHostPreference(categoryTemplate, preferenceContext(categoryTemplate)).also {
+                    shiftNativePreferenceOrders(screen, categoryOrder, 1)
+                    callCompatibleMethod(it, "setKey", SETTINGS_FREECLIP2_AUDIO_CATEGORY_KEY)
+                    callCompatibleMethod(it, "setOrder", categoryOrder)
+                    check(callCompatibleMethod(screen, "addPreference", it) != false)
+                }
+            ensureFreeClip2AudioPreference(
+                fragment = fragment,
+                category = category,
+                preferenceClass = dropDownClass,
+                key = SETTINGS_FREECLIP2_SOUND_EFFECT_KEY,
+                order = 0,
+                kind = HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SOUND_EFFECT,
+            )
+            nativePreference(fragment, "key_config")?.let { rowTemplate ->
+                ensureFreeClip2EqualizerEntry(
+                    fragment = fragment,
+                    category = category,
+                    rowTemplate = rowTemplate,
                 )
-                Log.d(TAG, "Settings FreeClip 2 audio controls added parent=${parent.javaClass.name}")
             }
-        }
-        controls.render(
-            spatialMode = currentFreeClip2AudioState.spatialMode,
-            spatialScene = currentFreeClip2AudioState.spatialScene,
-            soundEffect = currentFreeClip2AudioState.soundEffect,
-            labels = huaweiFreeClip2AudioLabels { resId, fallback ->
-                moduleString(anchor.context, resId, fallback)
-            },
-            darkSurface = isSettingsDarkMode(anchor.context),
-            showSpatialScene = true,
-            compact = false,
-        )
-        controls.visibility = View.VISIBLE
+            renderFreeClip2AudioPreferences(fragment)
+            Log.d(TAG, "Settings FreeClip 2 native audio preferences installed")
+        }.onFailure { Log.w(TAG, "Settings FreeClip 2 native audio preference install failed", it) }
     }
 
-    private fun onFreeClip2AudioSelected(root: View, kind: String, value: String) {
-        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
-        val ctx = context ?: return
+    private fun ensureFreeClip2AudioPreference(
+        fragment: Any,
+        category: Any,
+        preferenceClass: Class<*>,
+        key: String,
+        order: Int,
+        kind: String,
+    ): Any {
+        nativePreference(fragment, key)?.let { return it }
+        return newHostPreference(preferenceClass, preferenceContext(category)).also { preference ->
+            callCompatibleMethod(preference, "setKey", key)
+            callCompatibleMethod(preference, "setOrder", order)
+            callCompatibleMethod(preference, "setPersistent", false)
+            callCompatibleMethod(
+                preference,
+                "setOnPreferenceChangeListener",
+                freeClip2AudioPreferenceListener(kind),
+            )
+            check(callCompatibleMethod(category, "addPreference", preference) != false)
+        }
+    }
+
+    private fun ensureFreeClip2EqualizerEntry(
+        fragment: Any,
+        category: Any,
+        rowTemplate: Any,
+    ) {
+        if (nativePreference(fragment, SETTINGS_FREECLIP2_EQUALIZER_ENTRY_KEY) != null) return
+        newHostPreference(rowTemplate, preferenceContext(category)).also { preference ->
+            callCompatibleMethod(preference, "setKey", SETTINGS_FREECLIP2_EQUALIZER_ENTRY_KEY)
+            callCompatibleMethod(preference, "setOrder", 1)
+            callCompatibleMethod(preference, "setPersistent", false)
+            callCompatibleMethod(preference, "setShowRightArrow", true)
+            callCompatibleMethod(
+                preference,
+                "setOnPreferenceClickListener",
+                freeClip2EqualizerEntryClickListener(fragment),
+            )
+            check(callCompatibleMethod(category, "addPreference", preference) != false)
+        }
+    }
+
+    private fun freeClip2EqualizerEntryClickListener(fragment: Any): Any {
+        val listenerClass = findClass("androidx.preference.Preference\$OnPreferenceClickListener")
+        val fragmentReference = WeakReference(fragment)
+        return Proxy.newProxyInstance(appClassLoader, arrayOf(listenerClass)) { proxy, method, arguments ->
+            when (method.name) {
+                "onPreferenceClick" -> openFreeClip2EqualizerPage(fragmentReference.get())
+                "equals" -> proxy === arguments?.firstOrNull()
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "HuaweiPodsFreeClip2EqualizerEntryListener"
+                else -> null
+            }
+        }
+    }
+
+    private fun openFreeClip2EqualizerPage(fragment: Any?): Boolean {
+        if (fragment == null || currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            return false
+        }
+        return runCatching {
+            val activity = callCompatibleMethod(fragment, "getActivity") ?: return@runCatching false
+            val equalizerFragment = findClass(
+                "com.android.settings.bluetooth.MiuiHeadsetKeyConfigFragment",
+            ).getConstructor().newInstance()
+            callCompatibleMethod(
+                equalizerFragment,
+                "setArguments",
+                Bundle().apply { putBoolean(SETTINGS_FREECLIP2_EQUALIZER_PAGE_ARGUMENT, true) },
+            )
+            freeClip2EqualizerFragments[equalizerFragment] = true
+            callCompatibleMethod(activity, "changeFragment", equalizerFragment)
+            true
+        }.onFailure {
+            Log.w(TAG, "Settings FreeClip 2 equalizer page launch failed", it)
+        }.getOrDefault(false)
+    }
+
+    private fun freeClip2AudioPreferenceListener(kind: String): Any {
+        val listenerClass = findClass("androidx.preference.Preference\$OnPreferenceChangeListener")
+        return Proxy.newProxyInstance(appClassLoader, arrayOf(listenerClass)) { proxy, method, arguments ->
+            when (method.name) {
+                "onPreferenceChange" -> {
+                    val value = arguments?.getOrNull(1)?.toString() ?: return@newProxyInstance false
+                    onFreeClip2AudioPreferenceChanged(kind, value)
+                }
+                "equals" -> proxy === arguments?.firstOrNull()
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "HuaweiPodsFreeClip2AudioPreferenceListener($kind)"
+                else -> null
+            }
+        }
+    }
+
+    private fun onFreeClip2AudioPreferenceChanged(kind: String, value: String): Boolean {
+        if (kind != HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SOUND_EFFECT) return false
+        val effect = FreeClip2SoundEffect.fromExtraValue(value) ?: return false
+        if (effect == FreeClip2SoundEffect.CUSTOM) {
+            if (currentFreeClip2AudioState.soundEffect != FreeClip2SoundEffect.CUSTOM) {
+                currentFreeClip2AudioState = currentFreeClip2AudioState.copy(soundEffect = effect)
+                saveCurrentFreeClip2AudioState(context)
+                updateFragments()
+            }
+            return true
+        }
+        if (!effect.isSelectable) return false
+        freeClip2EqualizerWriteGeneration += 1
+        return value == currentFreeClip2AudioState.soundEffect.extraValue ||
+            onFreeClip2AudioSelected(kind, value)
+    }
+
+    private fun freeClip2EqualizerPreferenceListener(index: Int): Any {
+        val listenerClass = findClass("androidx.preference.Preference\$OnPreferenceChangeListener")
+        return Proxy.newProxyInstance(appClassLoader, arrayOf(listenerClass)) { proxy, method, arguments ->
+            when (method.name) {
+                "onPreferenceChange" -> {
+                    val gain = (arguments?.getOrNull(1) as? Number)?.toInt()
+                        ?: return@newProxyInstance false
+                    val gains = currentFreeClip2AudioState.equalizerGains.toMutableList()
+                    gains[index] = gain.coerceIn(
+                        HuaweiEqualizerCodec.GAIN_RANGE.first,
+                        HuaweiEqualizerCodec.GAIN_RANGE.last,
+                    )
+                    writeFreeClip2CustomEqualizer(gains)
+                }
+                "equals" -> proxy === arguments?.firstOrNull()
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "HuaweiPodsFreeClip2EqualizerListener($index)"
+                else -> null
+            }
+        }
+    }
+
+    private fun renderFreeClip2AudioPreferences(fragment: Any?) {
+        runCatching {
+            val category = nativePreference(fragment, SETTINGS_FREECLIP2_AUDIO_CATEGORY_KEY)
+                ?: return@runCatching
+            val visible = currentHuaweiRoute() == HuaweiDeviceRoute.HUAWEI_FREECLIP2
+            callCompatibleMethod(category, "setVisible", visible)
+            if (!visible) return@runCatching
+            val preferenceContext = preferenceContext(category)
+            val labels = huaweiFreeClip2AudioLabels { resId, fallback ->
+                moduleString(preferenceContext, resId, fallback)
+            }
+            nativePreference(fragment, SETTINGS_FREECLIP2_SOUND_EFFECT_KEY)?.let { preference ->
+                renderFreeClip2AudioDropDown(
+                    preference = preference,
+                    title = labels.soundEffect,
+                    summary = if (
+                        currentFreeClip2AudioState.soundEffect == FreeClip2SoundEffect.CUSTOM
+                    ) {
+                        moduleString(
+                            preferenceContext,
+                            R.string.huawei_equalizer_title,
+                            "自定义均衡器",
+                        )
+                    } else {
+                        moduleString(
+                            preferenceContext,
+                            R.string.freeclip2_sound_effect_preset,
+                            "官方预置音效",
+                        )
+                    },
+                    entries = freeClip2SettingsSoundEffects().map { effect ->
+                        when (effect) {
+                            FreeClip2SoundEffect.DEFAULT -> labels.soundEffectDefault
+                            FreeClip2SoundEffect.SPORT_ENHANCE -> labels.soundEffectSport
+                            FreeClip2SoundEffect.TREBLE_ENHANCE -> labels.soundEffectTreble
+                            FreeClip2SoundEffect.CLEAR_VOICE -> labels.soundEffectClearVoice
+                            FreeClip2SoundEffect.CUSTOM -> labels.soundEffectCustom
+                        } to effect.extraValue
+                    },
+                    value = currentFreeClip2AudioState.soundEffect.extraValue,
+                    visible = true,
+                )
+            }
+            renderFreeClip2EqualizerEntry(fragment, preferenceContext)
+        }.onFailure { Log.w(TAG, "Settings FreeClip 2 native audio preference render failed", it) }
+    }
+
+    private fun renderFreeClip2EqualizerEntry(
+        fragment: Any?,
+        preferenceContext: Context,
+    ) {
+        val visible = shouldShowFreeClip2EqualizerEntry(currentFreeClip2AudioState.soundEffect)
+        nativePreference(fragment, SETTINGS_FREECLIP2_EQUALIZER_ENTRY_KEY)?.let { preference ->
+            callCompatibleMethod(
+                preference,
+                "setTitle",
+                moduleString(preferenceContext, R.string.huawei_equalizer_title, "自定义均衡器"),
+            )
+            callCompatibleMethod(preference, "setSummary", null)
+            callCompatibleMethod(preference, "setShowRightArrow", true)
+            callCompatibleMethod(preference, "setVisible", visible)
+            callCompatibleMethod(preference, "setEnabled", true)
+        }
+    }
+
+    private fun isFreeClip2EqualizerPage(fragment: Any?): Boolean {
+        if (fragment == null) return false
+        if (freeClip2EqualizerFragments.containsKey(fragment)) return true
+        val arguments = runCatching {
+            callCompatibleMethod(fragment, "getArguments") as? Bundle
+        }.getOrNull()
+        val marked = arguments?.getBoolean(SETTINGS_FREECLIP2_EQUALIZER_PAGE_ARGUMENT, false) == true
+        if (marked) freeClip2EqualizerFragments[fragment] = true
+        return marked
+    }
+
+    private fun configureFreeClip2EqualizerPage(fragment: Any?) {
+        if (fragment == null || gestureDeviceRoute(fragment) != HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            return
+        }
+        keyConfigFragments[fragment] = true
+        runCatching {
+            nativeGesturePreferenceKeys.forEach { key -> hideNativePreference(fragment, key) }
+            val category = nativePreference(fragment, "headsetKeyConfig") ?: return@runCatching
+            val preferenceContext = preferenceContext(category)
+            val equalizerClass = findClass("com.android.settings.widget.MiuiSeekBarPreference")
+            repeat(HuaweiEqualizerCodec.BAND_COUNT) { index ->
+                val key = SETTINGS_FREECLIP2_EQUALIZER_BAND_KEY_PREFIX + index
+                val preference = nativePreference(fragment, key)
+                    ?: newHostPreference(equalizerClass, preferenceContext).also { created ->
+                        callCompatibleMethod(created, "setKey", key)
+                        callCompatibleMethod(created, "setOrder", index)
+                        callCompatibleMethod(created, "setPersistent", false)
+                        callCompatibleMethod(created, "setShowTitleIcon", false)
+                        callCompatibleMethod(
+                            created,
+                            "setOnPreferenceChangeListener",
+                            freeClip2EqualizerPreferenceListener(index),
+                        )
+                        check(callCompatibleMethod(category, "addPreference", created) != false)
+                    }
+                renderFreeClip2EqualizerBand(preference, preferenceContext, index)
+            }
+            val activity = callCompatibleMethod(fragment, "getActivity")
+            val actionBar = callCompatibleMethod(activity, "getAppCompatActionBar")
+            callCompatibleMethod(
+                actionBar,
+                "setTitle",
+                moduleString(preferenceContext, R.string.huawei_equalizer_title, "自定义均衡器"),
+            )
+        }.onFailure {
+            Log.w(TAG, "Settings FreeClip 2 equalizer page configuration failed", it)
+        }
+    }
+
+    private fun renderFreeClip2EqualizerBand(
+        preference: Any,
+        preferenceContext: Context,
+        index: Int,
+    ) {
+        val gain = currentFreeClip2AudioState.equalizerGains[index]
+        callCompatibleMethod(
+            preference,
+            "setTitle",
+            String.format(
+                Locale.getDefault(),
+                moduleString(
+                    preferenceContext,
+                    R.string.freebuds7i_eq_band,
+                    "频段 %1\$d",
+                ),
+                index + 1,
+            ),
+        )
+        callCompatibleMethod(preference, "setSummary", formatFreeClip2EqualizerGain(gain))
+        callCompatibleMethod(preference, "setMin", HuaweiEqualizerCodec.GAIN_RANGE.first)
+        callCompatibleMethod(preference, "setMax", HuaweiEqualizerCodec.GAIN_RANGE.last)
+        callCompatibleMethod(preference, "setProgress", gain)
+        callCompatibleMethod(preference, "setVisible", true)
+        callCompatibleMethod(preference, "setEnabled", true)
+    }
+
+    private fun formatFreeClip2EqualizerGain(gain: Int): String {
+        val sign = when {
+            gain > 0 -> "+"
+            gain < 0 -> "-"
+            else -> ""
+        }
+        val magnitude = abs(gain)
+        return "$sign${magnitude / 10}.${magnitude % 10} dB"
+    }
+
+    private fun renderFreeClip2AudioDropDown(
+        preference: Any,
+        title: String,
+        summary: String? = null,
+        entries: List<Pair<String, String>>,
+        value: String,
+        visible: Boolean,
+    ) {
+        callCompatibleMethod(preference, "setTitle", title)
+        summary?.let { callCompatibleMethod(preference, "setSummary", it) }
+        callCompatibleMethod(preference, "setEntries", entries.map { it.first }.toTypedArray())
+        callCompatibleMethod(preference, "setEntryValues", entries.map { it.second }.toTypedArray())
+        callCompatibleMethod(preference, "setValue", value)
+        callCompatibleMethod(preference, "setVisible", visible)
+        callCompatibleMethod(preference, "setEnabled", true)
+    }
+
+    private fun onFreeClip2AudioSelected(kind: String, value: String): Boolean {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return false
+        val ctx = context ?: return false
         val address = currentAddress?.takeIf(String::isNotBlank) ?: run {
             Log.w(TAG, "Settings FreeClip 2 audio command skipped: missing address kind=$kind value=$value")
-            return
+            return false
         }
         if (!freeClip2AudioPendingGate.tryBegin(kind, value, SystemClock.elapsedRealtime())) {
             Log.d(TAG, "Settings duplicate FreeClip 2 audio request ignored kind=$kind value=$value")
-            return
+            return false
         }
         val sent = runCatching {
             ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_SET).apply {
@@ -2009,10 +2540,57 @@ object SettingsHeadsetHook : HookContext() {
         if (!sent) {
             freeClip2AudioPendingGate.clear()
             Log.w(TAG, "Settings FreeClip 2 audio request send failed kind=$kind value=$value")
-            return
+            return false
         }
-        schedulePruneFreeBudsUnsupportedViews(root)
         Log.i(TAG, "Settings FreeClip 2 audio requested address=$address kind=$kind value=$value")
+        return true
+    }
+
+    private fun writeFreeClip2CustomEqualizer(gains: List<Int>): Boolean {
+        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2 ||
+            !isValidFreeClip2EqualizerGains(gains)
+        ) {
+            return false
+        }
+        val ctx = context ?: return false
+        val address = currentAddress?.takeIf(String::isNotBlank) ?: return false
+        val previous = currentFreeClip2AudioState
+        val presetId = previous.equalizerPresetId.takeIf { it in 0x64..0x66 } ?: 0x64
+        val presetName = previous.equalizerName.trim().ifEmpty { "HuaweiPods" }
+        val generation = ++freeClip2EqualizerWriteGeneration
+        currentFreeClip2AudioState = previous.copy(
+            soundEffect = FreeClip2SoundEffect.CUSTOM,
+            equalizerPresetId = presetId,
+            equalizerName = presetName,
+            equalizerGains = gains.toList(),
+        )
+        saveCurrentFreeClip2AudioState(ctx)
+        updateFragments()
+        SmartAudioEqualizerClient.setCustom(
+            context = ctx,
+            address = address,
+            presetId = presetId,
+            name = presetName,
+            gains = gains,
+        ) { success ->
+            if (generation != freeClip2EqualizerWriteGeneration ||
+                !address.equals(currentAddress, ignoreCase = true)
+            ) {
+                return@setCustom
+            }
+            if (!success) {
+                currentFreeClip2AudioState = previous
+                saveCurrentFreeClip2AudioState(ctx)
+                updateFragments()
+                Toast.makeText(
+                    ctx,
+                    moduleString(ctx, R.string.freeclip2_state_failed, "设置失败，请重试"),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                Log.w(TAG, "Settings FreeClip 2 custom equalizer write failed address=$address")
+            }
+        }
+        return true
     }
 
     private fun installFreeClip2FeaturePreferences(fragment: Any?) {
@@ -2138,7 +2716,11 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun newHostPreference(template: Any, context: Context): Any {
-        return template.javaClass.getConstructor(Context::class.java).newInstance(context)
+        return newHostPreference(template.javaClass, context)
+    }
+
+    private fun newHostPreference(preferenceClass: Class<*>, context: Context): Any {
+        return preferenceClass.getConstructor(Context::class.java).newInstance(context)
     }
 
     private fun preferenceContext(preference: Any): Context {
@@ -2461,6 +3043,12 @@ object SettingsHeadsetHook : HookContext() {
             ancLevelAnchorKeywords.any { text.contains(it, ignoreCase = true) }
         }
         val levelAnchor = levelContainer(root, anchorMatches.ifEmpty { matches })
+        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            existingDial?.visibility = View.GONE
+            existingAncSelector?.visibility = View.GONE
+            existingTransparencySelector?.visibility = View.GONE
+            return
+        }
         if (!route.supportsAnc) {
             existingDial?.visibility = View.GONE
             existingAncSelector?.visibility = View.GONE
@@ -2797,6 +3385,7 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun modeButtonContainer(root: View): View? {
+        root.hostView("ancLayoutInfo")?.let { return it }
         val matches = mutableListOf<TextView>()
         collectAncModeTextMatches(root, matches)
         val common = commonAncestor(root, matches)
@@ -2808,7 +3397,6 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     private fun collectAncModeTextMatches(view: View, out: MutableList<TextView>) {
-        if (view.tag == SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG) return
         if (view is TextView) {
             val text = view.text?.toString()?.trim().orEmpty()
             val contentDescription = view.contentDescription?.toString()?.trim().orEmpty()
@@ -3368,6 +3956,18 @@ object SettingsHeadsetHook : HookContext() {
             .putString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_SPATIAL_MODE, currentFreeClip2AudioState.spatialMode.extraValue)
             .putString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_SPATIAL_SCENE, currentFreeClip2AudioState.spatialScene.extraValue)
             .putString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_SOUND_EFFECT, currentFreeClip2AudioState.soundEffect.extraValue)
+            .putInt(
+                prefix + HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID,
+                currentFreeClip2AudioState.equalizerPresetId,
+            )
+            .putString(
+                prefix + HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME,
+                currentFreeClip2AudioState.equalizerName,
+            )
+            .putString(
+                prefix + HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_GAINS,
+                currentFreeClip2AudioState.equalizerGains.joinToString(","),
+            )
             .apply()
     }
 
@@ -3383,6 +3983,17 @@ object SettingsHeadsetHook : HookContext() {
             spatialModeValue = prefs.getString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_SPATIAL_MODE, null),
             spatialSceneValue = prefs.getString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_SPATIAL_SCENE, null),
             soundEffectValue = prefs.getString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_SOUND_EFFECT, null),
+            equalizerPresetIdValue = prefs.getInt(
+                prefix + HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_SELECTED_ID,
+                -1,
+            ).takeIf { it in 0x64..0x66 },
+            equalizerNameValue = prefs.getString(
+                prefix + HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_NAME,
+                null,
+            ),
+            equalizerGainsValue = parseFreeClip2EqualizerGains(
+                prefs.getString(prefix + HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_EQ_GAINS, null),
+            ),
         )
     }
 

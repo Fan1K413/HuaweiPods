@@ -31,8 +31,8 @@ class HuaweiFreeClip2ControllerTest {
     @Test
     fun `spatial audio modes and scenes match the guided capture`() {
         assertPacket("5A0009002BB401011802010060ED", FreeClip2SpatialAudioMode.OFF.packet())
-        assertPacket("5A0009002BB401011802010170CC", FreeClip2SpatialAudioMode.FIXED.packet())
-        assertPacket("5A0009002BB401011802010240AF", FreeClip2SpatialAudioMode.HEAD_TRACKING.packet())
+        assertPacket("5A0009002BB401011802010240AF", FreeClip2SpatialAudioMode.FIXED.packet())
+        assertPacket("5A0009002BB401011802010170CC", FreeClip2SpatialAudioMode.HEAD_TRACKING.packet())
         assertPacket("5A0009002BB401011803010057DD", FreeClip2SpatialScene.DEFAULT.packet())
         assertPacket("5A0009002BB401011803010147FC", FreeClip2SpatialScene.AUDIO_THEATER.packet())
         assertPacket("5A0009002BB4010118030102779F", FreeClip2SpatialScene.CINEMA.packet())
@@ -142,7 +142,7 @@ class HuaweiFreeClip2ControllerTest {
             byteArrayOf(0x01, 0x02) + unrelated + older + latest,
         )
 
-        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, state?.mode)
+        assertEquals(FreeClip2SpatialAudioMode.FIXED, state?.mode)
         assertEquals(FreeClip2SpatialScene.CONCERT_HALL, state?.scene)
         assertNull(state?.effect)
     }
@@ -182,7 +182,7 @@ class HuaweiFreeClip2ControllerTest {
 
         val state = HuaweiFreeClip2Controller.parseAudioState(spatial + effect)
 
-        assertEquals(FreeClip2SpatialAudioMode.FIXED, state?.mode)
+        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, state?.mode)
         assertEquals(FreeClip2SpatialScene.CINEMA, state?.scene)
         assertEquals(FreeClip2SoundEffect.DEFAULT, state?.effect)
     }
@@ -226,7 +226,7 @@ class HuaweiFreeClip2ControllerTest {
 
         val state = HuaweiFreeClip2Controller.parseSpatialAudioState(corrupt + verified)
 
-        assertEquals(FreeClip2SpatialAudioMode.HEAD_TRACKING, state?.mode)
+        assertEquals(FreeClip2SpatialAudioMode.FIXED, state?.mode)
         assertEquals(FreeClip2SpatialScene.CONCERT_HALL, state?.scene)
     }
 
@@ -248,14 +248,14 @@ class HuaweiFreeClip2ControllerTest {
 
     @Test
     fun `AAM spatial write and state report values use one verified mapping`() {
-        assertEquals(1, FreeClip2SpatialAudioMode.FIXED.protocolValue)
-        assertEquals(2, FreeClip2SpatialAudioMode.HEAD_TRACKING.protocolValue)
+        assertEquals(2, FreeClip2SpatialAudioMode.FIXED.protocolValue)
+        assertEquals(1, FreeClip2SpatialAudioMode.HEAD_TRACKING.protocolValue)
         assertEquals(
-            FreeClip2SpatialAudioMode.FIXED,
+            FreeClip2SpatialAudioMode.HEAD_TRACKING,
             FreeClip2SpatialAudioMode.fromStateReportValue(1),
         )
         assertEquals(
-            FreeClip2SpatialAudioMode.HEAD_TRACKING,
+            FreeClip2SpatialAudioMode.FIXED,
             FreeClip2SpatialAudioMode.fromStateReportValue(2),
         )
     }
@@ -266,7 +266,7 @@ class HuaweiFreeClip2ControllerTest {
         first[0] = 0
         val second = FreeClip2SpatialAudioMode.FIXED.packet()
         assertFalse(first.contentEquals(second))
-        assertPacket("5A0009002BB401011802010170CC", second)
+        assertPacket("5A0009002BB401011802010240AF", second)
     }
 
     private fun assertPacket(expected: String, actual: ByteArray) {

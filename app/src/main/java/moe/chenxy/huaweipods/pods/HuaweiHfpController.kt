@@ -563,6 +563,10 @@ object HuaweiHfpController {
         val requestedAddress = currentDevice.address
         val requestedGeneration = sessionGeneration
         val kind = intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_AUDIO_KIND)
+        if (kind == HuaweiPodsAction.FREECLIP2_AUDIO_KIND_EQUALIZER) {
+            relayFreeClip2Equalizer(intent, currentContext)
+            return
+        }
         val value = intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_AUDIO_VALUE)
         val update = when (kind) {
             HuaweiPodsAction.FREECLIP2_AUDIO_KIND_SPATIAL_MODE -> {
@@ -616,6 +620,20 @@ object HuaweiHfpController {
         } else {
             dispatchDirectFreeClip2AudioWrite(request)
         }
+    }
+
+    private fun relayFreeClip2Equalizer(intent: Intent, context: Context) {
+        val nonce = SmartAudioFreeClip2BridgePolicy.normalizeNonce(
+            intent.getStringExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE),
+        ) ?: return
+        val forwarded = Intent(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_EQ_SET).apply {
+            putExtras(intent)
+            putExtra(HuaweiPodsAction.EXTRA_FREECLIP2_BRIDGE_NONCE, nonce)
+            setPackage(SmartAudioFreeClip2BridgePolicy.SMART_AUDIO_PACKAGE)
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+        }
+        runCatching { context.sendIdentitySharingBroadcast(forwarded) }
+            .onFailure { Log.w(TAG, "Unable to relay FreeClip 2 equalizer request", it) }
     }
 
     private fun setFreeClip2Feature(intent: Intent, resultReceiver: ResultReceiver?) {
@@ -881,7 +899,10 @@ object HuaweiHfpController {
                 )
             }
         }
-        if (mode == null && effect == null && equalizer == null) return
+        val confirmedEffect = effect ?: equalizer?.let {
+            SmartAudioFreeClip2BridgePolicy.soundEffectFromOfficial(it.selectedId)
+        }
+        if (mode == null && confirmedEffect == null && equalizer == null) return
 
         pendingSmartAudioAudioQuery?.let { pending ->
             if (address.equals(pending.request.address, ignoreCase = true)) {
@@ -911,7 +932,7 @@ object HuaweiHfpController {
         val externalMode = mode.takeIf { pending == null }
         val update = FreeClip2AudioState(
             mode = externalMode,
-            effect = effect,
+            effect = confirmedEffect,
             equalizer = equalizer,
         )
         if (update.mode == null && update.effect == null && update.equalizer == null) return
@@ -922,7 +943,7 @@ object HuaweiHfpController {
         sendFreeClip2AudioState(confirmed)
         Log.i(
             TAG,
-            "FreeClip 2 official state confirmed mode=$mode effect=$effect " +
+            "FreeClip 2 official state confirmed mode=$mode effect=$confirmedEffect " +
                 "equalizer=${equalizer?.selectedId} device=$address",
         )
     }
