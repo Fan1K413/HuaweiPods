@@ -104,6 +104,8 @@ object SettingsHeadsetHook : HookContext() {
     private const val SETTINGS_HUAWEI_ANC_SELECTOR_TAG = "huaweipods_settings_anc_selector"
     private const val SETTINGS_FREECLIP2_AUDIO_CONTROLS_TAG =
         "huaweipods_settings_freeclip2_audio_controls"
+    private const val HUAWEI_SMART_AUDIO_PACKAGE = "com.huawei.smartaudio"
+    private val moreSettingsKeywords = listOf("更多设置", "More settings")
     private val gestureEntryKeywords = listOf(
         "手势操作",
         "手势控制",
@@ -1720,6 +1722,7 @@ object SettingsHeadsetHook : HookContext() {
         modeContainer?.let { setSettingsCapabilityViewVisible(it, policy.showAnc) }
         setSettingsRowsVisible(root, settingsEarTipFitKeywords, policy.showEarTipFitTest)
         setSettingsRowsVisible(root, gestureEntryKeywords, policy.showGestureConfiguration)
+        redirectMoreSettingsToHuaweiSmartAudio(root)
         syncFreeClip2AudioControls(root, modeContainer)
         if (policy.showAnc) configureTransparencyModeView(root, modeContainer, route)
         replaceHuaweiAncLevelsWithHuaweiDial(root)
@@ -1749,6 +1752,25 @@ object SettingsHeadsetHook : HookContext() {
                         "Settings unsupported row hidden route=${currentHuaweiRoute()} " +
                             "text=${textView.text} target=${target.javaClass.name}",
                     )
+                }
+            }
+        }
+    }
+
+    private fun redirectMoreSettingsToHuaweiSmartAudio(root: View) {
+        val launchIntent = root.context.packageManager
+            .getLaunchIntentForPackage(HUAWEI_SMART_AUDIO_PACKAGE)
+            ?: return
+        val matches = mutableListOf<TextView>()
+        collectExactTextMatches(root, moreSettingsKeywords, matches)
+        matches.forEach { textView ->
+            val target = bestHideTarget(root, textView)
+            if (target === root || target.isSystemScrollingContainer()) return@forEach
+            target.setOnClickListener { view ->
+                runCatching {
+                    view.context.startActivity(Intent(launchIntent))
+                }.onFailure {
+                    Log.w(TAG, "启动华为智慧音频失败", it)
                 }
             }
         }
