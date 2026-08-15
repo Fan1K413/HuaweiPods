@@ -283,7 +283,6 @@ object MiLinkServiceHook : HookContext() {
     private const val PREF_TRANSPARENCY_SUBMODE = "transparency_submode"
     private const val PREF_DEVICE_ROUTE = "device_route"
     private const val FREECLIP2_AUDIO_REFRESH_MIN_INTERVAL_MS = 750L
-    private const val DEVICE_SESSION_REQUEST_MIN_INTERVAL_MS = 1_500L
     private val bluetoothAddressPattern = Regex("^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$")
     private val ancIdentityGetterNames = listOf(
         "getAddress",
@@ -343,7 +342,6 @@ object MiLinkServiceHook : HookContext() {
     private var currentFreeClip2SoundEffect = FreeClip2SoundEffect.DEFAULT
     private val freeClip2AudioPendingGate = FreeClip2AudioPendingGate()
     private var lastFreeClip2AudioRefreshRequestAt = 0L
-    private var lastDeviceSessionRequestAt = 0L
     private val freeClip2AudioInternalRenderDepth = AtomicInteger(0)
     private var currentSessionConfirmed = false
     internal var lastAncBatteryController: Any? = null
@@ -527,7 +525,6 @@ object MiLinkServiceHook : HookContext() {
                 if (requiresCurrentState && !isCurrentHuaweiDevice(device, route)) return@hookAfter
                 cacheRuntimeOwner(className, instance)
                 captureRuntimeContext(instance)
-                if (requiresCurrentState && !currentSessionConfirmed) requestCurrentDeviceSession()
                 this.result = result()
                 if (className == "com.miui.headset.runtime.AncBatteryController" && methodName == "getHeadsetPropertyBlock") {
                     notifyHeadsetPropertyChanged(instance, device, 4)
@@ -639,7 +636,6 @@ object MiLinkServiceHook : HookContext() {
                     return@hookAfter
                 }
                 if (requiresCurrentState && !isCurrentHeadsetInfo(instance, route)) return@hookAfter
-                if (requiresCurrentState && !currentSessionConfirmed) requestCurrentDeviceSession()
                 this.result = result()
             }
         }.onFailure { Log.w(TAG, "hook HeadsetInfo.$methodName skipped", it) }
@@ -2149,7 +2145,6 @@ object MiLinkServiceHook : HookContext() {
                     HuaweiPodsAction.ACTION_PODS_DISCONNECTED -> {
                         if (!forgetCurrentDevice(receivedIntent)) return
                         saveState(context)
-                        requestCurrentDeviceSession(context)
                         refreshAncCards("disconnected")
                         refreshFreeClip2AudioEffectSections("disconnected")
                     }
@@ -2516,25 +2511,6 @@ object MiLinkServiceHook : HookContext() {
         Log.d(TAG, "MiLink FreeClip2 audio readback requested reason=$reason address=$address")
     }
 
-    private fun requestCurrentDeviceSession(fallbackContext: Context? = null) {
-        if (currentSessionConfirmed) return
-        val ctx = fallbackContext ?: context ?: return
-        val device = currentBluetoothDevice(ctx) ?: return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastDeviceSessionRequestAt < DEVICE_SESSION_REQUEST_MIN_INTERVAL_MS) return
-        lastDeviceSessionRequestAt = now
-        runCatching {
-            ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_CONNECT_POD_REQUEST).apply {
-                putExtra("device", device)
-                setPackage("com.android.bluetooth")
-                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-            })
-        }.onFailure {
-            lastDeviceSessionRequestAt = 0L
-            Log.w(TAG, "MiLink device session request failed address=${device.address}", it)
-        }
-    }
-
     private fun sendFreeClip2AudioSetting(
         kind: String,
         value: String,
@@ -2672,13 +2648,13 @@ object MiLinkServiceHook : HookContext() {
         }.getOrDefault(false)
     }
 
-    private fun currentBluetoothDevice(fallbackContext: Context? = null): BluetoothDevice? {
+    private fun currentBluetoothDevice(): BluetoothDevice? {
         val address = currentAddress
             ?.trim()
             ?.uppercase()
             ?.takeIf(bluetoothAddressPattern::matches)
             ?: return null
-        val ctx = fallbackContext ?: context ?: return null
+        val ctx = context ?: return null
         return runCatching {
             ctx.getSystemService(BluetoothManager::class.java)?.adapter?.getRemoteDevice(address)
         }.getOrNull()
