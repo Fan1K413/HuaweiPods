@@ -76,7 +76,7 @@ class HuaweiGestureControllerTest {
             HuaweiGestureController.buildDoubleTapPacket(
                 route,
                 HuaweiGestureSide.RIGHT,
-                HuaweiTapAction.SPATIAL_AUDIO,
+                HuaweiTapAction.PLAY_PREVIOUS,
             ),
         )
         assertArrayEquals(
@@ -95,7 +95,8 @@ class HuaweiGestureControllerTest {
                 HuaweiSwipeAction.VOLUME_CONTROL,
             ),
         )
-        assertNull(
+        assertArrayEquals(
+            hex("5A0006002B1E0101010B0C"),
             HuaweiGestureController.buildSwipePacket(
                 route,
                 HuaweiGestureSide.LEFT,
@@ -115,6 +116,41 @@ class HuaweiGestureControllerTest {
             HuaweiGestureController.buildGestureStateQuery(HuaweiDeviceRoute.HUAWEI_FREECLIP2),
         )
         assertNull(HuaweiGestureController.buildGestureStateQuery(HuaweiDeviceRoute.HUAWEI_FREEBUDS3))
+    }
+
+    @Test
+    fun `FreeClip 2 long press only exposes assistant and none`() {
+        val route = HuaweiDeviceRoute.HUAWEI_FREECLIP2
+        assertTrue(
+            HuaweiGestureController.supportsTapAction(
+                route,
+                HuaweiGestureKind.LONG_PRESS,
+                HuaweiTapAction.VOICE_ASSISTANT,
+            ),
+        )
+        assertTrue(
+            HuaweiGestureController.supportsTapAction(
+                route,
+                HuaweiGestureKind.LONG_PRESS,
+                HuaweiTapAction.NONE,
+            ),
+        )
+        assertFalse(
+            HuaweiGestureController.supportsTapAction(
+                route,
+                HuaweiGestureKind.LONG_PRESS,
+                HuaweiTapAction.NOISE_CANCELLATION,
+            ),
+        )
+        assertArrayEquals(
+            hex("5A0006002B16020100C7BE"),
+            HuaweiGestureController.buildTapPacket(
+                route,
+                HuaweiGestureKind.LONG_PRESS,
+                HuaweiGestureSide.RIGHT,
+                HuaweiTapAction.VOICE_ASSISTANT,
+            ),
+        )
     }
 
     @Test
@@ -256,7 +292,7 @@ class HuaweiGestureControllerTest {
             HuaweiGestureController.buildDoubleTapPacket(
                 HuaweiDeviceRoute.HUAWEI_FREECLIP2,
                 HuaweiGestureSide.RIGHT,
-                HuaweiTapAction.SPATIAL_AUDIO,
+                HuaweiTapAction.PLAY_PREVIOUS,
             ),
         )
         assertArrayEquals(

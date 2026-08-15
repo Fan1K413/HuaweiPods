@@ -80,7 +80,7 @@ class HuaweiGestureControlsTest {
     fun `FreeClip 2 readback maps only route-verified actions`() {
         val state = freeClip2GestureReadback(
             doubleLeft = "play_pause",
-            doubleRight = "spatial_audio",
+            doubleRight = "play_previous",
             tripleLeft = "voice_assistant",
             tripleRight = "play_next",
             swipeLeft = "volume_control",
@@ -92,7 +92,7 @@ class HuaweiGestureControlsTest {
             state.tapActions[HuaweiTapSlot(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureSide.LEFT)],
         )
         assertEquals(
-            HuaweiTapAction.SPATIAL_AUDIO,
+            HuaweiTapAction.PLAY_PREVIOUS,
             state.tapActions[HuaweiTapSlot(HuaweiGestureKind.DOUBLE_TAP, HuaweiGestureSide.RIGHT)],
         )
         assertFalse(
@@ -105,7 +105,7 @@ class HuaweiGestureControlsTest {
             state.tapActions[HuaweiTapSlot(HuaweiGestureKind.TRIPLE_TAP, HuaweiGestureSide.RIGHT)],
         )
         assertEquals(HuaweiSwipeAction.VOLUME_CONTROL, state.swipeActions[HuaweiGestureSide.LEFT])
-        assertFalse(state.swipeActions.containsKey(HuaweiGestureSide.RIGHT))
+        assertEquals(HuaweiSwipeAction.TRACK_CONTROL, state.swipeActions[HuaweiGestureSide.RIGHT])
     }
 
     @Test

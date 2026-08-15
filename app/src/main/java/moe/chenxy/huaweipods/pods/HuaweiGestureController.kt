@@ -86,14 +86,15 @@ object HuaweiGestureController {
         side: HuaweiGestureSide,
         action: HuaweiTapAction,
     ): ByteArray? {
-        val command = when (kind) {
-            HuaweiGestureKind.DOUBLE_TAP -> 0x1F
-            HuaweiGestureKind.TRIPLE_TAP -> 0x25
+        val (service, command) = when (kind) {
+            HuaweiGestureKind.DOUBLE_TAP -> 0x01 to 0x1F
+            HuaweiGestureKind.TRIPLE_TAP -> 0x01 to 0x25
+            HuaweiGestureKind.LONG_PRESS -> 0x2B to 0x16
             HuaweiGestureKind.SWIPE -> return null
         }
         val protocolValue = action.protocolValue(route, kind) ?: return null
         return buildSideActionPacket(
-            service = 0x01,
+            service = service,
             command = command,
             side = side,
             protocolValue = protocolValue,
@@ -461,6 +462,7 @@ object HuaweiGestureController {
 enum class HuaweiGestureKind(val extraValue: String) {
     DOUBLE_TAP("double_tap"),
     TRIPLE_TAP("triple_tap"),
+    LONG_PRESS("long_press"),
     SWIPE("swipe");
 
     companion object {
@@ -538,11 +540,12 @@ enum class HuaweiTapAction(val extraValue: String) {
         private val freeClip2DoubleTapActions = listOf(
             PLAY_PAUSE,
             PLAY_NEXT,
-            SPATIAL_AUDIO,
+            PLAY_PREVIOUS,
             VOICE_ASSISTANT,
             NONE,
         )
         private val freeClip2TripleTapActions = listOf(PLAY_NEXT, PLAY_PREVIOUS, NONE)
+        private val freeClip2LongPressActions = listOf(VOICE_ASSISTANT, NONE)
         private val freeBuds7iDoubleTapActions = listOf(
             PLAY_PAUSE,
             PLAY_NEXT,
@@ -562,6 +565,7 @@ enum class HuaweiTapAction(val extraValue: String) {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I to HuaweiGestureKind.TRIPLE_TAP -> freeBuds6iTripleTapActions
             HuaweiDeviceRoute.HUAWEI_FREECLIP2 to HuaweiGestureKind.DOUBLE_TAP -> freeClip2DoubleTapActions
             HuaweiDeviceRoute.HUAWEI_FREECLIP2 to HuaweiGestureKind.TRIPLE_TAP -> freeClip2TripleTapActions
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2 to HuaweiGestureKind.LONG_PRESS -> freeClip2LongPressActions
             HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to HuaweiGestureKind.DOUBLE_TAP -> freeBuds7iDoubleTapActions
             HuaweiDeviceRoute.HUAWEI_FREEBUDS7I to HuaweiGestureKind.TRIPLE_TAP -> freeBuds7iTripleTapActions
             HuaweiDeviceRoute.HUAWEI_EYEWEAR2 to HuaweiGestureKind.DOUBLE_TAP -> eyewear2DoubleTapActions
@@ -645,7 +649,7 @@ enum class HuaweiSwipeAction(
 
         fun availableFor(route: HuaweiDeviceRoute): List<HuaweiSwipeAction> = when (route) {
             HuaweiDeviceRoute.HUAWEI_FREEBUDS6I -> all
-            HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> listOf(VOLUME_CONTROL, NONE)
+            HuaweiDeviceRoute.HUAWEI_FREECLIP2 -> all
             HuaweiDeviceRoute.HUAWEI_EYEWEAR2 -> all
             else -> emptyList()
         }

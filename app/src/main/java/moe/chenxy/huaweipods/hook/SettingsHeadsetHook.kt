@@ -130,6 +130,10 @@ object SettingsHeadsetHook : HookContext() {
         "huaweipods_freeclip2_sound_category"
     private const val SETTINGS_FREECLIP2_FEATURE_KEY_PREFIX =
         "huaweipods_freeclip2_feature_"
+    private const val SETTINGS_FREECLIP2_SWIPE_LEFT_KEY =
+        "huaweipods_freeclip2_swipe_left"
+    private const val SETTINGS_FREECLIP2_SWIPE_RIGHT_KEY =
+        "huaweipods_freeclip2_swipe_right"
     private const val HUAWEI_SMART_AUDIO_PACKAGE = "com.huawei.smartaudio"
     private val moreSettingsKeywords = listOf("更多设置", "More settings")
     private val gestureEntryKeywords = listOf(
@@ -158,6 +162,8 @@ object SettingsHeadsetHook : HookContext() {
         "right_double",
         "left_triple",
         "right_triple",
+        SETTINGS_FREECLIP2_SWIPE_LEFT_KEY,
+        SETTINGS_FREECLIP2_SWIPE_RIGHT_KEY,
         "long_press_left_headset",
         "long_press_right_headset",
     )
@@ -494,6 +500,7 @@ object SettingsHeadsetHook : HookContext() {
                 instance?.let { headsetFragments[it] = true }
                 installFreeClip2AudioPreferences(instance)
                 installFreeClip2FeaturePreferences(instance)
+                orderFreeClip2SettingsPreferences(instance)
             }
         }.onFailure { Log.w(TAG, "hook MiuiHeadsetFragment.onCreate skipped", it) }
 
@@ -505,6 +512,7 @@ object SettingsHeadsetHook : HookContext() {
                 instance?.let { headsetFragments[it] = true }
                 installFreeClip2AudioPreferences(instance)
                 installFreeClip2FeaturePreferences(instance)
+                orderFreeClip2SettingsPreferences(instance)
                 schedulePruneFreeBudsUnsupportedViews(result as? View)
                 requestBluetoothStatus("fragment-create")
                 startPeriodicRefresh()
@@ -517,6 +525,7 @@ object SettingsHeadsetHook : HookContext() {
                 Log.d(TAG, "Fragment.onResume after ${fragmentDebug(instance)} isHuawei=${isHuaweiFragment(instance)}")
                 if (!isHuaweiFragment(instance)) return@hookAfter
                 installFreeClip2AudioPreferences(instance)
+                orderFreeClip2SettingsPreferences(instance)
                 schedulePruneFreeBudsUnsupportedViews(fragmentRootView(instance))
                 injectFragmentStatus(instance)
             }
@@ -662,23 +671,56 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun handleNativeGesturePreferenceChange(listener: Any?, preference: Any?, newValue: Any?): Boolean {
         val fragment = runCatching { getObjectField(listener, "this$0") }.getOrNull()
+        return handleNativeGesturePreferenceValueChange(fragment, preference, newValue)
+    }
+
+    private fun nativeGesturePreferenceListener(fragment: Any): Any {
+        val listenerClass = findClass("androidx.preference.Preference\$OnPreferenceChangeListener")
+        val fragmentReference = WeakReference(fragment)
+        return Proxy.newProxyInstance(appClassLoader, arrayOf(listenerClass)) { proxy, method, arguments ->
+            when (method.name) {
+                "onPreferenceChange" -> handleNativeGesturePreferenceValueChange(
+                    fragmentReference.get(),
+                    arguments?.getOrNull(0),
+                    arguments?.getOrNull(1),
+                )
+                "equals" -> proxy === arguments?.firstOrNull()
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "HuaweiPodsNativeGesturePreferenceListener"
+                else -> null
+            }
+        }
+    }
+
+    private fun handleNativeGesturePreferenceValueChange(
+        fragment: Any?,
+        preference: Any?,
+        newValue: Any?,
+    ): Boolean {
         if (!isHuaweiKeyConfigFragment(fragment)) return false
         val route = gestureDeviceRoute(fragment)
         if (!route.supportsGestureConfiguration) return false
         val key = runCatching { callCompatibleMethod(preference, "getKey") as? String }.getOrNull()
+        val targetAddress = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
+        val targetContext = runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull()
+            ?: context
+            ?: return false
+        val nativeLongPressKind = if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            HuaweiGestureKind.LONG_PRESS
+        } else {
+            HuaweiGestureKind.SWIPE
+        }
         val (kind, side) = when (key) {
             "left_double" -> HuaweiGestureKind.DOUBLE_TAP to HuaweiGestureSide.LEFT
             "right_double" -> HuaweiGestureKind.DOUBLE_TAP to HuaweiGestureSide.RIGHT
             "left_triple" -> HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.LEFT
             "right_triple" -> HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.RIGHT
-            "long_press_left_headset" -> HuaweiGestureKind.SWIPE to HuaweiGestureSide.LEFT
-            "long_press_right_headset" -> HuaweiGestureKind.SWIPE to HuaweiGestureSide.RIGHT
+            SETTINGS_FREECLIP2_SWIPE_LEFT_KEY -> HuaweiGestureKind.SWIPE to HuaweiGestureSide.LEFT
+            SETTINGS_FREECLIP2_SWIPE_RIGHT_KEY -> HuaweiGestureKind.SWIPE to HuaweiGestureSide.RIGHT
+            "long_press_left_headset" -> nativeLongPressKind to HuaweiGestureSide.LEFT
+            "long_press_right_headset" -> nativeLongPressKind to HuaweiGestureSide.RIGHT
             else -> return false
         }
-        val targetAddress = gestureDeviceAddress(fragment).orEmpty().ifBlank { currentAddress.orEmpty() }
-        val targetContext = runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull()
-            ?: context
-            ?: return false
         if (kind == HuaweiGestureKind.SWIPE) {
             val action = HuaweiSwipeAction.fromExtra(newValue?.toString())
                 ?: newValue?.toString()?.toIntOrNull()?.let { HuaweiSwipeAction.fromProtocolValue(route, it) }
@@ -1469,11 +1511,28 @@ object SettingsHeadsetHook : HookContext() {
         val doubleTapActions = HuaweiTapAction.availableFor(route, HuaweiGestureKind.DOUBLE_TAP)
         val tripleTapActions = HuaweiTapAction.availableFor(route, HuaweiGestureKind.TRIPLE_TAP)
         val swipeActions = HuaweiSwipeAction.availableFor(route)
+        val longPressActions = if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            HuaweiTapAction.availableFor(route, HuaweiGestureKind.LONG_PRESS)
+        } else {
+            emptyList()
+        }
         nativeGesturePreferenceKeys.forEach { key -> hideNativePreference(fragment, key) }
-        if (doubleTapActions.isEmpty() && tripleTapActions.isEmpty() && swipeActions.isEmpty()) {
+        if (doubleTapActions.isEmpty() && tripleTapActions.isEmpty() &&
+            swipeActions.isEmpty() && longPressActions.isEmpty()
+        ) {
             // 未验证的系统手势模板不能直接复用；已验证但无法映射到原生项的控制仍保留在模块页。
             Log.d(TAG, "Huawei native gesture page hidden route=$route address=$address")
             return
+        }
+        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            listOf(
+                SETTINGS_FREECLIP2_SWIPE_LEFT_KEY,
+                SETTINGS_FREECLIP2_SWIPE_RIGHT_KEY,
+                "long_press_left_headset",
+                "long_press_right_headset",
+            ).forEachIndexed { index, key ->
+                ensureNativeGestureDropDownPreference(fragment, key, index + 4)
+            }
         }
         configureTapPreference(
             fragment,
@@ -1514,22 +1573,94 @@ object SettingsHeadsetHook : HookContext() {
             )
         }
         if (swipeActions.isNotEmpty()) {
-            configureSwipePreference(fragment, "long_press_left_headset", address, route, HuaweiGestureSide.LEFT)
-            configureSwipePreference(fragment, "long_press_right_headset", address, route, HuaweiGestureSide.RIGHT)
+            val leftKey = if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+                SETTINGS_FREECLIP2_SWIPE_LEFT_KEY
+            } else {
+                "long_press_left_headset"
+            }
+            val rightKey = if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+                SETTINGS_FREECLIP2_SWIPE_RIGHT_KEY
+            } else {
+                "long_press_right_headset"
+            }
+            configureSwipePreference(fragment, leftKey, address, route, HuaweiGestureSide.LEFT)
+            configureSwipePreference(fragment, rightKey, address, route, HuaweiGestureSide.RIGHT)
+        }
+        if (longPressActions.isNotEmpty()) {
+            configureTapPreference(
+                fragment,
+                null,
+                "long_press_left_headset",
+                address,
+                route,
+                HuaweiGestureKind.LONG_PRESS,
+                HuaweiGestureSide.LEFT,
+            )
+            configureTapPreference(
+                fragment,
+                null,
+                "long_press_right_headset",
+                address,
+                route,
+                HuaweiGestureKind.LONG_PRESS,
+                HuaweiGestureSide.RIGHT,
+            )
+        }
+        if (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2) {
+            nativeGesturePreferenceKeys.forEachIndexed { order, key ->
+                nativePreference(fragment, key)?.let { preference ->
+                    callCompatibleMethod(preference, "setOrder", order)
+                }
+            }
         }
         Log.d(TAG, "Huawei native gesture page configured route=$route address=$address")
     }
 
+    private fun ensureNativeGestureDropDownPreference(
+        fragment: Any?,
+        key: String,
+        order: Int,
+    ): Any? {
+        fragment ?: return null
+        val category = nativePreference(fragment, "headsetKeyConfig") ?: return null
+        val template = nativePreference(fragment, "left_double") ?: return null
+        return runCatching {
+            val existing = nativePreference(fragment, key)
+            if (existing != null && template.javaClass.isInstance(existing)) {
+                callCompatibleMethod(existing, "setOrder", order)
+                return@runCatching existing
+            }
+            existing?.let { preference ->
+                val parent = callCompatibleMethod(preference, "getParent") ?: category
+                if (callCompatibleMethod(parent, "removePreference", preference) == false) {
+                    return@runCatching null
+                }
+            }
+            val preference = newHostPreference(template.javaClass, preferenceContext(template))
+            callCompatibleMethod(preference, "setKey", key)
+            callCompatibleMethod(preference, "setOrder", order)
+            callCompatibleMethod(preference, "setPersistent", false)
+            callCompatibleMethod(
+                preference,
+                "setOnPreferenceChangeListener",
+                nativeGesturePreferenceListener(fragment),
+            )
+            preference.takeIf { callCompatibleMethod(category, "addPreference", it) != false }
+        }.onFailure {
+            Log.w(TAG, "create native gesture preference failed key=$key", it)
+        }.getOrNull()
+    }
+
     private fun configureTapPreference(
         fragment: Any?,
-        fieldName: String,
+        fieldName: String?,
         key: String,
         address: String,
         route: HuaweiDeviceRoute,
         kind: HuaweiGestureKind,
         side: HuaweiGestureSide,
     ) {
-        val preference = runCatching { getObjectField(fragment, fieldName) }.getOrNull()
+        val preference = fieldName?.let { runCatching { getObjectField(fragment, it) }.getOrNull() }
             ?: nativePreference(fragment, key)
             ?: return
         val context = (runCatching { callCompatibleMethod(preference, "getContext") as? Context }.getOrNull())
@@ -1653,12 +1784,19 @@ object SettingsHeadsetHook : HookContext() {
         val key = gestureCacheKey(address, kind, side)
         gestureActionCache[key]?.let { return it }
         val defaultAction = defaultGestureAction(route, kind, side)
-        if (route != HuaweiDeviceRoute.HUAWEI_FREEBUDS3 || kind != HuaweiGestureKind.DOUBLE_TAP) {
+        val usesLocalState =
+            (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 && kind == HuaweiGestureKind.DOUBLE_TAP) ||
+                (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.LONG_PRESS)
+        if (!usesLocalState) {
             return defaultAction
         }
         val defaultValue = defaultAction.protocolValue(route, kind) ?: return defaultAction
         val localPreferences = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return defaultAction
-        val legacyValue = localPreferences.getInt(legacyGesturePrefKey(address, side), defaultValue)
+        val legacyValue = if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3) {
+            localPreferences.getInt(legacyGesturePrefKey(address, side), defaultValue)
+        } else {
+            defaultValue
+        }
         val value = localPreferences.getInt(key, legacyValue)
         return HuaweiTapAction.fromProtocolValue(route, kind, value) ?: defaultAction
     }
@@ -1673,7 +1811,9 @@ object SettingsHeadsetHook : HookContext() {
         val protocolValue = action.protocolValue(route, kind) ?: return
         val key = gestureCacheKey(address, kind, side)
         gestureActionCache[key] = action
-        if (route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 && kind == HuaweiGestureKind.DOUBLE_TAP) {
+        if ((route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 && kind == HuaweiGestureKind.DOUBLE_TAP) ||
+            (route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.LONG_PRESS)
+        ) {
             runCatching {
                 context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     ?.edit()
@@ -1762,6 +1902,8 @@ object SettingsHeadsetHook : HookContext() {
         val preferred = when {
             route == HuaweiDeviceRoute.HUAWEI_FREEBUDS3 && side == HuaweiGestureSide.LEFT ->
                 HuaweiTapAction.NOISE_CANCELLATION
+            route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.LONG_PRESS ->
+                HuaweiTapAction.NONE
             route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.TRIPLE_TAP &&
                 side == HuaweiGestureSide.LEFT -> HuaweiTapAction.PLAY_PREVIOUS
             route == HuaweiDeviceRoute.HUAWEI_FREECLIP2 && kind == HuaweiGestureKind.TRIPLE_TAP ->
@@ -1823,6 +1965,10 @@ object SettingsHeadsetHook : HookContext() {
                 R.string.huawei_gesture_left_triple_tap to "左侧三击"
             HuaweiGestureKind.TRIPLE_TAP to HuaweiGestureSide.RIGHT ->
                 R.string.huawei_gesture_right_triple_tap to "右侧三击"
+            HuaweiGestureKind.LONG_PRESS to HuaweiGestureSide.LEFT ->
+                R.string.huawei_gesture_left_long_press to "长按左侧触控区"
+            HuaweiGestureKind.LONG_PRESS to HuaweiGestureSide.RIGHT ->
+                R.string.huawei_gesture_right_long_press to "长按右侧触控区"
             HuaweiGestureKind.SWIPE to HuaweiGestureSide.LEFT ->
                 R.string.huawei_gesture_left_swipe to "左侧轻滑"
             HuaweiGestureKind.SWIPE to HuaweiGestureSide.RIGHT ->
@@ -2669,6 +2815,48 @@ object SettingsHeadsetHook : HookContext() {
             .forEach { (preference, order) ->
                 callCompatibleMethod(preference, "setOrder", order + amount)
             }
+    }
+
+    /** 仅调整顶层分类顺序，不改变分类内部结构和样式。 */
+    private fun orderFreeClip2SettingsPreferences(fragment: Any?) {
+        if (fragment == null || currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
+        runCatching {
+            val screen = callCompatibleMethod(fragment, "getPreferenceScreen") ?: return@runCatching
+            val count = callCompatibleMethod(screen, "getPreferenceCount") as? Int ?: return@runCatching
+            val preferences = (0 until count).mapNotNull { index ->
+                callCompatibleMethod(screen, "getPreference", index)
+            }
+            val preferencesByKey = preferences.mapNotNull { preference ->
+                val key = callCompatibleMethod(preference, "getKey") as? String
+                key?.let { it to preference }
+            }.toMap()
+            val leadingKeys = listOf(
+                SETTINGS_FREECLIP2_AUDIO_CATEGORY_KEY,
+                SETTINGS_FREECLIP2_SMART_CATEGORY_KEY,
+                SETTINGS_FREECLIP2_SOUND_CATEGORY_KEY,
+                "ldac_container",
+                "switchConfig",
+            )
+            val trailingKeys = listOf("profile_container", "moreSettingsInAi")
+            val orderedKeys = (leadingKeys + trailingKeys).toSet()
+            val disconnectPreference = nativePreference(fragment, "mi_disconnect")
+                ?: nativePreference(fragment, "mi_ignore")
+            val disconnectCategory = disconnectPreference
+                ?.let { preference -> callCompatibleMethod(preference, "getParent") }
+                ?.takeIf { parent -> preferences.any { it === parent } }
+            val orderedPreferences = leadingKeys.mapNotNull(preferencesByKey::get) +
+                preferences.filter { preference ->
+                    preference !== disconnectCategory &&
+                        (callCompatibleMethod(preference, "getKey") as? String) !in orderedKeys
+                } +
+                trailingKeys.mapNotNull(preferencesByKey::get) +
+                listOfNotNull(disconnectCategory)
+            orderedPreferences.forEachIndexed { order, preference ->
+                if ((callCompatibleMethod(preference, "getOrder") as? Int) != order) {
+                    callCompatibleMethod(preference, "setOrder", order)
+                }
+            }
+        }.onFailure { Log.w(TAG, "Settings FreeClip 2 preference ordering failed", it) }
     }
 
     private fun createFreeClip2FeatureCategory(

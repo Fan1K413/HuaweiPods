@@ -404,7 +404,7 @@ class HuaweiRfcommResponseParserTest {
         )
 
         assertEquals(HuaweiTapAction.PLAY_NEXT, state?.left)
-        assertEquals(HuaweiTapAction.SPATIAL_AUDIO, state?.right)
+        assertEquals(HuaweiTapAction.PLAY_PREVIOUS, state?.right)
     }
 
     @Test
@@ -448,9 +448,9 @@ class HuaweiRfcommResponseParserTest {
     }
 
     @Test
-    fun `ignores unverified FreeClip 2 gesture values`() {
+    fun `accepts verified FreeClip 2 track swipe value`() {
         val unverifiedTripleTap = hex("5A001100012601010402010203060204050607FF3C38")
-        val unverifiedSwipe = hex("5A000E002B1F01010102010003030001FF24DF")
+        val trackSwipe = hex("5A000E002B1F01010102010003030001FF24DF")
 
         assertNull(
             HuaweiRfcommResponseParser.parseTripleTapState(
@@ -458,7 +458,9 @@ class HuaweiRfcommResponseParserTest {
                 HuaweiDeviceRoute.HUAWEI_FREECLIP2,
             ),
         )
-        assertNull(HuaweiRfcommResponseParser.parseSwipeState(unverifiedSwipe))
+        val swipe = HuaweiRfcommResponseParser.parseSwipeState(trackSwipe)
+        assertEquals(HuaweiSwipeAction.TRACK_CONTROL, swipe?.left)
+        assertEquals(HuaweiSwipeAction.VOLUME_CONTROL, swipe?.right)
     }
 
     private fun hex(value: String): ByteArray = value.chunked(2)
