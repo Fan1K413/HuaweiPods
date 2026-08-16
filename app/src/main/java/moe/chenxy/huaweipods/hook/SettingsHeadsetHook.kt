@@ -1000,7 +1000,6 @@ object SettingsHeadsetHook : HookContext() {
             })
         }
         requestFreeClip2AudioState(reason)
-        requestFreeClip2FeatureStates(reason)
         Log.d(TAG, "requested bluetooth status reason=$reason")
     }
 
@@ -1021,34 +1020,6 @@ object SettingsHeadsetHook : HookContext() {
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
         })
         Log.d(TAG, "FreeClip 2 audio state requested reason=$reason address=$address")
-    }
-
-    private fun requestFreeClip2FeatureStates(reason: String) {
-        if (currentHuaweiRoute() != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
-        if (reason == "settings-periodic" &&
-            confirmedFreeClip2Features.size == FreeClip2BooleanFeature.entries.size
-        ) {
-            return
-        }
-        val ctx = context ?: return
-        val address = currentAddress?.takeIf(String::isNotBlank) ?: run {
-            Log.w(TAG, "FreeClip 2 feature refresh skipped: missing address reason=$reason")
-            return
-        }
-        ctx.sendBroadcast(Intent(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_REFRESH).apply {
-            putExtra("address", address)
-            putExtra("device_name", currentName.orEmpty())
-            encodeHuaweiDeviceRouteForBroadcast(HuaweiDeviceRoute.HUAWEI_FREECLIP2)?.let {
-                putExtra(HuaweiPodsAction.EXTRA_DEVICE_ROUTE, it)
-            }
-            putExtra(
-                HuaweiPodsAction.EXTRA_FREECLIP2_FEATURE_RESULT_RECEIVER,
-                freeClip2FeatureResultReceiver,
-            )
-            setPackage("com.android.bluetooth")
-            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-        })
-        Log.d(TAG, "FreeClip 2 feature states requested reason=$reason address=$address")
     }
 
     private fun startPeriodicRefresh() {
@@ -2979,8 +2950,8 @@ object SettingsHeadsetHook : HookContext() {
                 confirmed -> freeClip2FeatureSummary(preferenceContext, feature)
                 else -> moduleString(
                     preferenceContext,
-                    R.string.freeclip2_state_loading,
-                    "正在读取当前状态…",
+                    R.string.freeclip2_state_unknown,
+                    "当前状态未知，切换后将同步",
                 )
             },
         )
@@ -2991,7 +2962,7 @@ object SettingsHeadsetHook : HookContext() {
                 currentFreeClip2FeatureStates[feature] == true,
             )
         }
-        callCompatibleMethod(preference, "setEnabled", !pending && (confirmed || failed))
+        callCompatibleMethod(preference, "setEnabled", !pending)
     }
 
     private fun freeClip2FeatureTitle(
@@ -4210,6 +4181,7 @@ object SettingsHeadsetHook : HookContext() {
             val key = prefix + "feature_" + feature.extraValue
             if (prefs.contains(key)) {
                 currentFreeClip2FeatureStates[feature] = prefs.getBoolean(key, false)
+                confirmedFreeClip2Features.add(feature)
             }
         }
     }

@@ -35,7 +35,7 @@
     <string name="freeclip2_dual_device_summary">Allow the earbuds to connect to two devices at once</string>
     <string name="freeclip2_case_prompt_sound">Case prompt sound</string>
     <string name="freeclip2_case_prompt_sound_summary">Control charging-case opening and charging sounds</string>
-    <string name="freeclip2_state_loading">Reading current state…</string>
+    <string name="freeclip2_state_unknown">Current state is unknown. Change it to sync.</string>
     <string name="freeclip2_state_applying">Applying…</string>
     <string name="freeclip2_state_failed">Couldn’t read or apply the setting. Try again.</string>
     <string name="freeclip2_state_hint">Low latency is reapplied after every connection when enabled. Other unreadable switches still reflect the last value set by this module.</string>

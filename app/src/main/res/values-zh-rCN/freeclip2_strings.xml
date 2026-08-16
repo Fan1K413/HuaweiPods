@@ -35,7 +35,7 @@
     <string name="freeclip2_dual_device_summary">允许耳机同时连接两台设备</string>
     <string name="freeclip2_case_prompt_sound">充电盒提示音</string>
     <string name="freeclip2_case_prompt_sound_summary">控制充电盒开盖、充电等提示音</string>
-    <string name="freeclip2_state_loading">正在读取当前状态…</string>
+    <string name="freeclip2_state_unknown">当前状态未知，切换后将同步</string>
     <string name="freeclip2_state_applying">正在应用…</string>
     <string name="freeclip2_state_failed">读取或设置失败，请重试</string>
     <string name="freeclip2_state_hint">低时延开启后会在每次连接时自动重新应用；其他无法回读的开关仍以本模块最后一次设置为准。</string>

@@ -76,7 +76,6 @@ object HuaweiPodsAction {
     const val ACTION_FREECLIP2_AUDIO_REFRESH = PREFIX + ".freeclip2_audio_refresh"
     const val ACTION_FREECLIP2_AUDIO_CHANGED = PREFIX + ".freeclip2_audio_changed"
     const val ACTION_FREECLIP2_FEATURE_SET = PREFIX + ".freeclip2_feature_set"
-    const val ACTION_FREECLIP2_FEATURE_REFRESH = PREFIX + ".freeclip2_feature_refresh"
     const val ACTION_SMART_AUDIO_FREECLIP2_SET = PREFIX + ".smart_audio_freeclip2_set"
     const val ACTION_SMART_AUDIO_FREECLIP2_RESULT = PREFIX + ".smart_audio_freeclip2_result"
     const val ACTION_SMART_AUDIO_FREECLIP2_STATE = PREFIX + ".smart_audio_freeclip2_state"

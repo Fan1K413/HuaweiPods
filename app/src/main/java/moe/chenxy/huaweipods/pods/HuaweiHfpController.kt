@@ -36,7 +36,6 @@ object HuaweiHfpController {
     private const val FREECLIP2_AUDIO_CONFIRM_DELAY_MS = 450L
     private const val FREECLIP2_SMART_AUDIO_BRIDGE_TIMEOUT_MS = 1_500L
     private const val FREECLIP2_AUDIO_REFRESH_MIN_INTERVAL_MS = 2_500L
-    private const val FREECLIP2_FEATURE_REFRESH_MIN_INTERVAL_MS = 5_000L
     private const val DEVICE_INFO_REFRESH_MIN_INTERVAL_MS = 60_000L
     private const val LOW_LATENCY_AUTO_APPLY_DELAY_MS = 2_500L
     private const val LOW_LATENCY_AUTO_APPLY_RETRY_DELAY_MS = 2_500L
@@ -64,7 +63,6 @@ object HuaweiHfpController {
     private var lastAncRequestAt = 0L
     private var lastGestureStateRequestAt = 0L
     private var lastFreeClip2AudioStateRequestAt = 0L
-    private var lastFreeClip2FeatureStateRequestAt = 0L
     private var lastDeviceInfoRequestAt = 0L
     private var batteryRequestInFlight = false
     private var ancRequestInFlight = false
@@ -247,13 +245,6 @@ object HuaweiHfpController {
                         receivedIntent.freeClip2FeatureResultReceiver(),
                     )
                 }
-                HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_REFRESH -> {
-                    if (!targetsCurrentFreeClip2Session(receivedIntent)) return
-                    requestFreeClip2FeatureStates(
-                        force = receivedIntent.getBooleanExtra("force", false),
-                        resultReceiver = receivedIntent.freeClip2FeatureResultReceiver(),
-                    )
-                }
                 HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_RESULT -> {
                     handleSmartAudioFreeClip2Result(receivedIntent, sentFromPackage)
                 }
@@ -322,7 +313,6 @@ object HuaweiHfpController {
             lastAncRequestAt = 0L
             lastGestureStateRequestAt = 0L
             lastFreeClip2AudioStateRequestAt = 0L
-            lastFreeClip2FeatureStateRequestAt = 0L
             lastDeviceInfoRequestAt = 0L
             batteryRequestInFlight = false
             ancRequestInFlight = false
@@ -687,33 +677,6 @@ object HuaweiHfpController {
                 feature = feature,
                 keepSocket = false,
                 expectedEnabled = enabled,
-                resultReceiver = resultReceiver,
-            )
-        }
-    }
-
-    private fun requestFreeClip2FeatureStates(
-        force: Boolean = false,
-        resultReceiver: ResultReceiver? = null,
-    ) {
-        val currentContext = context ?: return
-        val currentDevice = device ?: return
-        if (sessionRoute != HuaweiDeviceRoute.HUAWEI_FREECLIP2) return
-        val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastFreeClip2FeatureStateRequestAt < FREECLIP2_FEATURE_REFRESH_MIN_INTERVAL_MS) {
-            return
-        }
-        lastFreeClip2FeatureStateRequestAt = now
-        val requestedGeneration = sessionGeneration
-        val requestedAddress = currentDevice.address
-        FreeClip2BooleanFeature.entries.forEachIndexed { index, feature ->
-            requestFreeClip2FeatureState(
-                context = currentContext,
-                device = currentDevice,
-                generation = requestedGeneration,
-                address = requestedAddress,
-                feature = feature,
-                keepSocket = index < FreeClip2BooleanFeature.entries.lastIndex,
                 resultReceiver = resultReceiver,
             )
         }
@@ -1305,7 +1268,6 @@ object HuaweiHfpController {
             lastAncRequestAt = 0L
             lastGestureStateRequestAt = 0L
             lastFreeClip2AudioStateRequestAt = 0L
-            lastFreeClip2FeatureStateRequestAt = 0L
             lastDeviceInfoRequestAt = 0L
             batteryRequestInFlight = false
             ancRequestInFlight = false
@@ -1913,7 +1875,6 @@ object HuaweiHfpController {
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_SET)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_AUDIO_REFRESH)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_SET)
-            addHuaweiPodsAction(HuaweiPodsAction.ACTION_FREECLIP2_FEATURE_REFRESH)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_RESULT)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_QUERY_RESULT)
             addHuaweiPodsAction(HuaweiPodsAction.ACTION_SMART_AUDIO_FREECLIP2_STATE)
